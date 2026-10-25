@@ -12,13 +12,42 @@ import {
   ExternalLink, 
   CheckCircle2, 
   HelpCircle,
-  FolderSync
+  FolderSync,
+  ShieldAlert,
+  FileCheck2,
+  Lock
 } from 'lucide-react';
 
-const RELEASE = {
-  label: "V1 candidate — not a release yet",
+/**
+ * Static release configuration conforming to the XI-IO release handoff contract.
+ * The Cube maintains this state until an approved, independently qualified generation 
+ * is delivered through the reviewed Cube Work release process.
+ */
+interface ReleaseContract {
+  label: string;
+  status: 'historical-candidate' | 'qualified-release';
+  repo: string;
+  sha: string;
+  shortSha: string;
+  rollbackSha: string;
+  approvalAuthority: string;
+  evidenceStatus: string;
+  launcherVerification: string;
+  supportedOS: readonly ('linux' | 'macos' | 'windows')[];
+  issueUrl: string;
+}
+
+const RELEASE: ReleaseContract = {
+  label: "Historical V1 Candidate — Not an approved production release",
+  status: "historical-candidate",
   repo: "Vado42-chris/xi-io-cli",
   sha: "54509965c9d91ab02febcc8e49755e2b072a0ca9",
+  shortSha: "54509965",
+  rollbackSha: "initial-bootstrap",
+  approvalAuthority: "Pending independent six-gate qualification",
+  evidenceStatus: "Awaiting real Ward, BINS, and device acceptance evidence (promotion blocked)",
+  launcherVerification: "Node executable path binding (runtime lookup fix in CLI #14)",
+  supportedOS: ['linux', 'macos', 'windows'],
   issueUrl: "https://github.com/Vado42-chris/xi-io-cli/issues/12",
 };
 
@@ -123,8 +152,6 @@ export default function App() {
     }
   };
 
-  const shortSha = RELEASE.sha.slice(0, 8);
-
   // Commands built strictly from the RELEASE config object
   const downloadCommand = `gh api -H "Accept: application/vnd.github.raw" "repos/${RELEASE.repo}/contents/install.mjs?ref=${RELEASE.sha}" > xiio-install.mjs`;
   const installCommand = `node xiio-install.mjs --ref ${RELEASE.sha}`;
@@ -137,24 +164,41 @@ export default function App() {
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         
         {/* Header */}
-        <header className="mb-8 border-b border-slate-800 pb-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-amber-400 shadow-sm">
-                <Terminal className="w-5 h-5" />
+        <header className="mb-6 border-b border-slate-800 pb-6">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-amber-400 shadow-sm">
+                  <Terminal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+                    XI-IO CLI
+                  </h1>
+                  <span className="text-xs text-slate-400">Release Instructions &amp; Verification</span>
+                </div>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-                XI-IO CLI
-              </h1>
+
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-slate-300 bg-slate-900 px-2.5 py-1 rounded-md border border-slate-800 flex items-center gap-1.5">
+                  <Lock className="w-3 h-3 text-slate-400" />
+                  {RELEASE.shortSha}
+                </span>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-400/15 text-amber-300 border border-amber-400/30">
-                {RELEASE.label}
-              </span>
-              <span className="font-mono text-xs text-slate-400 bg-slate-900 px-2.5 py-1 rounded-md border border-slate-800">
-                {shortSha}
-              </span>
+            {/* Historical Candidate Safeguard Banner */}
+            <div className="p-3.5 rounded-lg bg-amber-950/30 border border-amber-500/30 text-amber-200 text-xs sm:text-sm flex items-start gap-3">
+              <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-semibold text-amber-300 flex items-center gap-2">
+                  <span>{RELEASE.label}</span>
+                </div>
+                <p className="text-slate-300 text-xs leading-relaxed">
+                  This public guide displays historical candidate <code className="font-mono bg-slate-950 px-1 py-0.5 rounded text-amber-300">{RELEASE.shortSha}</code>. 
+                  Promotion to an approved production release requires independently qualified evidence across the six-gate test (Ward, BINS, and device-native acceptance).
+                </p>
+              </div>
             </div>
           </div>
         </header>
@@ -171,7 +215,7 @@ export default function App() {
             aria-label="Operating Systems"
             className="grid grid-cols-3 gap-2 p-1 bg-slate-900/90 rounded-xl border border-slate-800"
           >
-            {(['linux', 'macos', 'windows'] as const).map((os) => {
+            {RELEASE.supportedOS.map((os) => {
               const label = os === 'linux' ? 'Linux' : os === 'macos' ? 'macOS' : 'Windows';
               const isSelected = selectedOS === os;
               return (
@@ -221,18 +265,16 @@ export default function App() {
               <Check className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
               <span>Ollama running with at least one installed model that supports tools</span>
             </li>
-            {(selectedOS === 'linux' || true) && (
-              <li className={`flex items-start gap-2.5 ${selectedOS !== 'linux' ? 'text-slate-400' : 'text-slate-200'}`}>
-                <Check className={`w-4 h-4 mt-0.5 shrink-0 ${selectedOS === 'linux' ? 'text-emerald-400' : 'text-slate-600'}`} />
-                <span>
-                  <strong className="text-slate-200 font-semibold">Linux only:</strong> bubblewrap (
-                  <code className="font-mono bg-slate-950 px-1.5 py-0.5 rounded text-amber-300 border border-slate-800">
-                    sudo apt install bubblewrap
-                  </code>
-                  ) — without it, commands stay off and reading/edits still work
-                </span>
-              </li>
-            )}
+            <li className={`flex items-start gap-2.5 ${selectedOS !== 'linux' ? 'text-slate-400' : 'text-slate-200'}`}>
+              <Check className={`w-4 h-4 mt-0.5 shrink-0 ${selectedOS === 'linux' ? 'text-emerald-400' : 'text-slate-600'}`} />
+              <span>
+                <strong className="text-slate-200 font-semibold">Linux only:</strong> bubblewrap (
+                <code className="font-mono bg-slate-950 px-1.5 py-0.5 rounded text-amber-300 border border-slate-800">
+                  sudo apt install bubblewrap
+                </code>
+                ) — without it, commands stay off and reading/edits still work
+              </span>
+            </li>
           </ul>
         </section>
 
@@ -306,7 +348,7 @@ export default function App() {
               />
             </div>
 
-            <p className="text-xs sm:text-sm text-slate-400">
+            <p className="text-xs sm:text-sm text-slate-300">
               source_sha must equal{' '}
               <code className="font-mono text-amber-300 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800 select-all">
                 {RELEASE.sha}
@@ -368,7 +410,7 @@ export default function App() {
         </section>
 
         {/* Troubleshooting Boxes */}
-        <section className="space-y-4 mb-12">
+        <section className="space-y-4 mb-10">
           
           {/* Troubleshooting 1 */}
           <div className="p-5 rounded-xl bg-slate-900/40 border border-slate-800">
@@ -392,6 +434,32 @@ export default function App() {
             </p>
           </div>
 
+        </section>
+
+        {/* Release Protocol & Evidence Reference */}
+        <section className="mb-12 p-4 rounded-xl bg-slate-900/30 border border-slate-800/80 text-xs text-slate-400">
+          <div className="flex items-center gap-2 font-medium text-slate-300 mb-2">
+            <FileCheck2 className="w-4 h-4 text-slate-400" />
+            <span>Qualification &amp; Promotion Invariant</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] leading-relaxed">
+            <div>
+              <span className="text-slate-400">Authority:</span>{' '}
+              <span className="text-slate-300">{RELEASE.approvalAuthority}</span>
+            </div>
+            <div>
+              <span className="text-slate-400">Evidence Status:</span>{' '}
+              <span className="text-slate-300">{RELEASE.evidenceStatus}</span>
+            </div>
+            <div>
+              <span className="text-slate-400">Target Invariant:</span>{' '}
+              <span className="text-slate-300">{RELEASE.launcherVerification}</span>
+            </div>
+            <div>
+              <span className="text-slate-400">Rollback Generation:</span>{' '}
+              <span className="text-slate-300 font-mono">{RELEASE.rollbackSha}</span>
+            </div>
+          </div>
         </section>
 
         {/* Footer */}
