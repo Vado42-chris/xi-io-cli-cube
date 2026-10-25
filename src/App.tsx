@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import RollbackHistory from './components/RollbackHistory';
 import { 
   Check, 
   Copy, 
@@ -950,6 +951,9 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {/* Read-only CLI receipt history: no installed-host access or automatic probes. */}
+            <RollbackHistory />
 
             {/* Section 3: Installer Preflight Invariants */}
             <div className="pt-4 border-t border-slate-800/80">
