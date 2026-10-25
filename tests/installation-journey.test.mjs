@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
+import { compareVersionReport } from '../src/version-readback.mjs';
 
 // Pinned historical reference
 const PINNED_SHA = '54509965c9d91ab02febcc8e49755e2b072a0ca9';
@@ -314,26 +315,40 @@ test('installation journey: BINS test results strictly isolated to source commit
   assert.notEqual(newerResult.status, 'PASSED');
 });
 
-test('installation journey: Digest & Version Verifier warns on missing binary path or non-standard wrapper (P1 requirements)', () => {
+test('installation journey: version reports preserve P1 diagnostics without claiming installed-host proof', () => {
   const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
+  // Exercise the actual parser consumed by the page, not stale inline strings.
+  assert.match(appSrc, /import \{ compareVersionReport \} from '\.\/version-readback\.mjs'/);
+  assert.match(appSrc, /setReadbackResult\(compareVersionReport\(text, RELEASE\.sha\)\)/);
+  assert.match(appSrc, /\{readbackResult\.p1Notice\.title\}/);
+  assert.match(appSrc, /\{readbackResult\.p1Notice\.message\}/);
 
-  // Verify that P1 invariant checks exist in handleVerifyReadback
-  assert.ok(
-    appSrc.includes('P1 Invariant Violation: Missing CLI Binary Path'),
-    'Must parse and warn on missing CLI binary path'
-  );
-  assert.ok(
-    appSrc.includes('P1 Invariant Warning: Non-Standard Shell Wrapper'),
-    'Must parse and warn on non-standard shell wrapper'
-  );
-  assert.ok(
-    appSrc.includes('fs.realpathSync(process.execPath)'),
-    'Must explicitly reference P1 Node Executable Path binding requirements'
-  );
-  assert.ok(
-    appSrc.includes('path_warning'),
-    'Must include path_warning status for wrapper defects'
-  );
+  const missingBinary = compareVersionReport('bash: xi-io-cli: command not found', PINNED_SHA);
+  assert.equal(missingBinary.status, 'invalid');
+  assert.equal(missingBinary.p1Notice?.type, 'violation');
+  assert.match(missingBinary.p1Notice?.title, /Missing CLI Binary Path/);
+  assert.match(missingBinary.details, /DIAGNOSTIC ONLY/);
+  assert.equal(missingBinary.detectedSha, undefined);
+
+  const wrapper = compareVersionReport('#!/bin/sh\nexec node ./cli.mjs', PINNED_SHA);
+  assert.equal(wrapper.status, 'invalid');
+  assert.equal(wrapper.p1Notice?.type, 'warning');
+  assert.match(wrapper.p1Notice?.message, /fs\.realpathSync\(process\.execPath\)/);
+  assert.match(wrapper.p1Notice?.message, /NOT an independent installed-host proof/);
+
+  const report = {schema: 'xiio.cli.version/v1', product: 'xi-io: CLI',
+    source_sha: PINNED_SHA, running_file_sha256: 'a'.repeat(64), receipt_file_sha256: 'a'.repeat(64)};
+  const reportedMatch = compareVersionReport(JSON.stringify(report), PINNED_SHA);
+  assert.equal(reportedMatch.status, 'valid');
+  assert.match(reportedMatch.details, /REPORTED COMPARISON MATCH/);
+  assert.match(reportedMatch.details, /NOT_REPORTED/);
+  assert.match(reportedMatch.details, /wrapper status is UNKNOWN/);
+  assert.match(reportedMatch.details, /not independent host, installation, or byte-readback verification/);
+  assert.equal(reportedMatch.p1Notice, undefined); // v1 does not report executable path.
+  assert.equal(compareVersionReport(PINNED_SHA, PINNED_SHA).status, 'invalid');
+  assert.equal(compareVersionReport(JSON.stringify({...report, source_sha: REPAIRED_SHA}), PINNED_SHA).status, 'mismatch');
+  assert.equal(compareVersionReport(JSON.stringify({...report, receipt_file_sha256: 'b'.repeat(64)}), PINNED_SHA).status, 'mismatch');
+  assert.equal(compareVersionReport(JSON.stringify({...report, receipt_file_sha256: undefined}), PINNED_SHA).status, 'invalid');
 });
 
 test('installation journey: local-first default requires zero account, zero card, and operates 100% offline', () => {
