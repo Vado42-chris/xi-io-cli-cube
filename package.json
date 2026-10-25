@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "node --test test/installer-contract.test.mjs tests/installer-contract.test.mjs tests/cube-continuation.test.mjs tests/rollback-history.test.mjs test/rollback-history.test.mjs tests/installation-journey.test.mjs",
+    "test": "node --test test/installer-contract.test.mjs tests/installer-contract.test.mjs tests/cube-continuation.test.mjs tests/rollback-history.test.mjs test/rollback-history.test.mjs tests/installation-journey.test.mjs tests/version-readback.test.mjs",
     "test:contract": "node scripts/verify-installer-contract.mjs"
   },
   "dependencies": {

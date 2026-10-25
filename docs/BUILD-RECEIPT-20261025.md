@@ -10,8 +10,8 @@ Executed in an isolated Linux cloud workspace with Node v24.22.1:
 - clean npm dependency installation: PASS;
 - `npm run lint`: PASS;
 - `npm run build`: PASS;
-- `npm test`: 58 PASS / 1 optional byte oracle SKIP without external oracle;
-- same tests with independently fetched pinned installer bytes: 59 PASS / 0 SKIP (51 source/parser tests plus 8 explicitly labeled illustrative simulations, not installation acceptance);
+- `npm test`: 64 PASS / 1 optional byte oracle SKIP without external oracle;
+- same tests with independently fetched pinned installer bytes: 65 PASS / 0 SKIP (57 source/parser tests plus 8 explicitly labeled illustrative simulations, not installation acceptance);
 - `node scripts/verify-installer-contract.mjs`: 15/15 PASS;
 - React server rendering: PASS;
 - `git diff --check`: PASS.
@@ -39,3 +39,9 @@ All 23 published blobs were verified. Preserve the new separation of local nativ
 The incoming App added a second rollback inspector with a default fabricated `rollback.json`, invented byte hashes, inferred current/previous generations and auto-generated QUALIFIED status. That duplicate is removed in favor of the already-present owner-selected canonical receipt component. Its exact original bytes remain recoverable from base commit 991513e2; no legitimate selected-file feature is removed. Source regressions prevent duplicate rendering or invented qualification from returning.
 
 The incoming eight simulations are retained under their published filename but accurately named. Their local wrapper text, copy operations, formatter, saved/reopened file, and manually assigned exit-code variable are not real software execution tests. The invented manifest example now additionally exercises the actual parser and proves rejection of its unsupported schema. These eight passes must not be reported as installer/editor journey acceptance.
+
+## Final source-command and reported-version repair
+
+The pinned CLI has no package manifest/build pipeline. Its source pane now shows authenticated `gh repo clone`, exact detached checkout, `node --check install.mjs`, then the existing `node install.mjs --ref <pin>` flow. The primary gh-api installer route is unchanged. No editor subcommand is introduced.
+
+Version comparison now accepts only bounded JSON with `schema: xiio.cli.version/v1`, `product: xi-io: CLI`, a complete source SHA and both complete SHA-256 fields. Source mismatch or disagreement between running/receipt digests is a reported mismatch; raw hashes, missing receipt digests and arbitrary prose cannot pass. A positive result says REPORTED COMPARISON, never independent installed-host verification. Pinned version source blob `31fa824f81867988c55ec62a8bebab9d806390ec` does not emit Node executable path or wrapper type: these remain NOT_REPORTED and wrapper status UNKNOWN. Extra asserted fields cannot qualify a wrapper. Six regression tests cover these boundaries.

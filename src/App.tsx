@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { compareVersionReport } from './version-readback.mjs';
 import { validateCasReceipt } from './cas-receipt.mjs';
 import React, { useState, useEffect, useRef } from 'react';
 import RollbackHistory from './components/RollbackHistory';
@@ -121,7 +122,7 @@ export default function App() {
   // Interactive Version Readback Validator State
   const [readbackInput, setReadbackInput] = useState<string>('');
   const [readbackResult, setReadbackResult] = useState<{
-    status: 'idle' | 'valid' | 'repaired' | 'mismatch' | 'invalid';
+    status: 'idle' | 'valid' | 'mismatch' | 'invalid';
     detectedSha?: string;
     details?: string;
   }>({ status: 'idle' });
@@ -213,39 +214,7 @@ export default function App() {
   // Live validator for Step 3 Readback
   const handleVerifyReadback = (text: string) => {
     setReadbackInput(text);
-    if (!text.trim()) {
-      setReadbackResult({ status: 'idle' });
-      return;
-    }
-
-    // Try to match 40-character SHA or JSON source_sha field
-    const shaMatch = text.match(/[a-f0-9]{40}/i);
-    const parsedSha = shaMatch ? shaMatch[0].toLowerCase() : null;
-
-    if (parsedSha === RELEASE.sha) {
-      setReadbackResult({
-        status: 'valid',
-        detectedSha: parsedSha,
-        details: 'MATCH VERIFIED: Installed binary source_sha exactly matches candidate pin.'
-      });
-    } else if (parsedSha === '5b2d80766a2fca01d51a92e6e3c545b7364bfa10' || text.includes('5b2d807')) {
-      setReadbackResult({
-        status: 'repaired',
-        detectedSha: parsedSha || '5b2d807',
-        details: 'REPAIRED CANDIDATE DETECTED: Source matches CLI #14 launcher fix head. Awaiting physical acceptance.'
-      });
-    } else if (parsedSha) {
-      setReadbackResult({
-        status: 'mismatch',
-        detectedSha: parsedSha,
-        details: `MISMATCH DETECTED: Detected ${parsedSha.slice(0, 8)} instead of expected ${shortSha}. Stop and report on Issue #12.`
-      });
-    } else {
-      setReadbackResult({
-        status: 'invalid',
-        details: 'Could not detect a 40-character hexadecimal SHA or version block in the input.'
-      });
-    }
+    setReadbackResult(compareVersionReport(text, RELEASE.sha));
   };
 
   // Live validator for CAS conflict schema
@@ -550,7 +519,7 @@ export default function App() {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <span>2. Install &amp; Compile</span>
+                <span>2. Install &amp; Inspect Source</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-amber-300 font-mono">
                   {selectedTarget.toUpperCase()}
                 </span>
@@ -1154,7 +1123,7 @@ export default function App() {
                     cliMode === 'source' ? 'bg-amber-400 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Source Compile &amp; Target Build
+                  Inspect &amp; Install Node CLI
                 </button>
                 <button
                   type="button"
@@ -1163,7 +1132,7 @@ export default function App() {
                     cliMode === 'validator' ? 'bg-amber-400 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Digest &amp; Version Verifier
+                  Reported Version Comparison
                 </button>
               </div>
             </div>
@@ -1266,14 +1235,14 @@ export default function App() {
                     <div>
                       <h3 className="text-base font-bold text-white flex items-center gap-2">
                         <FileCode className="w-4 h-4 text-amber-400" />
-                        Compile XI-IO CLI from Source (Local Build Target)
+                        Inspect &amp; Install the Pinned Node CLI
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Build the candidate binary directly from the authenticated git checkout without downloading remote scripts
+                        Inspect the pinned installer from an authenticated checkout, then run its existing installation flow. This Node CLI has no npm build/package manifest; syntax checking is not authenticity or host qualification.
                       </p>
                     </div>
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-amber-300">
-                      Target: {selectedOS}-x64
+                      Node.js 22+ script
                     </span>
                   </div>
 
@@ -1282,25 +1251,25 @@ export default function App() {
                       <span className="text-xs text-slate-300 font-mono block mb-1">1. Clone &amp; Checkout Candidate Ref:</span>
                       <CommandBlock
                         id="compile-step-1"
-                        command={`git clone https://github.com/${RELEASE.repo}.git && cd xi-io-cli && git checkout ${RELEASE.sha}`}
+                        command={`gh repo clone ${RELEASE.repo} xi-io-cli && cd xi-io-cli && git checkout --detach ${RELEASE.sha}`}
                         copiedId={copiedId}
                         onCopy={handleCopy}
                       />
                     </div>
                     <div>
-                      <span className="text-xs text-slate-300 font-mono block mb-1">2. Install Dependencies &amp; Compile Binary:</span>
+                      <span className="text-xs text-slate-300 font-mono block mb-1">2. Check Installer Syntax (Does Not Execute It):</span>
                       <CommandBlock
                         id="compile-step-2"
-                        command={`npm ci && npm run build && npm link`}
+                        command={`node --check install.mjs`}
                         copiedId={copiedId}
                         onCopy={handleCopy}
                       />
                     </div>
                     <div>
-                      <span className="text-xs text-slate-300 font-mono block mb-1">3. Verify Local Build Digest &amp; Node Path:</span>
+                      <span className="text-xs text-slate-300 font-mono block mb-1">3. Run the Existing Pinned Installer:</span>
                       <CommandBlock
                         id="compile-step-3"
-                        command={`node -e "console.log(process.execPath)" && xi-io-cli version`}
+                        command={`node install.mjs --ref ${RELEASE.sha}`}
                         copiedId={copiedId}
                         onCopy={handleCopy}
                       />
@@ -1316,10 +1285,10 @@ export default function App() {
                     <div>
                       <h3 className="text-base font-bold text-white flex items-center gap-2">
                         <Play className="w-4 h-4 text-amber-400" />
-                        Live Digest &amp; Version Readback Verifier
+                        Reported Digest &amp; Version Comparison
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Paste the terminal output of <code className="font-mono text-amber-300">xi-io-cli version</code> to verify against the candidate pin
+                        Paste the terminal output of <code className="font-mono text-amber-300">xi-io-cli version</code> to compare its reported source and file digests against the candidate pin. No independent host check occurs. The pinned JSON does not report Node executable path or wrapper type (NOT_REPORTED); wrapper status is UNKNOWN, not a diagnosed bad wrapper. Extra pasted path/wrapper fields are not trusted.
                       </p>
                     </div>
                   </div>
@@ -1328,7 +1297,8 @@ export default function App() {
                     <textarea
                       value={readbackInput}
                       onChange={(e) => handleVerifyReadback(e.target.value)}
-                      placeholder='Paste output from "xi-io-cli version" or raw binary SHA-256...'
+                      maxLength={65536}
+                      placeholder='Paste complete xiio.cli.version/v1 JSON from "xi-io-cli version"...'
                       className="w-full h-24 p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
 
@@ -1336,16 +1306,12 @@ export default function App() {
                       <div className={`p-3 rounded-lg border text-xs font-mono flex items-start gap-2.5 ${
                         readbackResult.status === 'valid'
                           ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
-                          : readbackResult.status === 'repaired'
-                          ? 'bg-blue-950/40 border-blue-500/50 text-blue-300'
                           : readbackResult.status === 'mismatch'
                           ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
                           : 'bg-amber-950/40 border-amber-500/50 text-amber-300'
                       }`}>
                         {readbackResult.status === 'valid' ? (
                           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                        ) : readbackResult.status === 'repaired' ? (
-                          <Activity className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
                         ) : (
                           <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                         )}
@@ -1353,7 +1319,7 @@ export default function App() {
                           <div className="font-bold">{readbackResult.details}</div>
                           {readbackResult.detectedSha && (
                             <div className="text-[11px] text-slate-400 mt-1">
-                              Detected SHA: <code className="text-slate-200">{readbackResult.detectedSha}</code>
+                              Reported source SHA: <code className="text-slate-200">{readbackResult.detectedSha}</code>
                             </div>
                           )}
                         </div>
