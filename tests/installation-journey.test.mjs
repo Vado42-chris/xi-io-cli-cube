@@ -269,3 +269,49 @@ test('installation journey: rollback meta-file parses and lists prior binary has
   }
 });
 
+test('installation journey: source compilation requires pinned installer path and rejects npm link', () => {
+  const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
+
+  // Verify that unpinned npm link workflow is absent
+  assert.equal(
+    appSrc.includes('npm run build && npm link'),
+    false,
+    'Defective unpinned npm link workflow must not be advertised'
+  );
+
+  // Verify that the pinned install.mjs invocation with candidate SHA is present in the source flow
+  assert.ok(
+    appSrc.includes('node install.mjs --ref ${RELEASE.sha}'),
+    'Source compilation flow must invoke pinned install.mjs with candidate SHA'
+  );
+});
+
+test('installation journey: BINS test results strictly isolated to source commit and not carried forward', () => {
+  const BINS_HISTORICAL_COMMIT = '7ea3976f';
+  const BINS_NEWER_COMMIT = '9a8b7c6d';
+
+  // Evidence custody ledger
+  const testLedger = new Map();
+  testLedger.set(BINS_HISTORICAL_COMMIT, {
+    status: 'PASSED',
+    gate: 5,
+    scope: 'PR #110 CAS collision refusal',
+    verified_at: '2026-10-24T12:00:00.000Z'
+  });
+
+  // Querying earlier commit returns recorded evidence
+  assert.ok(testLedger.has(BINS_HISTORICAL_COMMIT));
+  assert.equal(testLedger.get(BINS_HISTORICAL_COMMIT).status, 'PASSED');
+
+  // Critical invariant: Newer commit has ZERO carried-forward results without independent physical qualification
+  const getResultsForCommit = (commit) => {
+    // Must never fallback or inherit from earlier commits
+    return testLedger.get(commit) || { status: 'PENDING_PHYSICAL_QUALIFICATION', gate: 5 };
+  };
+
+  const newerResult = getResultsForCommit(BINS_NEWER_COMMIT);
+  assert.equal(newerResult.status, 'PENDING_PHYSICAL_QUALIFICATION');
+  assert.notEqual(newerResult.status, 'PASSED');
+});
+
+

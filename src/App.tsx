@@ -347,8 +347,8 @@ export default function App() {
       name: "BINS Version Custody & CAS Collision Refusal",
       owner: "BINS #110",
       status: "REPAIRED IN SOURCE",
-      hosts: { loki: "Commit 7ea3976f (expected-version CAS merged)", aries: "Physical CAS test pending" },
-      criteria: "Atomic ResourceVersion advance; competing write refused with REFUSED_STALE_VERSION (HTTP 409)."
+      hosts: { loki: "Commit 7ea3976f (historical CAS baseline; results strictly isolated to 7ea3976f)", aries: "Physical CAS test pending on newer commits (never carried forward automatically)" },
+      criteria: "Atomic ResourceVersion advance; competing write refused with REFUSED_STALE_VERSION (HTTP 409). Test results strictly tied to exact commit SHA."
     },
     {
       gate: 6,
@@ -382,6 +382,13 @@ export default function App() {
       owner: "CLI #14",
       status: "VERIFIED IN SOURCE",
       detail: "Preserves legacy ~/.local/bin/xi-io-cli; requires explicit SHA-256 confirmation before moving older wrappers aside."
+    },
+    {
+      id: "P4",
+      title: "Shared Repair & Main Reconciliation",
+      owner: "PR #2 (Single Writer)",
+      status: "RECONCILING WITH MAIN",
+      detail: "Canonical shared repair in PR #2 preserved intact as evidence; branch undergoing single-writer reconciliation with synchronized main. Zero duplicate/overlapping PRs."
     }
   ];
 
@@ -1323,13 +1330,21 @@ export default function App() {
                       />
                     </div>
                     <div>
-                      <span className="text-xs text-slate-300 font-mono block mb-1">2. Install Dependencies &amp; Compile Binary:</span>
+                      <div className="flex items-center justify-between text-xs text-slate-300 font-mono mb-1">
+                        <span>2. Install Dependencies &amp; Run Pinned Installer:</span>
+                        <span className="text-[10px] text-amber-400 bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.2 rounded font-sans">
+                          Defect Repaired: Replaced unpinned npm link
+                        </span>
+                      </div>
                       <CommandBlock
                         id="compile-step-2"
-                        command={`npm ci && npm run build && npm link`}
+                        command={`npm ci && npm run build && node install.mjs --ref ${RELEASE.sha}`}
                         copiedId={copiedId}
                         onCopy={handleCopy}
                       />
+                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                        <strong className="text-slate-300">Defect Note:</strong> The advertised <code className="text-amber-300 font-mono">npm link</code> workflow was an unpinned defect that required root write permissions, bypassed unprivileged <code className="text-amber-300 font-mono">~/.local/bin</code> wrapper creation, and skipped <code className="text-amber-300 font-mono">install-receipt.json</code> generation. The real pinned path runs <code className="text-amber-300 font-mono">node install.mjs --ref {RELEASE.sha}</code>.
+                      </p>
                     </div>
                     <div>
                       <span className="text-xs text-slate-300 font-mono block mb-1">3. Verify Local Build Digest &amp; Node Path:</span>
