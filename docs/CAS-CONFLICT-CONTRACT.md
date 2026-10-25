@@ -19,7 +19,7 @@ To align Switchboard and BINS agents, every conflict payload must provide:
 * `timestamp`: ISO 8601 UTC timestamp of refusal evaluation.
 
 ### Operational Source Status:
-* **BINS #110 Implementation Invariant**: The inspected BINS `put()` interface currently accepts `(path, source_occurrence_ref, media_type, resource_ref)`, but lacks `expected_version_ref`. Lock scope is currently limited to the store instance and source path. **This missing compare-and-swap check is the first documented RED in BINS #110.**
+* **BINS #110 source observation (2026-10-25)**: Draft head `7ea3976fea95b6f1162d50a791ff79c26bdc5e28`, `src/bins/local-file-custody.js` (blob `7b90cbfd020e306747fe529cdc7979f5898556c3`), accepts `expected_version_ref` and emits `REFUSED_STALE_VERSION`. The earlier claim that this parameter is absent is superseded. PR #110 remains open and draft, not merged. Source presence is not physical concurrency acceptance. The schema below is the Cube target format, not proof that every emitter response conforms.
 * **Consumer Delivery**: A refused write is **not** automatically an `APPLY_RETURN`. Switchboard must deliver the conflict receipt to the original Work consumer and establish verifiable acknowledgement before closing the transaction.
 
 ---
@@ -53,12 +53,12 @@ To align Switchboard and BINS agents, every conflict payload must provide:
     },
     "expected_version": {
       "type": "string",
-      "pattern": "^(bins:resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:sha256:[0-9a-f]{64}|[0-9a-f]{64})$",
+      "pattern": "^bins:resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:sha256:[0-9a-f]{64}$",
       "description": "Content-addressed version reference supplied by caller in pre-condition."
     },
     "actual_version": {
       "type": "string",
-      "pattern": "^(bins:resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:sha256:[0-9a-f]{64}|[0-9a-f]{64})$",
+      "pattern": "^bins:resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:sha256:[0-9a-f]{64}$",
       "description": "Authoritative content-addressed version currently recorded in BINS journal."
     },
     "actual_sha256": {
@@ -86,18 +86,6 @@ To align Switchboard and BINS agents, every conflict payload must provide:
         "ABORT_AND_RETRY_WITH_NEW_WORK"
       ],
       "description": "Prescribed recovery protocol for the calling runtime."
-    },
-    "expected_version_ref": {
-      "type": "string",
-      "description": "Alias for expected_version."
-    },
-    "actual_version_ref": {
-      "type": "string",
-      "description": "Alias for actual_version."
-    },
-    "rejected_at": {
-      "type": "string",
-      "description": "Alias for timestamp."
     }
   },
   "additionalProperties": false
@@ -106,15 +94,17 @@ To align Switchboard and BINS agents, every conflict payload must provide:
 
 ---
 
-## 3. Concrete Conforming Example
+The Cube performs local target-format checks, not general Draft-07 validation or emitter authentication. It additionally checks resource/digest consistency, and UTC timestamps with up to millisecond precision. A local format PASS is not a physical Gate 5 PASS.
+
+## 3. Synthetic Conforming Example (Not Host Evidence)
 
 ```json
 {
   "status": "REFUSED_STALE_VERSION",
   "resource_ref": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "expected_version": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6:sha256:54509965c9d91ab02febcc8e49755e2b072a0ca9e144a8219dfa95c9603f9011",
-  "actual_version": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6:sha256:9c568988fbf8fc43facdca12267847c30b55e01460599c2794eb09aa8e52e468",
-  "actual_sha256": "9c568988fbf8fc43facdca12267847c30b55e01460599c2794eb09aa8e52e468",
+  "expected_version": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "actual_version": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6:sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+  "actual_sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
   "timestamp": "2026-10-25T15:10:00.000Z",
   "competing_agent_id": "ward:agent:aries-worker-01",
   "recovery_action": "FETCH_LATEST_VERSION_AND_REBASE"

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import RollbackHistory from './RollbackHistory';
+import { validateCasReceipt } from './cas-receipt.mjs';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Check, 
@@ -253,40 +255,7 @@ export default function App() {
       setCasValidation({ valid: false, checked: false, errors: [] });
       return;
     }
-    const errs: string[] = [];
-    let parsed: any = null;
-    try {
-      parsed = JSON.parse(inputStr);
-    } catch {
-      setCasValidation({ valid: false, checked: true, errors: ['Input is not valid JSON'] });
-      return;
-    }
-
-    if (parsed.status !== 'REFUSED_STALE_VERSION') {
-      errs.push('status must be exactly "REFUSED_STALE_VERSION"');
-    }
-    if (typeof parsed.resource_ref !== 'string' || !/^bins:resource:[0-9a-fA-F-]{36}$/.test(parsed.resource_ref)) {
-      errs.push('resource_ref must match canonical format: bins:resource:<UUID>');
-    }
-    if (!parsed.expected_version || typeof parsed.expected_version !== 'string') {
-      errs.push('expected_version is required (content-addressed version)');
-    }
-    if (!parsed.actual_version || typeof parsed.actual_version !== 'string') {
-      errs.push('actual_version is required (current content-addressed version in BINS)');
-    }
-    if (!parsed.actual_sha256 || !/^[0-9a-f]{64}$/i.test(parsed.actual_sha256)) {
-      errs.push('actual_sha256 must be a 64-character hex digest');
-    }
-    if (!parsed.timestamp || isNaN(Date.parse(parsed.timestamp))) {
-      errs.push('timestamp must be a valid ISO 8601 UTC date string');
-    }
-
-    setCasValidation({
-      valid: errs.length === 0,
-      checked: true,
-      errors: errs,
-      parsed
-    });
+    setCasValidation(validateCasReceipt(inputStr));
   };
 
   const handleGenerateCanaryReceipt = () => {
@@ -343,7 +312,7 @@ export default function App() {
       name: "BINS Version Custody & CAS Collision Refusal",
       owner: "BINS #110",
       status: "REPAIRED IN SOURCE",
-      hosts: { loki: "Commit 7ea3976f (expected-version CAS merged)", aries: "Physical CAS test pending" },
+      hosts: { loki: "Commit 7ea3976f (draft expected-version CAS; not merged)", aries: "Physical CAS test pending" },
       criteria: "Atomic ResourceVersion advance; competing write refused with REFUSED_STALE_VERSION (HTTP 409)."
     },
     {
@@ -363,14 +332,14 @@ export default function App() {
       title: "Node Executable Path Binding",
       owner: "CLI #14",
       status: "VERIFIED IN SOURCE",
-      detail: "Repaired launcher pins fs.realpathSync(process.execPath), eliminating ambient PATH lookup in desktop/service sessions."
+      detail: "CLI #14 candidate only: repaired launcher pins fs.realpathSync(process.execPath). The historical CLI #13 download below still resolves node on PATH; it does not inherit this repair."
     },
     {
       id: "P2",
       title: "Running Digest & SHA Readback",
       owner: "CLI #14",
-      status: "PASSING ON HOSTS (16:05 UTC)",
-      detail: "Installed binary output matches 54509965 (candidate) verified on Linux hosts (Aries and Loki)."
+      status: "RECORDED LINUX PASS AT 54509965",
+      detail: "CLI #12 recorded Linux host PASS at 54509965 on Aries and Loki (16:05 UTC). This historical pinned-candidate evidence is retained; it does not qualify a newer draft or prove the currently running Node path."
     },
     {
       id: "P3",
@@ -776,6 +745,7 @@ export default function App() {
         {/* TAB 3: SYSTEM DIAGNOSTICS & QUALIFICATION GATES */}
         {activeView === 'status-dashboard' && (
           <section className="space-y-8 mb-10" aria-label="System Diagnostics">
+            <RollbackHistory />
             
             {/* Section 0: The 5-Point Minimum Acceptance Standard */}
             <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
@@ -931,7 +901,7 @@ export default function App() {
                     {casValidation.valid ? (
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>VALID: Payload strictly conforms to CAS Conflict Contract (Draft-07). Canonical UUID and content-addressed digests verified.</span>
+                        <span>VALID FORMAT: Target receipt fields and digest consistency checked locally. This is not host evidence, Ward admission, or Work return verification.</span>
                       </div>
                     ) : (
                       <div className="space-y-1">
@@ -1474,7 +1444,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Physical Gate 6: Readback
+                      Local version check (not Work return)
                     </button>
                   </div>
 
@@ -1512,7 +1482,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Physical Gate 3 &amp; 4: Ward
+                      Local launch (not Ward admission)
                     </button>
                   </div>
 

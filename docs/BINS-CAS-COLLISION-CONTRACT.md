@@ -18,18 +18,17 @@ Each lane retains exclusive ownership of its implementation:
 
 ## 2. Structured Rejection Contract (`REFUSED_STALE_VERSION`)
 
-When BINS `put()` detects an expected-ResourceVersion mismatch, it **must not** throw an unhandled filesystem exception or return a generic HTTP 500 / exit 1. It must return a deterministic structured rejection:
+When BINS `put()` detects an expected-ResourceVersion mismatch, it **must not** throw an unhandled filesystem exception or return a generic HTTP 500 / exit 1. It must return a deterministic structured rejection. This synthetic example follows `CAS-CONFLICT-CONTRACT.md`; it is not a captured host receipt:
 
 ```json
 {
-  "schema": "xiio.bins.conflict-receipt/v1",
   "status": "REFUSED_STALE_VERSION",
-  "resource_ref": "urn:xiio:resource:designated-existing",
-  "expected_version": "v1.4",
-  "actual_version": "v1.5",
-  "actual_sha256": "4a0e026b7762e5c7a52d5d7c3658dfbd880226b1",
+  "resource_ref": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "expected_version": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "actual_version": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6:sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+  "actual_sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+  "timestamp": "2026-10-25T15:10:00.000Z",
   "competing_agent_id": "ward:agent:aries-worker-01",
-  "rejected_at": "2026-10-25T15:02:00.000Z",
   "recovery_action": "FETCH_LATEST_VERSION_AND_REBASE"
 }
 ```
