@@ -314,4 +314,26 @@ test('installation journey: BINS test results strictly isolated to source commit
   assert.notEqual(newerResult.status, 'PASSED');
 });
 
+test('installation journey: Digest & Version Verifier warns on missing binary path or non-standard wrapper (P1 requirements)', () => {
+  const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
+
+  // Verify that P1 invariant checks exist in handleVerifyReadback
+  assert.ok(
+    appSrc.includes('P1 Invariant Violation: Missing CLI Binary Path'),
+    'Must parse and warn on missing CLI binary path'
+  );
+  assert.ok(
+    appSrc.includes('P1 Invariant Warning: Non-Standard Shell Wrapper'),
+    'Must parse and warn on non-standard shell wrapper'
+  );
+  assert.ok(
+    appSrc.includes('fs.realpathSync(process.execPath)'),
+    'Must explicitly reference P1 Node Executable Path binding requirements'
+  );
+  assert.ok(
+    appSrc.includes('path_warning'),
+    'Must include path_warning status for wrapper defects'
+  );
+});
+
 

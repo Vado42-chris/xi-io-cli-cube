@@ -123,9 +123,14 @@ export default function App() {
   // Interactive Version Readback Validator State
   const [readbackInput, setReadbackInput] = useState<string>('');
   const [readbackResult, setReadbackResult] = useState<{
-    status: 'idle' | 'valid' | 'repaired' | 'mismatch' | 'invalid';
+    status: 'idle' | 'valid' | 'repaired' | 'mismatch' | 'invalid' | 'path_warning';
     detectedSha?: string;
     details?: string;
+    p1Notice?: {
+      type: 'violation' | 'warning';
+      title: string;
+      message: string;
+    };
   }>({ status: 'idle' });
 
   // Interactive 5-Step Acceptance Test Runner for @ibal Editor
@@ -220,27 +225,82 @@ export default function App() {
       return;
     }
 
+    const trimmed = text.trim();
+
+    // Check for missing CLI binary path or execution failure
+    const isMissingBinary =
+      /command not found/i.test(trimmed) ||
+      /no such file or directory/i.test(trimmed) ||
+      /is not recognized as an internal or external command/i.test(trimmed) ||
+      /cannot find path/i.test(trimmed) ||
+      /binary_path["']?\s*:\s*(null|""|undefined)/i.test(trimmed) ||
+      /ENOENT.*xi-io-cli/i.test(trimmed);
+
+    // Check for non-standard shell wrapper or ambient PATH lookup
+    const isNonStandardWrapper =
+      /legacy_shell_wrapper/i.test(trimmed) ||
+      /wrapper_type["']?\s*:\s*["'](?!node_realpath_execPath)[a-zA-Z0-9_-]+["']/i.test(trimmed) ||
+      (trimmed.includes('#!/bin/sh') && !trimmed.includes('realpathSync') && !trimmed.includes('execPath')) ||
+      (trimmed.includes('#!/bin/bash') && !trimmed.includes('realpathSync') && !trimmed.includes('execPath')) ||
+      /ambient PATH lookup/i.test(trimmed) ||
+      (trimmed.includes('#!/usr/bin/env node') && !trimmed.includes('realpathSync'));
+
+    let p1Notice: { type: 'violation' | 'warning'; title: string; message: string } | undefined;
+    if (isMissingBinary) {
+      p1Notice = {
+        type: 'violation',
+        title: 'P1 Invariant Violation: Missing CLI Binary Path',
+        message: 'The output indicates xi-io-cli is missing from ~/.local/bin or unresolvable in PATH. P1 requires an installed wrapper bound to fs.realpathSync(process.execPath).'
+      };
+    } else if (isNonStandardWrapper) {
+      p1Notice = {
+        type: 'warning',
+        title: 'P1 Invariant Warning: Non-Standard Shell Wrapper',
+        message: 'The output indicates a non-standard wrapper or ambient PATH lookup. P1 requires fs.realpathSync(process.execPath) to eliminate ambient PATH lookups in desktop/service sessions.'
+      };
+    }
+
     // Try to match 40-character SHA or JSON source_sha field
-    const shaMatch = text.match(/[a-f0-9]{40}/i);
+    const shaMatch = trimmed.match(/[a-f0-9]{40}/i);
     const parsedSha = shaMatch ? shaMatch[0].toLowerCase() : null;
+
+    if (isMissingBinary) {
+      setReadbackResult({
+        status: 'invalid',
+        details: 'BINARY RESOLUTION FAILED: Missing binary path or command not found in environment PATH.',
+        p1Notice
+      });
+      return;
+    }
 
     if (parsedSha === RELEASE.sha) {
       setReadbackResult({
-        status: 'valid',
+        status: isNonStandardWrapper ? 'path_warning' : 'valid',
         detectedSha: parsedSha,
-        details: 'MATCH VERIFIED: Installed binary source_sha exactly matches candidate pin.'
+        details: isNonStandardWrapper
+          ? 'SHA MATCH WITH P1 WRAPPER WARNING: source_sha matches candidate pin, but wrapper fails P1 Node Executable Path binding requirements.'
+          : 'MATCH VERIFIED: Installed binary source_sha exactly matches candidate pin.',
+        p1Notice
       });
-    } else if (parsedSha === '5b2d80766a2fca01d51a92e6e3c545b7364bfa10' || text.includes('5b2d807')) {
+    } else if (parsedSha === '5b2d80766a2fca01d51a92e6e3c545b7364bfa10' || trimmed.includes('5b2d807')) {
       setReadbackResult({
         status: 'repaired',
         detectedSha: parsedSha || '5b2d807',
-        details: 'REPAIRED CANDIDATE DETECTED: Source matches CLI #14 launcher fix head. Awaiting physical acceptance.'
+        details: 'REPAIRED CANDIDATE DETECTED: Source matches CLI #14 launcher fix head. Awaiting physical acceptance.',
+        p1Notice
       });
     } else if (parsedSha) {
       setReadbackResult({
         status: 'mismatch',
         detectedSha: parsedSha,
-        details: `MISMATCH DETECTED: Detected ${parsedSha.slice(0, 8)} instead of expected ${shortSha}. Stop and report on Issue #12.`
+        details: `MISMATCH DETECTED: Detected ${parsedSha.slice(0, 8)} instead of expected ${shortSha}. Stop and report on Issue #12.`,
+        p1Notice
+      });
+    } else if (isNonStandardWrapper) {
+      setReadbackResult({
+        status: 'path_warning',
+        details: 'P1 WRAPPER AUDIT: Non-standard shell wrapper detected without detectable 40-character source SHA.',
+        p1Notice
       });
     } else {
       setReadbackResult({
@@ -1383,30 +1443,61 @@ export default function App() {
                     />
 
                     {readbackResult.status !== 'idle' && (
-                      <div className={`p-3 rounded-lg border text-xs font-mono flex items-start gap-2.5 ${
+                      <div className={`p-3.5 rounded-lg border text-xs font-mono space-y-2.5 ${
                         readbackResult.status === 'valid'
                           ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
                           : readbackResult.status === 'repaired'
                           ? 'bg-blue-950/40 border-blue-500/50 text-blue-300'
                           : readbackResult.status === 'mismatch'
                           ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
+                          : readbackResult.status === 'path_warning'
+                          ? 'bg-amber-950/40 border-amber-500/50 text-amber-300'
                           : 'bg-amber-950/40 border-amber-500/50 text-amber-300'
                       }`}>
-                        {readbackResult.status === 'valid' ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                        ) : readbackResult.status === 'repaired' ? (
-                          <Activity className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                        )}
-                        <div>
-                          <div className="font-bold">{readbackResult.details}</div>
-                          {readbackResult.detectedSha && (
-                            <div className="text-[11px] text-slate-400 mt-1">
-                              Detected SHA: <code className="text-slate-200">{readbackResult.detectedSha}</code>
-                            </div>
+                        <div className="flex items-start gap-2.5">
+                          {readbackResult.status === 'valid' ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          ) : readbackResult.status === 'repaired' ? (
+                            <Activity className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                          ) : readbackResult.status === 'path_warning' ? (
+                            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                           )}
+                          <div className="flex-1">
+                            <div className="font-bold">{readbackResult.details}</div>
+                            {readbackResult.detectedSha && (
+                              <div className="text-[11px] text-slate-400 mt-1">
+                                Detected SHA: <code className="text-slate-200">{readbackResult.detectedSha}</code>
+                              </div>
+                            )}
+                          </div>
                         </div>
+
+                        {/* P1 Node Executable Path Binding Notice Callout */}
+                        {readbackResult.p1Notice && (
+                          <div className={`p-2.5 rounded-md border text-[11px] leading-relaxed flex items-start gap-2 ${
+                            readbackResult.p1Notice.type === 'violation'
+                              ? 'bg-rose-950/60 border-rose-500/50 text-rose-200'
+                              : 'bg-amber-950/60 border-amber-500/50 text-amber-200'
+                          }`}>
+                            <AlertCircle className={`w-4 h-4 shrink-0 mt-0.5 ${
+                              readbackResult.p1Notice.type === 'violation' ? 'text-rose-400' : 'text-amber-400'
+                            }`} />
+                            <div className="space-y-1">
+                              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                                <span>{readbackResult.p1Notice.title}</span>
+                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700 font-mono">
+                                  CLI #14 Preflight
+                                </span>
+                              </div>
+                              <p className="text-slate-300 font-sans">{readbackResult.p1Notice.message}</p>
+                              <div className="font-mono text-[10px] text-slate-400 pt-0.5">
+                                Required: wrapper must invoke <code className="text-amber-300">fs.realpathSync(process.execPath)</code> into <code className="text-amber-300">~/.local/bin/xi-io-cli</code>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
