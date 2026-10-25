@@ -8,6 +8,7 @@ import {parseRollbackFiles} from '../lib/rollbackHistory.mjs';
  * It does not currently emit a single canonical rollback-meta JSON.
  */
 export default function RollbackHistory(){
+  const request=useRef(0);
   const folderRef=useRef<HTMLInputElement>(null);
   const [history,setHistory]=useState<ReturnType<typeof parseRollbackFiles>>(
     ()=>parseRollbackFiles([])
@@ -24,27 +25,31 @@ export default function RollbackHistory(){
 
   async function inspect(files: FileList | null){
     if(!files||!files.length)return;
+    const requestId=++request.current;
     setBusy(true);
     try{
       // Never ingest arbitrary project files from a selected directory.
       const relevant=Array.from(files).filter(f=>
         ['install-receipt.json','current','previous'].includes(f.name));
+      if(relevant.length>32)throw new Error('Select at most 32 relevant metadata files');
       const entries=await Promise.all(relevant.map(async f=>({
         name:f.name,
         relativePath:f.webkitRelativePath||f.name,
         // Read only bounded candidate metadata. A larger file is rejected,
         // never uploaded or displayed.
-        text:f.size>262144?'x'.repeat(262145):await f.text()
+        text:f.size>65536?'x'.repeat(65537):await f.text()
       })));
+      if(requestId!==request.current)return;
       setHistory(parseRollbackFiles(entries));
       setSelected(true);
-    }catch{
+    }catch(error){
+      if(requestId!==request.current)return;
       setHistory({state:'REJECTED',first_red:'LOCAL_FILE_READ_FAILED',
         records:[],pointers:{current:null,previous:null},
-        issues:['Unable to read selected local metadata.'],evidence:'LOCAL_USER_SELECTED_METADATA_ONLY',
+        issues:[error instanceof Error ? error.message : 'Unable to read selected local metadata.'],evidence:'LOCAL_USER_SELECTED_METADATA_ONLY',
         installedBinaryVerified:false,fullByteReadbackVerified:false});
       setSelected(true);
-    }finally{setBusy(false);}
+    }finally{if(requestId===request.current)setBusy(false);}
   }
 
   return (
@@ -60,7 +65,7 @@ export default function RollbackHistory(){
             Inspect previously recorded CLI generations without executing commands or contacting a server.
             The V1 installer writes <code className="text-amber-300">versions/&lt;generation&gt;/install-receipt.json</code>
             and plain-text <code className="text-amber-300">current</code> / <code className="text-amber-300">previous</code> pointers.
-            Select those files, or choose the installation folder if supported.
+            Select those files, or choose the installation folder if supported (32 relevant files maximum, 64 KiB each).
           </p>
         </div>
       </div>
@@ -127,6 +132,8 @@ export default function RollbackHistory(){
                           :'Pointer state unknown'}
                       </span>
                     </div>
+                    {row.conflict&&<p className="mt-2 text-rose-300">POTENTIAL CONFLICT: differing records for the same reported scope/generation; none is authoritative.</p>}
+                    <p className="mt-2 break-all text-slate-400">Recorded scope: {row.repo||'unknown repo'} / {row.prefix||'unknown prefix'} / {row.platform||'unknown platform'}. Host identity not supplied.</p>
                     <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
                       <div><dt className="text-slate-500">Source commit (Git SHA-1)</dt>
                         <dd className="break-all font-mono text-slate-300">{row.sourceSha||'UNKNOWN'}</dd></div>
@@ -143,7 +150,7 @@ export default function RollbackHistory(){
         }
         <p className="text-slate-500">
           Privacy: selected files are parsed in this browser only; no upload, token read, network call,
-          execution, installation or rollback occurs. Recorded SHA-256 is not proof that a binary
+          execution, installation or rollback occurs. Selection order is not rollback order. Receipts can precede failed install checks; pointers are unverified metadata, not current runtime proof. Recorded SHA-256 is not proof that a binary
           on disk still matches it. Node executable hashes are not recorded by these CLI receipts.
         </p>
       </div>

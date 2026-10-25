@@ -1,3 +1,11 @@
+/**
+ * ILLUSTRATIVE SIMULATIONS ONLY — retained from synchronized main 991513e2.
+ * These examples construct their own files/checks. They do NOT import or run
+ * install.mjs, xi-io-cli, a launcher, or an editor, and cannot qualify any of them.
+ * The final example additionally checks that the actual Cube parser rejects
+ * the invented rollback-manifest schema rather than treating it as authority.
+ */
+import {parseRollbackFiles} from '../src/lib/rollbackHistory.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,7 +21,7 @@ function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
 }
 
-test('installation journey: clean install creates binary wrapper and receipt', () => {
+test('simulation only: writes a synthetic wrapper and noncanonical receipt', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-clean-install-'));
   try {
     const binDir = path.join(tmpDir, 'bin');
@@ -44,7 +52,7 @@ test('installation journey: clean install creates binary wrapper and receipt', (
   }
 });
 
-test('installation journey: upgrade preserves rollback and migrates generation', () => {
+test('simulation only: copies synthetic generation strings and restores a backup', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-upgrade-'));
   try {
     const binDir = path.join(tmpDir, 'bin');
@@ -64,7 +72,7 @@ test('installation journey: upgrade preserves rollback and migrates generation',
     assert.equal(fs.readFileSync(wrapperPath, 'utf8'), `GENERATION_${REPAIRED_SHA}`);
     assert.equal(fs.readFileSync(previousBackup, 'utf8'), `GENERATION_${PINNED_SHA}`);
 
-    // Rollback operation: atomic revert
+    // Illustrative copy-back, not an atomic installer rollback
     const currentTemp = path.join(backupDir, 'xi-io-cli.next');
     fs.copyFileSync(wrapperPath, currentTemp);
     fs.copyFileSync(previousBackup, wrapperPath);
@@ -75,7 +83,7 @@ test('installation journey: upgrade preserves rollback and migrates generation',
   }
 });
 
-test('installation journey: failed install preserves previous installed version without damage', () => {
+test('simulation only: local digest guard preserves fixture bytes', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-failed-install-'));
   try {
     const binDir = path.join(tmpDir, 'bin');
@@ -102,7 +110,7 @@ test('installation journey: failed install preserves previous installed version 
   }
 });
 
-test('installation journey: paths containing spaces execute without shell word-splitting', () => {
+test('filesystem example only: reads and writes a path containing spaces (no shell execution)', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio space dir test-'));
   try {
     const projectDir = path.join(tmpDir, 'my target workspace');
@@ -118,7 +126,7 @@ test('installation journey: paths containing spaces execute without shell word-s
   }
 });
 
-test('installation journey: missing prerequisites produce actionable errors', () => {
+test('simulation only: example prerequisite formatter emits messages', () => {
   const checkPrerequisites = (env) => {
     const errors = [];
     if (!env.nodeVersion || parseInt(env.nodeVersion.split('.')[0], 10) < 22) {
@@ -142,7 +150,7 @@ test('installation journey: missing prerequisites produce actionable errors', ()
   assert.ok(errors[2].includes('bubblewrap'));
 });
 
-test('installation journey: first launch and project reopening preserves content parity', () => {
+test('filesystem example only: write/read preserves content (no editor launch)', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-first-launch-'));
   try {
     const projectDir = path.join(tmpDir, 'project-workspace');
@@ -176,7 +184,7 @@ test('installation journey: first launch and project reopening preserves content
   }
 });
 
-test('installation journey: local CLI CAS pre-commit check refuses intervening write (exit code 3)', () => {
+test('simulation only: digest mismatch sets a local variable to 3 (no CLI execution)', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-cas-refusal-'));
   try {
     const projectDir = path.join(tmpDir, 'project-workspace');
@@ -217,7 +225,7 @@ test('installation journey: local CLI CAS pre-commit check refuses intervening w
   }
 });
 
-test('installation journey: rollback meta-file parses and lists prior binary hashes', () => {
+test('simulation fixture: invented rollback manifest is not accepted as a CLI receipt', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-rollback-meta-'));
   try {
     const metaFilePath = path.join(tmpDir, 'rollback.json');
@@ -225,7 +233,7 @@ test('installation journey: rollback meta-file parses and lists prior binary has
     // Case 1: When meta-file is absent
     assert.equal(fs.existsSync(metaFilePath), false, 'File initially absent');
 
-    // Case 2: When meta-file is written by CLI after upgrade
+    // Case 2: Test-created invented manifest; not emitted by the inspected CLI
     const sampleManifest = {
       schema: 'xiio.cli.rollback-manifest/v1',
       current_generation: 2,
@@ -252,6 +260,10 @@ test('installation journey: rollback meta-file parses and lists prior binary has
     assert.ok(fs.existsSync(metaFilePath), 'Rollback meta-file present');
     const readManifest = JSON.parse(fs.readFileSync(metaFilePath, 'utf8'));
 
+    const rejected=parseRollbackFiles([{name:'install-receipt.json',text:JSON.stringify(readManifest)}]);
+    assert.equal(rejected.records.length,0);
+    assert.equal(rejected.installedBinaryVerified,false);
+    assert.match(rejected.first_red,/UNSUPPORTED_SCHEMA/);
     assert.equal(readManifest.generations.length, 2);
     assert.equal(readManifest.current_generation, 2);
     assert.equal(readManifest.rollback_target_generation, 1);
@@ -269,7 +281,7 @@ test('installation journey: rollback meta-file parses and lists prior binary has
   }
 });
 
-test('installation journey: source compilation requires pinned installer path and rejects npm link', () => {
+test('source assertion: pinned Node installer path is present and npm-link workflow absent', () => {
   const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
 
   // Verify that unpinned npm link workflow is absent
@@ -286,7 +298,7 @@ test('installation journey: source compilation requires pinned installer path an
   );
 });
 
-test('installation journey: BINS test results strictly isolated to source commit and not carried forward', () => {
+test('simulation only: synthetic Map ledger does not inherit results between commit keys', () => {
   const BINS_HISTORICAL_COMMIT = '7ea3976f';
   const BINS_NEWER_COMMIT = '9a8b7c6d';
 
@@ -312,28 +324,6 @@ test('installation journey: BINS test results strictly isolated to source commit
   const newerResult = getResultsForCommit(BINS_NEWER_COMMIT);
   assert.equal(newerResult.status, 'PENDING_PHYSICAL_QUALIFICATION');
   assert.notEqual(newerResult.status, 'PASSED');
-});
-
-test('installation journey: Digest & Version Verifier warns on missing binary path or non-standard wrapper (P1 requirements)', () => {
-  const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
-
-  // Verify that P1 invariant checks exist in handleVerifyReadback
-  assert.ok(
-    appSrc.includes('P1 Invariant Violation: Missing CLI Binary Path'),
-    'Must parse and warn on missing CLI binary path'
-  );
-  assert.ok(
-    appSrc.includes('P1 Invariant Warning: Non-Standard Shell Wrapper'),
-    'Must parse and warn on non-standard shell wrapper'
-  );
-  assert.ok(
-    appSrc.includes('fs.realpathSync(process.execPath)'),
-    'Must explicitly reference P1 Node Executable Path binding requirements'
-  );
-  assert.ok(
-    appSrc.includes('path_warning'),
-    'Must include path_warning status for wrapper defects'
-  );
 });
 
 

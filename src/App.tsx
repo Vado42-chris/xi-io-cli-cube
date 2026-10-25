@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { compareVersionReport } from './version-readback.mjs';
+import { validateCasReceipt } from './cas-receipt.mjs';
 import React, { useState, useEffect, useRef } from 'react';
 import RollbackHistory from './components/RollbackHistory';
 import { 
@@ -33,10 +35,7 @@ import {
   Play,
   CheckSquare,
   Square,
-  FileCode,
-  History,
-  RotateCcw,
-  Database
+  FileCode
 } from 'lucide-react';
 
 const RELEASE = {
@@ -123,14 +122,9 @@ export default function App() {
   // Interactive Version Readback Validator State
   const [readbackInput, setReadbackInput] = useState<string>('');
   const [readbackResult, setReadbackResult] = useState<{
-    status: 'idle' | 'valid' | 'repaired' | 'mismatch' | 'invalid' | 'path_warning';
+    status: 'idle' | 'valid' | 'mismatch' | 'invalid';
     detectedSha?: string;
     details?: string;
-    p1Notice?: {
-      type: 'violation' | 'warning';
-      title: string;
-      message: string;
-    };
   }>({ status: 'idle' });
 
   // Interactive 5-Step Acceptance Test Runner for @ibal Editor
@@ -220,94 +214,7 @@ export default function App() {
   // Live validator for Step 3 Readback
   const handleVerifyReadback = (text: string) => {
     setReadbackInput(text);
-    if (!text.trim()) {
-      setReadbackResult({ status: 'idle' });
-      return;
-    }
-
-    const trimmed = text.trim();
-
-    // Check for missing CLI binary path or execution failure
-    const isMissingBinary =
-      /command not found/i.test(trimmed) ||
-      /no such file or directory/i.test(trimmed) ||
-      /is not recognized as an internal or external command/i.test(trimmed) ||
-      /cannot find path/i.test(trimmed) ||
-      /binary_path["']?\s*:\s*(null|""|undefined)/i.test(trimmed) ||
-      /ENOENT.*xi-io-cli/i.test(trimmed);
-
-    // Check for non-standard shell wrapper or ambient PATH lookup
-    const isNonStandardWrapper =
-      /legacy_shell_wrapper/i.test(trimmed) ||
-      /wrapper_type["']?\s*:\s*["'](?!node_realpath_execPath)[a-zA-Z0-9_-]+["']/i.test(trimmed) ||
-      (trimmed.includes('#!/bin/sh') && !trimmed.includes('realpathSync') && !trimmed.includes('execPath')) ||
-      (trimmed.includes('#!/bin/bash') && !trimmed.includes('realpathSync') && !trimmed.includes('execPath')) ||
-      /ambient PATH lookup/i.test(trimmed) ||
-      (trimmed.includes('#!/usr/bin/env node') && !trimmed.includes('realpathSync'));
-
-    let p1Notice: { type: 'violation' | 'warning'; title: string; message: string } | undefined;
-    if (isMissingBinary) {
-      p1Notice = {
-        type: 'violation',
-        title: 'P1 Invariant Violation: Missing CLI Binary Path',
-        message: 'The output indicates xi-io-cli is missing from ~/.local/bin or unresolvable in PATH. P1 requires an installed wrapper bound to fs.realpathSync(process.execPath).'
-      };
-    } else if (isNonStandardWrapper) {
-      p1Notice = {
-        type: 'warning',
-        title: 'P1 Invariant Warning: Non-Standard Shell Wrapper',
-        message: 'The output indicates a non-standard wrapper or ambient PATH lookup. P1 requires fs.realpathSync(process.execPath) to eliminate ambient PATH lookups in desktop/service sessions.'
-      };
-    }
-
-    // Try to match 40-character SHA or JSON source_sha field
-    const shaMatch = trimmed.match(/[a-f0-9]{40}/i);
-    const parsedSha = shaMatch ? shaMatch[0].toLowerCase() : null;
-
-    if (isMissingBinary) {
-      setReadbackResult({
-        status: 'invalid',
-        details: 'BINARY RESOLUTION FAILED: Missing binary path or command not found in environment PATH.',
-        p1Notice
-      });
-      return;
-    }
-
-    if (parsedSha === RELEASE.sha) {
-      setReadbackResult({
-        status: isNonStandardWrapper ? 'path_warning' : 'valid',
-        detectedSha: parsedSha,
-        details: isNonStandardWrapper
-          ? 'SHA MATCH WITH P1 WRAPPER WARNING: source_sha matches candidate pin, but wrapper fails P1 Node Executable Path binding requirements.'
-          : 'MATCH VERIFIED: Installed binary source_sha exactly matches candidate pin.',
-        p1Notice
-      });
-    } else if (parsedSha === '5b2d80766a2fca01d51a92e6e3c545b7364bfa10' || trimmed.includes('5b2d807')) {
-      setReadbackResult({
-        status: 'repaired',
-        detectedSha: parsedSha || '5b2d807',
-        details: 'REPAIRED CANDIDATE DETECTED: Source matches CLI #14 launcher fix head. Awaiting physical acceptance.',
-        p1Notice
-      });
-    } else if (parsedSha) {
-      setReadbackResult({
-        status: 'mismatch',
-        detectedSha: parsedSha,
-        details: `MISMATCH DETECTED: Detected ${parsedSha.slice(0, 8)} instead of expected ${shortSha}. Stop and report on Issue #12.`,
-        p1Notice
-      });
-    } else if (isNonStandardWrapper) {
-      setReadbackResult({
-        status: 'path_warning',
-        details: 'P1 WRAPPER AUDIT: Non-standard shell wrapper detected without detectable 40-character source SHA.',
-        p1Notice
-      });
-    } else {
-      setReadbackResult({
-        status: 'invalid',
-        details: 'Could not detect a 40-character hexadecimal SHA or version block in the input.'
-      });
-    }
+    setReadbackResult(compareVersionReport(text, RELEASE.sha));
   };
 
   // Live validator for CAS conflict schema
@@ -317,40 +224,7 @@ export default function App() {
       setCasValidation({ valid: false, checked: false, errors: [] });
       return;
     }
-    const errs: string[] = [];
-    let parsed: any = null;
-    try {
-      parsed = JSON.parse(inputStr);
-    } catch {
-      setCasValidation({ valid: false, checked: true, errors: ['Input is not valid JSON'] });
-      return;
-    }
-
-    if (parsed.status !== 'REFUSED_STALE_VERSION') {
-      errs.push('status must be exactly "REFUSED_STALE_VERSION"');
-    }
-    if (typeof parsed.resource_ref !== 'string' || !/^bins:resource:[0-9a-fA-F-]{36}$/.test(parsed.resource_ref)) {
-      errs.push('resource_ref must match canonical format: bins:resource:<UUID>');
-    }
-    if (!parsed.expected_version || typeof parsed.expected_version !== 'string') {
-      errs.push('expected_version is required (content-addressed version)');
-    }
-    if (!parsed.actual_version || typeof parsed.actual_version !== 'string') {
-      errs.push('actual_version is required (current content-addressed version in BINS)');
-    }
-    if (!parsed.actual_sha256 || !/^[0-9a-f]{64}$/i.test(parsed.actual_sha256)) {
-      errs.push('actual_sha256 must be a 64-character hex digest');
-    }
-    if (!parsed.timestamp || isNaN(Date.parse(parsed.timestamp))) {
-      errs.push('timestamp must be a valid ISO 8601 UTC date string');
-    }
-
-    setCasValidation({
-      valid: errs.length === 0,
-      checked: true,
-      errors: errs,
-      parsed
-    });
+    setCasValidation(validateCasReceipt(inputStr));
   };
 
   const handleGenerateCanaryReceipt = () => {
@@ -407,7 +281,7 @@ export default function App() {
       name: "BINS Version Custody & CAS Collision Refusal",
       owner: "BINS #110",
       status: "REPAIRED IN SOURCE",
-      hosts: { loki: "Commit 7ea3976f (historical CAS baseline; results strictly isolated to 7ea3976f)", aries: "Physical CAS test pending on newer commits (never carried forward automatically)" },
+      hosts: { loki: "Commit 7ea3976f (historical baseline; draft expected-version CAS; not merged; results strictly isolated to 7ea3976f)", aries: "Physical CAS test pending on newer commits (never carried forward automatically)" },
       criteria: "Atomic ResourceVersion advance; competing write refused with REFUSED_STALE_VERSION (HTTP 409). Test results strictly tied to exact commit SHA."
     },
     {
@@ -427,14 +301,14 @@ export default function App() {
       title: "Node Executable Path Binding",
       owner: "CLI #14",
       status: "VERIFIED IN SOURCE",
-      detail: "Repaired launcher pins fs.realpathSync(process.execPath), eliminating ambient PATH lookup in desktop/service sessions."
+      detail: "CLI #14 candidate only: repaired launcher pins fs.realpathSync(process.execPath). The historical CLI #13 download below still resolves node on PATH; it does not inherit this repair."
     },
     {
       id: "P2",
       title: "Running Digest & SHA Readback",
       owner: "CLI #14",
-      status: "PASSING ON HOSTS (16:05 UTC)",
-      detail: "Installed binary output matches 54509965 (candidate) verified on Linux hosts (Aries and Loki)."
+      status: "RECORDED LINUX PASS AT 54509965",
+      detail: "CLI #12 recorded Linux host PASS at 54509965 on Aries and Loki (16:05 UTC). This historical pinned-candidate evidence is retained; it does not qualify a newer draft or prove the currently running Node path."
     },
     {
       id: "P3",
@@ -652,7 +526,7 @@ export default function App() {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <span>2. Install &amp; Compile</span>
+                <span>2. Install &amp; Inspect Source</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-amber-300 font-mono">
                   {selectedTarget.toUpperCase()}
                 </span>
@@ -1002,7 +876,7 @@ export default function App() {
                     {casValidation.valid ? (
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>VALID: Payload strictly conforms to CAS Conflict Contract (Draft-07). Canonical UUID and content-addressed digests verified.</span>
+                        <span>VALID FORMAT: Target receipt fields and digest consistency checked locally. This is not host evidence, Ward admission, or Work return verification.</span>
                       </div>
                     ) : (
                       <div className="space-y-1">
@@ -1256,7 +1130,7 @@ export default function App() {
                     cliMode === 'source' ? 'bg-amber-400 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Source Compile &amp; Target Build
+                  Inspect &amp; Install Node CLI
                 </button>
                 <button
                   type="button"
@@ -1265,7 +1139,7 @@ export default function App() {
                     cliMode === 'validator' ? 'bg-amber-400 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Digest &amp; Version Verifier
+                  Reported Version Comparison
                 </button>
               </div>
             </div>
@@ -1368,14 +1242,14 @@ export default function App() {
                     <div>
                       <h3 className="text-base font-bold text-white flex items-center gap-2">
                         <FileCode className="w-4 h-4 text-amber-400" />
-                        Compile XI-IO CLI from Source (Local Build Target)
+                        Inspect &amp; Install the Pinned Node CLI
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Build the candidate binary directly from the authenticated git checkout without downloading remote scripts
+                        Inspect the pinned installer from an authenticated checkout, then run its existing installation flow. This Node CLI has no npm build/package manifest; syntax checking is not authenticity or host qualification.
                       </p>
                     </div>
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-amber-300">
-                      Target: {selectedOS}-x64
+                      Node.js 22+ script
                     </span>
                   </div>
 
@@ -1384,33 +1258,28 @@ export default function App() {
                       <span className="text-xs text-slate-300 font-mono block mb-1">1. Clone &amp; Checkout Candidate Ref:</span>
                       <CommandBlock
                         id="compile-step-1"
-                        command={`git clone https://github.com/${RELEASE.repo}.git && cd xi-io-cli && git checkout ${RELEASE.sha}`}
+                        command={`gh repo clone ${RELEASE.repo} xi-io-cli && cd xi-io-cli && git checkout --detach ${RELEASE.sha}`}
                         copiedId={copiedId}
                         onCopy={handleCopy}
                       />
                     </div>
                     <div>
-                      <div className="flex items-center justify-between text-xs text-slate-300 font-mono mb-1">
-                        <span>2. Install Dependencies &amp; Run Pinned Installer:</span>
-                        <span className="text-[10px] text-amber-400 bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.2 rounded font-sans">
-                          Defect Repaired: Replaced unpinned npm link
-                        </span>
-                      </div>
+                      <span className="text-xs text-slate-300 font-mono block mb-1">2. Check Installer Syntax (Does Not Execute It):</span>
                       <CommandBlock
                         id="compile-step-2"
-                        command={`npm ci && npm run build && node install.mjs --ref ${RELEASE.sha}`}
+                        command={`node --check install.mjs`}
                         copiedId={copiedId}
                         onCopy={handleCopy}
                       />
                       <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                        <strong className="text-slate-300">Defect Note:</strong> The advertised <code className="text-amber-300 font-mono">npm link</code> workflow was an unpinned defect that required root write permissions, bypassed unprivileged <code className="text-amber-300 font-mono">~/.local/bin</code> wrapper creation, and skipped <code className="text-amber-300 font-mono">install-receipt.json</code> generation. The real pinned path runs <code className="text-amber-300 font-mono">node install.mjs --ref {RELEASE.sha}</code>.
+                        The pinned checkout contains Node scripts, not an npm build manifest. Check syntax above, then run the pinned installer below to create its managed wrapper and receipt.
                       </p>
                     </div>
                     <div>
-                      <span className="text-xs text-slate-300 font-mono block mb-1">3. Verify Local Build Digest &amp; Node Path:</span>
+                      <span className="text-xs text-slate-300 font-mono block mb-1">3. Run the Existing Pinned Installer:</span>
                       <CommandBlock
                         id="compile-step-3"
-                        command={`node -e "console.log(process.execPath)" && xi-io-cli version`}
+                        command={`node install.mjs --ref ${RELEASE.sha}`}
                         copiedId={copiedId}
                         onCopy={handleCopy}
                       />
@@ -1426,10 +1295,10 @@ export default function App() {
                     <div>
                       <h3 className="text-base font-bold text-white flex items-center gap-2">
                         <Play className="w-4 h-4 text-amber-400" />
-                        Live Digest &amp; Version Readback Verifier
+                        Reported Digest &amp; Version Comparison
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Paste the terminal output of <code className="font-mono text-amber-300">xi-io-cli version</code> to verify against the candidate pin
+                        Paste the terminal output of <code className="font-mono text-amber-300">xi-io-cli version</code> to compare its reported source and file digests against the candidate pin. No independent host check occurs. The pinned JSON does not report Node executable path or wrapper type (NOT_REPORTED); wrapper status is UNKNOWN, not a diagnosed bad wrapper. Extra pasted path/wrapper fields are not trusted.
                       </p>
                     </div>
                   </div>
@@ -1438,66 +1307,32 @@ export default function App() {
                     <textarea
                       value={readbackInput}
                       onChange={(e) => handleVerifyReadback(e.target.value)}
-                      placeholder='Paste output from "xi-io-cli version" or raw binary SHA-256...'
+                      maxLength={65536}
+                      placeholder='Paste complete xiio.cli.version/v1 JSON from "xi-io-cli version"...'
                       className="w-full h-24 p-3 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
 
                     {readbackResult.status !== 'idle' && (
-                      <div className={`p-3.5 rounded-lg border text-xs font-mono space-y-2.5 ${
+                      <div className={`p-3 rounded-lg border text-xs font-mono flex items-start gap-2.5 ${
                         readbackResult.status === 'valid'
                           ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
-                          : readbackResult.status === 'repaired'
-                          ? 'bg-blue-950/40 border-blue-500/50 text-blue-300'
                           : readbackResult.status === 'mismatch'
                           ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
-                          : readbackResult.status === 'path_warning'
-                          ? 'bg-amber-950/40 border-amber-500/50 text-amber-300'
                           : 'bg-amber-950/40 border-amber-500/50 text-amber-300'
                       }`}>
-                        <div className="flex items-start gap-2.5">
-                          {readbackResult.status === 'valid' ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                          ) : readbackResult.status === 'repaired' ? (
-                            <Activity className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                          ) : readbackResult.status === 'path_warning' ? (
-                            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                          ) : (
-                            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                          )}
-                          <div className="flex-1">
-                            <div className="font-bold">{readbackResult.details}</div>
-                            {readbackResult.detectedSha && (
-                              <div className="text-[11px] text-slate-400 mt-1">
-                                Detected SHA: <code className="text-slate-200">{readbackResult.detectedSha}</code>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* P1 Node Executable Path Binding Notice Callout */}
-                        {readbackResult.p1Notice && (
-                          <div className={`p-2.5 rounded-md border text-[11px] leading-relaxed flex items-start gap-2 ${
-                            readbackResult.p1Notice.type === 'violation'
-                              ? 'bg-rose-950/60 border-rose-500/50 text-rose-200'
-                              : 'bg-amber-950/60 border-amber-500/50 text-amber-200'
-                          }`}>
-                            <AlertCircle className={`w-4 h-4 shrink-0 mt-0.5 ${
-                              readbackResult.p1Notice.type === 'violation' ? 'text-rose-400' : 'text-amber-400'
-                            }`} />
-                            <div className="space-y-1">
-                              <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                                <span>{readbackResult.p1Notice.title}</span>
-                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700 font-mono">
-                                  CLI #14 Preflight
-                                </span>
-                              </div>
-                              <p className="text-slate-300 font-sans">{readbackResult.p1Notice.message}</p>
-                              <div className="font-mono text-[10px] text-slate-400 pt-0.5">
-                                Required: wrapper must invoke <code className="text-amber-300">fs.realpathSync(process.execPath)</code> into <code className="text-amber-300">~/.local/bin/xi-io-cli</code>
-                              </div>
-                            </div>
-                          </div>
+                        {readbackResult.status === 'valid' ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                         )}
+                        <div>
+                          <div className="font-bold">{readbackResult.details}</div>
+                          {readbackResult.detectedSha && (
+                            <div className="text-[11px] text-slate-400 mt-1">
+                              Reported source SHA: <code className="text-slate-200">{readbackResult.detectedSha}</code>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1588,7 +1423,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Physical Gate 6: Readback
+                      Local version check (not Work return)
                     </button>
                   </div>
 
@@ -1626,7 +1461,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Physical Gate 3 &amp; 4: Ward
+                      Local launch (not Ward admission)
                     </button>
                   </div>
 

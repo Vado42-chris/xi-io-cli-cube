@@ -14,7 +14,7 @@
 **DO NOT make physical host access or user command execution a prerequisite for software packaging, installer scripts, or integration repairs.**
 
 ### Supported Platform Scope
-- **Qualified Baseline Platform:** **Linux `x86_64`** (Debian/Ubuntu/Fedora, glibc 2.31+, Node.js 22+, bubblewrap 0.4+).
+- **Recorded Baseline Platform:** **Linux `x86_64`** on Aries and Loki at historical CLI `54509965` (CLI #12, 16:05 UTC). Node.js 22+ is the inspected installer requirement. This record does not independently qualify every Debian/Ubuntu/Fedora release or glibc/bubblewrap version.
 - **Explicitly Untested / Unsupported:**
   - **Windows `x86_64`**: Pinned installer commands use `cmd.exe`. Unverified on physical Windows hosts.
   - **macOS (`arm64` / `x86_64`)**: Pinned script unverified on macOS hosts.

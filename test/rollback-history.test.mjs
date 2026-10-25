@@ -6,7 +6,7 @@ const SH='a'.repeat(40), DIGEST='b'.repeat(64);
 const receipt=(generation='gen-one',extra={})=>({
   name:'install-receipt.json',relativePath:'cli/versions/'+generation+'/install-receipt.json',
   text:JSON.stringify({schema:'xiio.cli.install-receipt/v2',source_sha:SH,generation,
-    installed_at:'2026-10-25T10:00:00Z',files:{'src/xiio.mjs':DIGEST},...extra})
+    installed_at:'2026-10-25T10:00:00.000Z',repo:'Vado42-chris/xi-io-cli',ref:SH,prefix:'/example/cli',platform:'linux',node:'22.14.0',models_installed:0,files:{'src/xiio.mjs':DIGEST,'config/service-catalog.json':'c'.repeat(64)},...extra})
 });
 const pointer=(name,content)=>({name,relativePath:'cli/'+name,text:content});
 test('no local files is UNKNOWN, never a qualifying installed release',()=>{
@@ -17,11 +17,11 @@ test('no local files is UNKNOWN, never a qualifying installed release',()=>{
 });
 test('real V2 receipts expose metadata digests, not runtime verification',()=>{
   const r=parseRollbackFiles([receipt(),pointer('current','gen-new\n'),pointer('previous','gen-one\n'),
-    receipt('gen-new',{installed_at:'2026-10-25T10:05:00Z'})]);
+    receipt('gen-new',{installed_at:'2026-10-25T10:05:00.000Z'})]);
   assert.equal(r.state,'RECORDED_METADATA');
   assert.equal(r.records.length,2);
-  assert.equal(r.records[0].pointerState,'CURRENT_POINTER');
-  assert.equal(r.records[1].pointerState,'PREVIOUS_POINTER');
+  assert.equal(r.records[1].pointerState,'CURRENT_POINTER');
+  assert.equal(r.records[0].pointerState,'PREVIOUS_POINTER');
   assert.equal(r.records[1].cliFileSha256,DIGEST);
   assert.equal(r.records[1].sourceSha,SH);
   assert.equal(r.installedBinaryVerified,false);
@@ -64,9 +64,10 @@ test('bad SHA-1 or recorded CLI SHA-256 invalidates receipt',()=>{
     assert.equal(r.state,'PARTIAL');
   }
 });
-test('two claims for the same generation with different hashes cannot both count',()=>{
+test('conflicting claims are retained and flagged rather than silently overwritten',()=>{
   const r=parseRollbackFiles([receipt(),receipt('gen-one',{source_sha:'c'.repeat(40)})]);
-  assert.equal(r.records.length,1);
+  assert.equal(r.records.length,2);
+  assert.ok(r.records.every(row=>row.conflict));
   assert.equal(r.state,'PARTIAL');
   assert.ok(r.issues.includes('install-receipt.json: SAME_GENERATION_CONFLICT'));
 });
@@ -107,4 +108,30 @@ test('oversized file count is a typed refusal, not truncated success',()=>{
   const r=parseRollbackFiles(Array.from({length:121},()=>receipt()));
   assert.equal(r.state,'REJECTED');
   assert.equal(r.first_red,'TOO_MANY_FILES');
+});
+
+test('reconciliation: v2 missing digest or required installer fields is rejected',()=>{
+  for(const extra of [{files:{}},{repo:undefined},{node:'20.0.0'}]){
+    const r=parseRollbackFiles([receipt('gen-one',extra)]);
+    assert.equal(r.records.length,0);assert.equal(r.state,'PARTIAL');
+  }
+});
+test('reconciliation: separate reported installation scopes are not conflicting generations',()=>{
+  const r=parseRollbackFiles([receipt(),receipt('gen-one',{prefix:'/other/cli'}),pointer('current','gen-one')]);
+  assert.equal(r.records.length,2);
+  assert.ok(r.records.every(row=>!row.conflict&&row.pointerState==='POINTER_UNRESOLVED'));
+  assert.ok(r.issues.some(issue=>issue.startsWith('POINTER_SCOPE_UNRESOLVED')));
+});
+test('reconciliation: selected order remains visible instead of inferred rollback chronology',()=>{
+  const r=parseRollbackFiles([receipt('older'),receipt('newer',{installed_at:'2026-10-25T11:00:00.000Z'})]);
+  assert.deepEqual(r.records.map(row=>row.generation),['older','newer']);
+});
+
+test('reconciliation: canonical parser preserves recorded byte digest and rejects missing digest',()=>{
+  const selected=receipt();
+  let r=parseRollbackFiles([selected]);
+  assert.equal(r.records.length,1);assert.equal(r.records[0].cliFileSha256,DIGEST);
+  assert.equal(r.fullByteReadbackVerified,false);
+  r=parseRollbackFiles([receipt('gen-one',{files:{}})]);
+  assert.equal(r.records.length,0);assert.equal(r.state,'PARTIAL');
 });
