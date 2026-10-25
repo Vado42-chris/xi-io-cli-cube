@@ -1,6 +1,6 @@
 {
-  "name": "TempTransport - Cold Chain & Transport Tracker",
-  "description": "Temperature-controlled transport logistics, real-time cold chain telemetry, excursion monitoring, and fleet management.",
+  "name": "XI-IO CLI Install",
+  "description": "Offline installation guide and command verification for the xi-io-cli V1 candidate.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }
