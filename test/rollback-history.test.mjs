@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import {parseRollbackFiles} from '../src/lib/rollbackHistory.mjs';
 
@@ -107,4 +108,12 @@ test('oversized file count is a typed refusal, not truncated success',()=>{
   const r=parseRollbackFiles(Array.from({length:121},()=>receipt()));
   assert.equal(r.state,'REJECTED');
   assert.equal(r.first_red,'TOO_MANY_FILES');
+});
+
+// UI source must never invent an installed history or claim physical qualification.
+test('Cube diagnostics uses one receipt reader and no hard-coded qualified history',()=>{
+  const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
+  assert.match(app,/<RollbackHistory\s*\/>/);
+  assert.doesNotMatch(app,/BASELINE_ROLLBACK_MANIFEST|QUALIFIED_ACTIVE|QUALIFIED_ROLLBACK_TARGET|rollback-manifest\/v1|Simulate File Present/);
+  assert.equal(app.split('54509965c9d91ab02febcc8e49755e2b072a0ca9').length-1,1);
 });
