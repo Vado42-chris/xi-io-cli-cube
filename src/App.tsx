@@ -24,7 +24,11 @@ import {
   ArrowRight,
   ShieldX,
   FileText,
-  AlertCircle
+  AlertCircle,
+  Laptop,
+  Globe,
+  Radio,
+  FileCheck2
 } from 'lucide-react';
 
 const RELEASE = {
@@ -37,7 +41,7 @@ const RELEASE = {
 const OS_LIST = ['linux', 'macos', 'windows'] as const;
 type OperatingSystem = typeof OS_LIST[number];
 type ActiveView = 'catalog' | 'installer' | 'status-dashboard';
-type TargetComponentId = 'cli' | 'switchboard' | 'bins' | 'ward';
+type TargetComponentId = 'cli' | 'studio' | 'web' | 'switchboard' | 'bins' | 'ward';
 
 function detectUserOS(): OperatingSystem {
   if (typeof window === 'undefined') return 'linux';
@@ -166,131 +170,178 @@ export default function App() {
     }
   };
 
-  // Authoritative Six-Gate Acceptance Taxonomy from docs/INSTALLER-CANDIDATE-QUALIFICATION.md
-  const AUTHORITATIVE_GATES = [
+  // Canonical Physical Six-Gate Contract (Measuring true remote execution & custody)
+  const PHYSICAL_SIX_GATES = [
     {
-      id: 1,
-      title: "Node Executable Path Binding",
-      owner: "CLI #14",
-      status: "STAGED",
-      hosts: { loki: "Candidate 5b2d807 in source", aries: "Offline (Unverified)" },
-      description: "Repaired launcher pins fs.realpathSync(process.execPath), eliminating ambient PATH lookup in desktop/service sessions.",
-      stepLink: "step-1"
-    },
-    {
-      id: 2,
-      title: "Installed Runtime & Running Digest Readback",
-      owner: "CLI #14",
-      status: "OPEN",
-      hosts: { loki: "Awaiting physical xi-io-cli version", aries: "Offline (Unverified)" },
-      description: "Installed binary output must verify exact source_sha and running-file digest without relying on PRE_RUNNER passes.",
-      stepLink: "step-3"
-    },
-    {
-      id: 3,
-      title: "Legacy Launcher Migration & Rollback Protection",
-      owner: "CLI #14",
-      status: "STAGED",
-      hosts: { loki: "Loki wrapper f8449dc preserved", aries: "Offline (Unverified)" },
-      description: "Refuses overwrite of unrecognized ~/.local/bin/xi-io-cli wrappers; enforces SHA-256 approved migration and rollback.",
-      stepLink: "step-5"
-    },
-    {
-      id: 4,
-      title: "Discovery & Ward Admission Boundary",
+      gate: 1,
+      name: "Declared API",
       owner: "Switchboard #65",
+      status: "STAGED",
+      hosts: { loki: "Candidate 9c568988 in draft", aries: "Last recorded: Offline" },
+      criteria: "Per-host service declaration and routing signature published in Switchboard service registry."
+    },
+    {
+      gate: 2,
+      name: "Installed Device Endpoint",
+      owner: "CLI #14 / Device Worker",
+      status: "STAGED",
+      hosts: { loki: "Candidate 5b2d807 in source", aries: "Last recorded: Offline" },
+      criteria: "Authenticated native daemon listening on local host socket; verified executable binding."
+    },
+    {
+      gate: 3,
+      name: "Ward Capability Admission",
+      owner: "Ward Perimeter",
       status: "OPEN",
-      hosts: { loki: "PR #65 draft 9c568988", aries: "Offline (Unverified)" },
-      description: "Host-specific health remains health-only; no catalog entry mints a Ward grant; diagnostic PONG is non-qualifying.",
-      stepLink: "step-4"
+      hosts: { loki: "Awaiting capability token binding", aries: "Last recorded: Offline" },
+      criteria: "Cryptographic capability grant verified against exact resource and version; zero ambient execution."
     },
     {
-      id: 5,
-      title: "Atomic Expected-ResourceVersion CAS Refusal",
+      gate: 4,
+      name: "Actual Device Effect",
+      owner: "Switchboard Worker",
+      status: "OPEN",
+      hosts: { loki: "Awaiting authorized invocation", aries: "Last recorded: Offline" },
+      criteria: "Target mutation applied to physical host filesystem; diagnostic PONG is non-qualifying."
+    },
+    {
+      gate: 5,
+      name: "BINS Version Custody & CAS Collision Refusal",
       owner: "BINS #110",
-      status: "BLOCKING",
-      hosts: { loki: "Missing expected_version_ref in put()", aries: "Missing expected_version_ref" },
-      description: "Enforces atomic payload/journal staging and REFUSED_STALE_VERSION on concurrent writes to the same ResourceRef.",
-      stepLink: "step-5"
+      status: "REPAIRED IN SOURCE",
+      hosts: { loki: "Commit 7ea3976f (expected-version CAS merged)", aries: "Cross-host custody unverified" },
+      criteria: "Atomic ResourceVersion advance; competing write refused with REFUSED_STALE_VERSION (HTTP 409)."
     },
     {
-      id: 6,
-      title: "Complete Work Execution Chain & Independent Readback",
+      gate: 6,
+      name: "Original Work APPLY_RETURN",
       owner: "Work Pipeline",
       status: "OPEN",
-      hosts: { loki: "Requires verified byte readback", aries: "Requires verified byte readback" },
-      description: "Full chain: declared API -> callable endpoint -> Ward admission -> actual effect -> independent readback -> APPLY_RETURN.",
-      stepLink: "step-3"
+      hosts: { loki: "Awaiting independent readback", aries: "Last recorded: Offline" },
+      criteria: "Out-of-band byte readback confirmed; receipt delivered and acknowledged by original Work consumer."
     }
   ];
 
-  // Component catalog with strict separation between installable packages, infrastructure dependencies, and future targets
-  const SUITE_COMPONENTS = [
+  // Installer Preflight Invariants (Governing the local client binary)
+  const INSTALLER_PREFLIGHT = [
+    {
+      id: "P1",
+      title: "Node Executable Path Binding",
+      owner: "CLI #14",
+      status: "VERIFIED IN SOURCE",
+      detail: "Repaired launcher pins fs.realpathSync(process.execPath), eliminating ambient PATH lookup in desktop/service sessions."
+    },
+    {
+      id: "P2",
+      title: "Running Digest & SHA Readback",
+      owner: "CLI #14",
+      status: "PENDING HOST EXECUTION",
+      detail: "Installed binary output must match 54509965 (candidate) or 5b2d807 (repaired) without relying on PRE_RUNNER passes."
+    },
+    {
+      id: "P3",
+      title: "Launcher Migration & Rollback Protection",
+      owner: "CLI #14",
+      status: "VERIFIED IN SOURCE",
+      detail: "Preserves legacy ~/.local/bin/xi-io-cli; requires explicit SHA-256 confirmation before moving older wrappers aside."
+    }
+  ];
+
+  // Comprehensive Product Catalog reflecting the real XI-IO ecosystem pipeline
+  const SUITE_PRODUCTS = [
     {
       id: "cli" as TargetComponentId,
       name: "XI-IO CLI",
-      category: "Installable Toolchain Client",
-      tagline: "Local command-line executor & interactive CAS file editor",
+      category: "Customer Installable Client",
+      tagline: "Local execution runtime & interactive CAS file editor",
       badge: "V1 Candidate Pinned",
       badgeColor: "bg-amber-400/15 text-amber-300 border-amber-400/30",
       isInstallable: true,
-      description: "The primary operator interface for running tools, sandboxed execution with bubblewrap, and reviewing file diffs before disk modification.",
-      qualificationStatus: "Candidate 54509965 (PR #13 historical pin). Unreleased.",
-      prerequisites: "Node.js 22+, GitHub CLI signed in (private repo access), Ollama with tool support.",
-      supportedOS: "Linux (bubblewrap supported), macOS, Windows (cmd.exe).",
+      description: "Primary operator CLI with bubblewrap containment, whole-file content verification, and interactive edit approvals.",
+      releaseVersion: "54509965 (Historical PR #13 Pin)",
+      statusDetail: "Unapproved Candidate. Verified in static contract audit; awaiting physical host six-gate qualification.",
+      prerequisites: "Node.js 22+, GitHub CLI authenticated (private repo), Ollama tool model.",
       icon: Terminal
     },
     {
+      id: "studio" as TargetComponentId,
+      name: "XI-IO Studio & KDE Adapters",
+      category: "Desktop Application & Workspaces",
+      tagline: "Native desktop session manager & Plasma workspace extension",
+      badge: "PR #240 in Review",
+      badgeColor: "bg-purple-400/15 text-purple-300 border-purple-400/30",
+      isInstallable: false,
+      description: "Desktop workspace environment with native KDE Plasma integration, D-Bus session controls, and background worker monitors.",
+      releaseVersion: "PR #240 (14 passing local source tests)",
+      statusDetail: "In Desktop Qualification. Isolated from CLI critical path; not yet published as customer installer.",
+      prerequisites: "Linux Desktop / KDE Plasma 6 or standard X11/Wayland desktop session.",
+      icon: Laptop
+    },
+    {
+      id: "web" as TargetComponentId,
+      name: "XI-IO Public Web & Docs",
+      category: "Documentation & Release Portal",
+      tagline: "Public product catalog, release ledgers & qualification reports",
+      badge: "Draft PR #1367",
+      badgeColor: "bg-cyan-400/15 text-cyan-300 border-cyan-400/30",
+      isInstallable: false,
+      description: "Public distribution portal providing verified release manifests, changelogs, and audit ledger readouts.",
+      releaseVersion: "PR #1367 (Draft Architecture)",
+      statusDetail: "In Pipeline. Governs canonical release publishing; pending native build qualification.",
+      prerequisites: "Web browser with offline cache capabilities.",
+      icon: Globe
+    },
+    {
       id: "switchboard" as TargetComponentId,
-      name: "Switchboard Bridge",
-      category: "Infrastructure Daemon (Not a User Package)",
-      tagline: "Authenticated device router & Ward admission relay",
-      badge: "Draft PR #65 (Unqualified)",
+      name: "Switchboard Bridge Daemon",
+      category: "Infrastructure Daemon",
+      tagline: "Authenticated device-to-cloud router & Ward admission relay",
+      badge: "Draft PR #65 (9c568988)",
       badgeColor: "bg-blue-400/15 text-blue-300 border-blue-400/30",
       isInstallable: false,
-      description: "Host infrastructure daemon that routes admitted operations to native device workers and returns verified receipts to Work consumers.",
-      qualificationStatus: "Draft 9c568988. No standalone customer installation artifact.",
-      prerequisites: "Managed by host infrastructure; requires Ward admission token.",
-      supportedOS: "Host daemons on Linux and macOS.",
+      description: "Host infrastructure daemon routing cloud instructions through Ward capability admission to local executors.",
+      releaseVersion: "PR #65 (Commit 9c568988)",
+      statusDetail: "Infrastructure Dependency. Managed by host runtime; not a downloadable user package.",
+      prerequisites: "Physical host daemon installation; requires valid Ward capability token.",
       icon: Cpu
     },
     {
       id: "bins" as TargetComponentId,
-      name: "BINS Version Custody",
-      category: "Storage Engine (Infrastructure Dependency)",
-      tagline: "Content-addressed ResourceVersion ledger & multi-agent custody",
-      badge: "PR #110 CAS Refactor (Blocking)",
+      name: "BINS Version Custody Engine",
+      category: "Storage Engine & Ledger",
+      tagline: "Atomic ResourceVersion custody & multi-agent CAS guard",
+      badge: "PR #110 (Commit 7ea3976f)",
       badgeColor: "bg-rose-400/15 text-rose-300 border-rose-400/30",
       isInstallable: false,
-      description: "Shared version authority ensuring atomic file/journal updates and refusing lost updates on concurrent writes to the same ResourceRef.",
-      qualificationStatus: "Draft 35a9316. Blocked on missing expected_version_ref CAS guard in put().",
-      prerequisites: "Shared host storage repository; managed by BINS custodian.",
-      supportedOS: "Cross-host POSIX filesystem storage.",
+      description: "Shared storage engine enforcing atomic pair staging, content-addressed versioning, and HTTP 409 collision refusal.",
+      releaseVersion: "PR #110 (Commit 7ea3976f CAS refactor)",
+      statusDetail: "Repaired in Source. Physical cross-host qualification pending on Loki & Aries.",
+      prerequisites: "POSIX filesystem with atomic rename support; BINS store repository.",
       icon: Layers
     },
     {
       id: "ward" as TargetComponentId,
       name: "Ward Security Perimeter",
-      category: "Authorization Framework (Internal)",
+      category: "Authorization Framework",
       tagline: "Cryptographic capability minting & admission gate",
       badge: "Core Framework",
       badgeColor: "bg-emerald-400/15 text-emerald-300 border-emerald-400/30",
       isInstallable: false,
-      description: "Authorizes and binds user consent directly to immutable ResourceVersions before any device execution is permitted.",
-      qualificationStatus: "Internal framework policy; not an installable artifact.",
-      prerequisites: "Embedded in Switchboard and execution workers.",
-      supportedOS: "Platform independent.",
+      description: "Security boundary ensuring no execution occurs without explicit user OAuth consent bound to exact ResourceVersions.",
+      releaseVersion: "Core Policy Framework",
+      statusDetail: "Internal Boundary. Embedded within Switchboard and native worker endpoints.",
+      prerequisites: "Internal cryptographic engine; non-downloadable.",
       icon: ShieldCheck
     }
   ];
 
-  const currentComponent = SUITE_COMPONENTS.find(c => c.id === selectedTarget) || SUITE_COMPONENTS[0];
+  const currentComponent = SUITE_PRODUCTS.find(c => c.id === selectedTarget) || SUITE_PRODUCTS[0];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-amber-500/30 selection:text-amber-200">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
         
-        {/* Static Recorded Evidence Baseline Component (No Fake Telemetry / No Simulated Refresh) */}
+        {/* Truthful Baseline Status Component (Observation Evidence, Zero Telemetry) */}
         <section className="mb-6 rounded-2xl bg-slate-900/90 border border-slate-800 p-4 sm:p-5 shadow-xl">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
             <div className="flex items-center gap-3">
@@ -301,22 +352,22 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">Recorded System Qualification Baseline</h2>
                   <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-950/80 text-rose-300 border border-rose-800/60">
-                    Gates Open (0/6 Verified)
+                    Physical Gates: 0/6 Verified
                   </span>
                 </div>
                 <p className="text-xs text-slate-400">
-                  Static evidence review — does not perform live network polling. Host readiness reflects the recorded six-gate baseline.
+                  Static evidence review recorded at 2026-10-25 08:33 UTC (Ref: Switchboard #18 / CLI #12). Does not perform live network polling.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2 self-start sm:self-auto text-xs text-slate-400 font-mono bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
               <Lock className="w-3.5 h-3.5 text-slate-400" />
-              <span>Offline Static Audit</span>
+              <span>Offline Evidence Review</span>
             </div>
           </div>
 
-          {/* Physical Node Baseline State */}
+          {/* Physical Node Baseline State with Exact Disclosures */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
             {/* Loki Status */}
             <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/90 flex items-center justify-between">
@@ -324,13 +375,13 @@ export default function App() {
                 <Server className="w-4 h-4 text-amber-400" />
                 <div>
                   <div className="text-xs font-semibold text-slate-200">Host: Loki</div>
-                  <div className="text-[11px] text-amber-300/90 font-mono">Candidate 5b2d807 in source</div>
+                  <div className="text-[11px] text-amber-300/90 font-mono">Candidate 5b2d807 identified in source</div>
                 </div>
               </div>
               <div className="text-right">
                 <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-950/50 text-amber-300 border border-amber-800/60">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  Staged / Unverified
+                  Installation Unverified
                 </span>
                 <div className="text-[10px] text-slate-400 mt-0.5">Physical receipt pending</div>
               </div>
@@ -342,13 +393,13 @@ export default function App() {
                 <Server className="w-4 h-4 text-slate-500" />
                 <div>
                   <div className="text-xs font-semibold text-slate-200">Host: Aries</div>
-                  <div className="text-[11px] text-rose-300/90 font-mono">Device Connection</div>
+                  <div className="text-[11px] text-rose-300/90 font-mono">Desktop Device Bridge</div>
                 </div>
               </div>
               <div className="text-right">
                 <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-rose-950/50 text-rose-300 border border-rose-800/60">
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                  Offline
+                  Last Recorded: Offline
                 </span>
                 <div className="text-[10px] text-slate-400 mt-0.5">Device reports disconnected</div>
               </div>
@@ -430,11 +481,11 @@ export default function App() {
               <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-semibold text-amber-300">
-                  Historical V1 Candidate
+                  Historical V1 Candidate — Not an Approved Release
                 </div>
                 <p className="text-slate-300 text-xs leading-relaxed">
-                  This public guide displays historical candidate <code className="font-mono bg-slate-950 px-1 py-0.5 rounded text-amber-300">{shortSha}</code>, not an approved production release.
-                  Promotion to an approved release requires independently qualified evidence across the six-gate test (Ward, BINS, and device-native acceptance).
+                  This public guide displays historical candidate <code className="font-mono bg-slate-950 px-1 py-0.5 rounded text-amber-300">{shortSha}</code>. 
+                  It is not an approved production release. Promotion requires complete independent six-gate physical verification across Loki and Aries.
                 </p>
               </div>
             </div>
@@ -448,13 +499,13 @@ export default function App() {
               <div className="max-w-2xl">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-amber-400/10 text-amber-300 border border-amber-400/20 mb-4">
                   <Compass className="w-3.5 h-3.5" />
-                  <span>HEX Toolchain Discovery</span>
+                  <span>HEX Ecosystem Discovery</span>
                 </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight mb-2">
-                  Discover Installable Products &amp; Targets
+                  Discover Products &amp; Infrastructure Targets
                 </h3>
                 <p className="text-sm text-slate-300 leading-relaxed mb-6">
-                  Select a toolchain component below to inspect its exact installation contract, release generation, prerequisites, and qualification status. Infrastructure dependencies and unreleased targets cannot be deployed until their respective qualification gates pass.
+                  Explore the full XI-IO product and toolchain pipeline. Genuinely installable user packages are clearly distinguished from infrastructure daemons, internal boundaries, and pipeline previews. Selecting any component binds its exact identity and requirements into Tab 2.
                 </p>
                 <div className="flex items-center gap-3">
                   <button
@@ -473,7 +524,7 @@ export default function App() {
                     onClick={() => setActiveView('status-dashboard')}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-all"
                   >
-                    <span>Inspect Six-Gate Matrix</span>
+                    <span>Inspect Six-Gate Evidence</span>
                   </button>
                 </div>
               </div>
@@ -483,14 +534,14 @@ export default function App() {
             <div>
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h4 className="text-base font-bold text-white">Component Architecture &amp; Installation Contracts</h4>
-                  <p className="text-xs text-slate-400">Selecting a product binds its identity and contracts into Tab 2</p>
+                  <h4 className="text-base font-bold text-white">Products &amp; Infrastructure Pipeline</h4>
+                  <p className="text-xs text-slate-400">Select a component to inspect its installation path and requirements</p>
                 </div>
-                <span className="text-xs font-mono text-slate-400">Roster: Candidate V1</span>
+                <span className="text-xs font-mono text-slate-400">Catalog Registry: Active</span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {SUITE_COMPONENTS.map((product) => {
+                {SUITE_PRODUCTS.map((product) => {
                   const Icon = product.icon;
                   const isSelected = selectedTarget === product.id;
                   return (
@@ -524,14 +575,15 @@ export default function App() {
                         <p className="text-xs text-slate-400 leading-relaxed">{product.description}</p>
                         
                         <div className="text-[11px] space-y-1 pt-1 font-mono text-slate-400">
-                          <div><span className="text-slate-400">Status:</span> <span className="text-slate-300">{product.qualificationStatus}</span></div>
+                          <div><span className="text-slate-400">Release:</span> <span className="text-slate-300">{product.releaseVersion}</span></div>
+                          <div><span className="text-slate-400">Status:</span> <span className="text-slate-300">{product.statusDetail}</span></div>
                           <div><span className="text-slate-400">Prereqs:</span> <span className="text-slate-300">{product.prerequisites}</span></div>
                         </div>
                       </div>
 
                       <div className="pt-3 border-t border-slate-800/60 flex items-center justify-between">
                         <span className="text-[11px] font-mono text-slate-400">
-                          {product.isInstallable ? 'Installable: Yes' : 'Direct Install: Blocked'}
+                          {product.isInstallable ? 'Installable: Yes (Candidate)' : 'User Install: Blocked'}
                         </span>
                         <button
                           type="button"
@@ -545,7 +597,7 @@ export default function App() {
                               : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
                           }`}
                         >
-                          <span>{product.isInstallable ? 'Install Target' : 'Inspect Requirements'}</span>
+                          <span>{product.isInstallable ? 'Install CLI' : 'Inspect Requirements'}</span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -557,73 +609,95 @@ export default function App() {
           </section>
         )}
 
-        {/* TAB 3: SYSTEM DIAGNOSTICS & SIX-GATE ACCEPTANCE */}
+        {/* TAB 3: SYSTEM DIAGNOSTICS & QUALIFICATION GATES */}
         {activeView === 'status-dashboard' && (
-          <section className="space-y-4 mb-10" aria-label="System Diagnostics">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Layers className="w-5 h-5 text-amber-400" />
-                  Six-Gate Physical Qualification Matrix
-                </h3>
-                <p className="text-xs text-slate-400">Authoritative physical verification criteria from docs/INSTALLER-CANDIDATE-QUALIFICATION.md</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveView('installer')}
-                className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-medium"
-              >
-                <span>Back to Installer</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3">
-              {AUTHORITATIVE_GATES.map((gate) => (
-                <div key={gate.id} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-amber-400 font-mono text-xs font-bold border border-slate-700">
-                        {gate.id}
-                      </span>
-                      <h4 className="text-sm font-semibold text-white">{gate.title}</h4>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">{gate.owner}</span>
-                    </div>
-                    <p className="text-xs text-slate-300">{gate.description}</p>
-                    <div className="text-[11px] text-slate-400 flex items-center gap-4 pt-1 font-mono">
-                      <span>Loki: <strong className="text-amber-300 font-normal">{gate.hosts.loki}</strong></span>
-                      <span>Aries: <strong className="text-rose-300 font-normal">{gate.hosts.aries}</strong></span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                      gate.status === 'BLOCKING'
-                        ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-                        : gate.status === 'STAGED'
-                        ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
-                        : 'bg-slate-800 text-slate-400 border border-slate-700'
-                    }`}>
-                      {gate.status}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedTarget('cli');
-                        setActiveView('installer');
-                        setTimeout(() => {
-                          const el = document.getElementById(gate.stepLink);
-                          el?.scrollIntoView({ behavior: 'smooth' });
-                        }, 50);
-                      }}
-                      className="px-2 py-1 rounded text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700"
-                    >
-                      View Step
-                    </button>
-                  </div>
+          <section className="space-y-8 mb-10" aria-label="System Diagnostics">
+            
+            {/* Section 1: Canonical Physical Six-Gate Contract */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Layers className="w-5 h-5 text-amber-400" />
+                    Canonical Physical Six-Gate Acceptance Contract
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Mandatory end-to-end execution requirements governing live release authorization
+                  </p>
                 </div>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setActiveView('installer')}
+                  className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-medium"
+                >
+                  <span>Go to Installer</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                {PHYSICAL_SIX_GATES.map((g) => (
+                  <div key={g.gate} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-amber-400 font-mono text-xs font-bold border border-slate-700">
+                          {g.gate}
+                        </span>
+                        <h4 className="text-sm font-semibold text-white">Gate {g.gate}: {g.name}</h4>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">{g.owner}</span>
+                      </div>
+                      <p className="text-xs text-slate-300">{g.criteria}</p>
+                      <div className="text-[11px] text-slate-400 flex items-center gap-4 pt-1 font-mono">
+                        <span>Loki: <strong className="text-amber-300 font-normal">{g.hosts.loki}</strong></span>
+                        <span>Aries: <strong className="text-rose-300 font-normal">{g.hosts.aries}</strong></span>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                        g.status === 'REPAIRED IN SOURCE'
+                          ? 'bg-blue-950/80 text-blue-300 border border-blue-800'
+                          : g.status === 'STAGED'
+                          ? 'bg-amber-950/80 text-amber-300 border border-amber-800'
+                          : 'bg-slate-800 text-slate-400 border border-slate-700'
+                      }`}>
+                        {g.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
+
+            {/* Section 2: Installer Preflight Invariants */}
+            <div className="pt-4 border-t border-slate-800/80">
+              <div className="mb-3">
+                <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                  <FileCheck2 className="w-4 h-4 text-emerald-400" />
+                  Installer Preflight Invariants (Local Binary Checks)
+                </h4>
+                <p className="text-xs text-slate-400">Local environment preconditions verified during CLI installation</p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5">
+                {INSTALLER_PREFLIGHT.map((p) => (
+                  <div key={p.id} className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between gap-3 text-xs">
+                    <div>
+                      <div className="font-semibold text-slate-200 flex items-center gap-2">
+                        <span className="font-mono text-amber-400">{p.id}</span>
+                        <span>{p.title}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">({p.owner})</span>
+                      </div>
+                      <div className="text-slate-400 text-[11px] mt-0.5">{p.detail}</div>
+                    </div>
+                    <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 shrink-0">
+                      {p.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
           </section>
         )}
 
@@ -643,41 +717,41 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Target Switcher */}
-              <div className="inline-flex p-1 bg-slate-950 rounded-lg border border-slate-800 text-xs">
-                {(['cli', 'switchboard', 'bins', 'ward'] as const).map((tId) => (
+              {/* Target Switcher across components */}
+              <div className="inline-flex p-1 bg-slate-950 rounded-lg border border-slate-800 text-xs flex-wrap gap-1">
+                {SUITE_PRODUCTS.map((prod) => (
                   <button
-                    key={tId}
+                    key={prod.id}
                     type="button"
-                    onClick={() => setSelectedTarget(tId)}
+                    onClick={() => setSelectedTarget(prod.id)}
                     className={`px-2.5 py-1 rounded capitalize font-medium transition-colors ${
-                      selectedTarget === tId
+                      selectedTarget === prod.id
                         ? 'bg-amber-400 text-slate-950 font-bold'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {tId}
+                    {prod.id}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* If an unreleased / infrastructure component is selected, block installation and display requirements */}
+            {/* If an unreleased or infrastructure component is selected, block installation and display exact requirements */}
             {!currentComponent.isInstallable && (
               <div className="p-4 rounded-lg bg-rose-950/40 border border-rose-500/50 text-rose-200 text-xs space-y-2">
                 <div className="font-semibold text-rose-300 flex items-center gap-2 text-sm">
                   <ShieldX className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>Installation Blocked: {currentComponent.name} is an Infrastructure Component</span>
+                  <span>Installation Blocked: {currentComponent.name} is not an Installable Customer Package</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  {currentComponent.name} cannot be installed directly from this client. It does not publish a standalone installer package and is managed by host infrastructure under Ward admission.
+                  {currentComponent.name} cannot be installed from this client. {currentComponent.category.includes('Infrastructure') ? 'It is an infrastructure daemon managed by host systems under Ward capability admission.' : 'It is currently in pipeline qualification and does not yet publish an approved installer artifact.'}
                 </p>
                 <div className="bg-slate-950/70 p-3 rounded border border-rose-900/50 font-mono text-[11px] text-slate-300 space-y-1">
-                  <div><strong>Qualification Status:</strong> {currentComponent.qualificationStatus}</div>
+                  <div><strong>Release Status:</strong> {currentComponent.statusDetail}</div>
                   <div><strong>Prerequisites:</strong> {currentComponent.prerequisites}</div>
                   <div><strong>Governing Gate:</strong> Requires physical host evidence in Tab 3 before release.</div>
                 </div>
-                <div className="pt-1">
+                <div className="pt-1 flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => setActiveView('status-dashboard')}
@@ -685,6 +759,13 @@ export default function App() {
                   >
                     <span>View Qualifying Gates in System Diagnostics</span>
                     <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTarget('cli')}
+                    className="inline-flex items-center gap-1.5 text-xs text-slate-300 hover:text-white underline font-medium"
+                  >
+                    <span>Switch to Installable XI-IO CLI</span>
                   </button>
                 </div>
               </div>
@@ -694,6 +775,15 @@ export default function App() {
           {/* CLI Installer Commands (Displayed for CLI target, DOM preserved for contract compliance) */}
           <div className={selectedTarget === 'cli' ? 'block' : 'opacity-40 pointer-events-none'}>
             
+            {/* Warning callout adjacent to executable instructions */}
+            <div className="mb-6 p-3.5 rounded-lg bg-amber-950/20 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Candidate Pin: Executing this flow installs historical candidate <strong className="font-mono">{shortSha}</strong>.</span>
+              </div>
+              <span className="font-mono text-[11px] text-amber-300/80 shrink-0">Unapproved Candidate</span>
+            </div>
+
             {/* OS Picker */}
             <section className="mb-8" aria-label="Operating system selection">
               <div className="flex items-center justify-between mb-2">
@@ -795,7 +885,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Tied to Gate 1
+                      Preflight: Node Path Binding
                     </button>
                   </div>
 
@@ -832,7 +922,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Tied to Gate 1
+                      Preflight: Runtime Hash
                     </button>
                   </div>
 
@@ -860,7 +950,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Tied to Gate 2 &amp; 6
+                      Physical Gate 6: Readback
                     </button>
                   </div>
 
@@ -898,7 +988,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Tied to Gate 4
+                      Physical Gate 3 &amp; 4: Ward
                     </button>
                   </div>
 
@@ -932,7 +1022,7 @@ export default function App() {
                       onClick={() => setActiveView('status-dashboard')}
                       className="text-[11px] text-slate-400 hover:text-amber-300 font-mono"
                     >
-                      Tied to Gate 3 &amp; 5
+                      Preflight P3: Rollback
                     </button>
                   </div>
 
