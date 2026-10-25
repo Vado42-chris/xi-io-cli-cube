@@ -1,21 +1,30 @@
 # CAS Conflict Contract: `REFUSED_STALE_VERSION`
 **Specification ID:** `XI-IO-CAS-CONFLICT-SCHEMA-V1`  
 **Referenced Work:** BINS #110, Switchboard #65, CLI #14  
-**Applies To:** Host Workers, BINS Custody, Switchboard `APPLY_RETURN` Envelope  
+**Applies To:** Host Workers, BINS Custody, Switchboard `APPLY_RETURN` Relay & Consumer  
+**Status:** Target Interface Contract (Reconciled Against Inspected BINS Source)  
 
 ---
 
-## 1. Overview & Purpose
-This document defines the normative JSON schema for the `REFUSED_STALE_VERSION` error payload emitted when an optimistic concurrency check fails during a compare-and-swap (CAS) operation. 
+## 1. Overview & Integration Scope
+This specification defines the exact JSON schema for the `REFUSED_STALE_VERSION` error response emitted when an optimistic concurrency check fails during a compare-and-swap (CAS) operation in BINS #110.
 
-By adhering to this schema:
-* **BINS #110** emits a standard conflict descriptor rather than throwing unhandled exceptions.
-* **Switchboard #65** recognizes the payload as a deterministic business refusal and packages it directly into the `APPLY_RETURN` message.
-* **CLI #14** maps the error to exit code `3` (`EXIT_CONFLICT_STALE_VERSION`) and displays human-actionable rebase instructions.
+### Required Fields for Collision Evidence:
+To align Switchboard and BINS agents, every conflict payload must provide:
+* `status`: Exactly `"REFUSED_STALE_VERSION"`.
+* `resource_ref`: Canonical `bins:resource:<UUID>`.
+* `expected_version`: The content-addressed version expected by the writer.
+* `actual_version`: The current content-addressed version recorded in BINS.
+* `actual_sha256`: The raw 64-character SHA-256 digest of current on-disk content.
+* `timestamp`: ISO 8601 UTC timestamp of refusal evaluation.
+
+### Operational Source Status:
+* **BINS #110 Implementation Invariant**: The inspected BINS `put()` interface currently accepts `(path, source_occurrence_ref, media_type, resource_ref)`, but lacks `expected_version_ref`. Lock scope is currently limited to the store instance and source path. **This missing compare-and-swap check is the first documented RED in BINS #110.**
+* **Consumer Delivery**: A refused write is **not** automatically an `APPLY_RETURN`. Switchboard must deliver the conflict receipt to the original Work consumer and establish verifiable acknowledgement before closing the transaction.
 
 ---
 
-## 2. JSON Schema (Draft-07)
+## 2. Normative JSON Schema (Draft-07)
 
 ```json
 {
@@ -24,21 +33,14 @@ By adhering to this schema:
   "title": "BinsConflictReceipt",
   "type": "object",
   "required": [
-    "schema",
     "status",
     "resource_ref",
     "expected_version",
     "actual_version",
     "actual_sha256",
-    "rejected_at",
-    "recovery_action"
+    "timestamp"
   ],
   "properties": {
-    "schema": {
-      "type": "string",
-      "const": "xiio.bins.conflict-receipt/v1",
-      "description": "Exact version identifier of this conflict receipt format."
-    },
     "status": {
       "type": "string",
       "const": "REFUSED_STALE_VERSION",
@@ -46,32 +48,36 @@ By adhering to this schema:
     },
     "resource_ref": {
       "type": "string",
-      "pattern": "^urn:xiio:resource:[a-zA-Z0-9._-]+$",
-      "description": "Canonical URN identifying the target resource in BINS custody."
+      "pattern": "^bins:resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Canonical UUID-based resource reference in BINS custody."
     },
     "expected_version": {
       "type": "string",
-      "pattern": "^v[0-9]+(\\.[0-9]+)*$",
-      "description": "ResourceVersion provided by the writer in its pre-condition check."
+      "pattern": "^(bins:resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:sha256:[0-9a-f]{64}|[0-9a-f]{64})$",
+      "description": "Content-addressed version reference supplied by caller in pre-condition."
     },
     "actual_version": {
       "type": "string",
-      "pattern": "^v[0-9]+(\\.[0-9]+)*$",
-      "description": "Current ResourceVersion stored in the authoritative BINS journal."
+      "pattern": "^(bins:resource:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:sha256:[0-9a-f]{64}|[0-9a-f]{64})$",
+      "description": "Authoritative content-addressed version currently recorded in BINS journal."
     },
     "actual_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
-      "description": "Hex-encoded SHA-256 digest of the current state of the resource on disk."
+      "description": "Raw 64-character hex digest of current on-disk content."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of refusal evaluation."
+    },
+    "schema": {
+      "type": "string",
+      "description": "Optional version identifier of this conflict receipt format."
     },
     "competing_agent_id": {
       "type": "string",
-      "description": "Optional identifier of the winning agent or process that committed actual_version."
-    },
-    "rejected_at": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 UTC timestamp recording when the collision was evaluated and rejected."
+      "description": "Optional identifier of the winning agent/process whose write established actual_version."
     },
     "recovery_action": {
       "type": "string",
@@ -80,6 +86,18 @@ By adhering to this schema:
         "ABORT_AND_RETRY_WITH_NEW_WORK"
       ],
       "description": "Prescribed recovery protocol for the calling runtime."
+    },
+    "expected_version_ref": {
+      "type": "string",
+      "description": "Alias for expected_version."
+    },
+    "actual_version_ref": {
+      "type": "string",
+      "description": "Alias for actual_version."
+    },
+    "rejected_at": {
+      "type": "string",
+      "description": "Alias for timestamp."
     }
   },
   "additionalProperties": false
@@ -88,48 +106,31 @@ By adhering to this schema:
 
 ---
 
-## 3. Concrete Example Payload
+## 3. Concrete Conforming Example
 
 ```json
 {
-  "schema": "xiio.bins.conflict-receipt/v1",
   "status": "REFUSED_STALE_VERSION",
-  "resource_ref": "urn:xiio:resource:designated-existing",
-  "expected_version": "v1.4",
-  "actual_version": "v1.5",
-  "actual_sha256": "4a0e026b7762e5c7a52d5d7c3658dfbd880226b14f8a32b091f0923e41dc0b42",
+  "resource_ref": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "expected_version": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6:sha256:54509965c9d91ab02febcc8e49755e2b072a0ca9e144a8219dfa95c9603f9011",
+  "actual_version": "bins:resource:3fa85f64-5717-4562-b3fc-2c963f66afa6:sha256:9c568988fbf8fc43facdca12267847c30b55e01460599c2794eb09aa8e52e468",
+  "actual_sha256": "9c568988fbf8fc43facdca12267847c30b55e01460599c2794eb09aa8e52e468",
+  "timestamp": "2026-10-25T15:10:00.000Z",
   "competing_agent_id": "ward:agent:aries-worker-01",
-  "rejected_at": "2026-10-25T15:02:00.000Z",
   "recovery_action": "FETCH_LATEST_VERSION_AND_REBASE"
 }
 ```
 
 ---
 
-## 4. Consumer Invariants Across Lanes
+## 4. Lane Responsibilities
 
-### A. BINS #110 (Emitter)
-* Evaluates CAS prior to filesystem alteration.
-* If `expected_version != journal.current_version`:
-  1. Abort file write immediately.
-  2. Assemble the exact JSON payload matching the schema above.
-  3. Emit payload to stdout/socket and return status code indicating CAS conflict.
-
-### B. Switchboard #65 (Relay)
-* Detects `status === "REFUSED_STALE_VERSION"`.
-* Wraps the payload into the `APPLY_RETURN` envelope:
-  ```json
-  {
-    "type": "APPLY_RETURN",
-    "work_id": "work-12345",
-    "result": "CONFLICT",
-    "evidence": { ...conflict_receipt... }
-  }
-  ```
-* Bypasses retry loops; delivers receipt directly back to caller.
-
-### C. CLI #14 (Client)
-* Detects receipt in operation response.
-* Cleans up local temporary and lock files (`.tmp`, `.lock`).
-* Prints: `Error: Stale version conflict on <resource_ref>. Expected <expected_version>, but current version is <actual_version>.`
-* Exits with code `3` (`EXIT_CONFLICT_STALE_VERSION`).
+1. **BINS #110 (Emitter)**:
+   * When `expected_version != current_version`, abort write immediately with zero disk alteration.
+   * Emit the structured conflict object containing all required fields (`status`, `resource_ref`, `expected_version`, `actual_version`, `actual_sha256`, `timestamp`).
+2. **Switchboard #65 (Relay)**:
+   * Detects `REFUSED_STALE_VERSION` and packages the receipt into `APPLY_RETURN`.
+   * Delivers receipt to the original Work consumer and secures verified delivery confirmation.
+3. **CLI #14 (Client)**:
+   * Maps receipt to exit code `3` (`EXIT_CONFLICT_STALE_VERSION`).
+   * Process signal traps ensure zero dangling `.lock` or `.tmp` files.
