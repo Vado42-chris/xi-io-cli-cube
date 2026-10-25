@@ -27,7 +27,7 @@ jobs:
       - name: Audit actual page and release configuration
         run: node scripts/verify-installer-contract.mjs
 
-bundled-build:
+  bundled-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
