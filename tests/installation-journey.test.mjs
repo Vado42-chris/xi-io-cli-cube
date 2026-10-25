@@ -6,6 +6,7 @@
  * the invented rollback-manifest schema rather than treating it as authority.
  */
 import {parseRollbackFiles} from '../src/lib/rollbackHistory.mjs';
+import {compareVersionReport} from '../src/version-readback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -327,3 +328,23 @@ test('simulation only: synthetic Map ledger does not inherit results between com
 });
 
 
+
+test('P1 source diagnostics: reported terminal failure warns, absent version fields do not diagnose a bad wrapper', () => {
+  const obj={schema:'xiio.cli.version/v1',product:'xi-io: CLI',source_sha:PINNED_SHA,
+    running_file_sha256:'a'.repeat(64),receipt_file_sha256:'a'.repeat(64)};
+  const reported=compareVersionReport(JSON.stringify(obj),PINNED_SHA);
+  assert.equal(reported.status,'valid');assert.equal(reported.p1Notice,undefined);
+  assert.match(reported.details,/NOT_REPORTED/);
+  const nullPath=compareVersionReport(JSON.stringify({...obj,node_path:null,wrapper_type:null}),PINNED_SHA);
+  assert.equal(nullPath.status,'valid');assert.equal(nullPath.p1Notice,undefined);
+  const missing=compareVersionReport('bash: xi-io-cli: command not found',PINNED_SHA);
+  assert.equal(missing.status,'invalid');assert.equal(missing.p1Notice?.type,'violation');
+  const wrapper=compareVersionReport('#!/bin/sh\nexec node "$app" "$@"',PINNED_SHA);
+  assert.equal(wrapper.status,'invalid');assert.equal(wrapper.p1Notice?.type,'warning');
+  const absolute=compareVersionReport('#!/bin/sh\nexec "/home/user/node22/bin/node" "$app"',PINNED_SHA);
+  assert.equal(absolute.status,'invalid');assert.equal(absolute.p1Notice,undefined);
+  const app=fs.readFileSync(path.join(process.cwd(),'src/App.tsx'),'utf8');
+  assert.match(app,/readbackResult\.p1Notice/);
+  assert.match(app,/setReadbackResult\(compareVersionReport\(text, RELEASE.sha\)\)/);
+  assert.doesNotMatch(app,/MATCH VERIFIED: Installed binary|REPAIRED CANDIDATE DETECTED/);
+});

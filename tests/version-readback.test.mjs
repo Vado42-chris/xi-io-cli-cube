@@ -40,3 +40,16 @@ test('source pane uses actual pinned installer commands and comparison module, n
  assert.match(app,/setReadbackResult\(compareVersionReport\(text, RELEASE.sha\)\)/);
  assert.doesNotMatch(app,/MATCH VERIFIED: Installed binary|REPAIRED CANDIDATE DETECTED|text.includes\('5b2d807'\)/);
 });
+
+test('P1: bad installed launcher text is a diagnostic, not a SHA or host attestation',()=>{
+  const bin=compareVersionReport('bash: xi-io-cli: command not found',pin);
+  assert.equal(bin.status,'invalid');assert.equal(bin.p1Notice?.type,'violation');
+  const env=compareVersionReport('#!/usr/bin/env node\nconsole.log(1)',pin);
+  assert.equal(env.status,'invalid');assert.equal(env.p1Notice?.type,'warning');
+  const sh=compareVersionReport('#!/bin/bash\nexec node "$s" "$@"',pin);
+  assert.equal(sh.status,'invalid');assert.equal(sh.p1Notice?.type,'warning');
+  const normal={...report(),node_path:null,wrapper_type:null};
+  assert.equal(compare(normal).status,'valid');assert.equal(compare(normal).p1Notice,undefined);
+  assert.equal(compareVersionReport('expected '+pin+' but cli missing',pin).status,'invalid');
+  assert.equal(compareVersionReport('zsh: command not found: xi-io-cli',pin).p1Notice?.type,'violation');
+});

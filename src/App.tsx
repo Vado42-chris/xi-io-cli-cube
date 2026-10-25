@@ -125,6 +125,7 @@ export default function App() {
     status: 'idle' | 'valid' | 'mismatch' | 'invalid';
     detectedSha?: string;
     details?: string;
+    p1Notice?: { type:'warning' | 'violation'; title:string; message:string };
   }>({ status: 'idle' });
 
   // Interactive 5-Step Acceptance Test Runner for @ibal Editor
@@ -1327,6 +1328,13 @@ export default function App() {
                         )}
                         <div>
                           <div className="font-bold">{readbackResult.details}</div>
+                          {readbackResult.p1Notice && (
+                            <div role="alert" className="mt-3 border border-amber-500/50 rounded-lg p-3 bg-amber-950/20 text-amber-200 text-xs">
+                              <strong>{readbackResult.p1Notice.title}</strong>
+                              <p className="mt-1">{readbackResult.p1Notice.message}</p>
+                              <p className="mt-1 text-slate-400">P1 Node Executable Path binding: inspect the host's actual installed wrapper and its absolute fs.realpathSync(process.execPath) Node path. Historical V1 does not report those fields (NOT_REPORTED / UNKNOWN).</p>
+                            </div>
+                          )}
                           {readbackResult.detectedSha && (
                             <div className="text-[11px] text-slate-400 mt-1">
                               Reported source SHA: <code className="text-slate-200">{readbackResult.detectedSha}</code>
