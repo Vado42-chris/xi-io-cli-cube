@@ -896,7 +896,6 @@ export default function App() {
                 <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight mb-2">
                   Make anything here, and keep all of it.
                 </h1>
-                <p data-preview-probe="chris" className="text-lg font-bold text-amber-500">HI CHRIS THIS IS ME</p>
                 <p className={`max-w-2xl mx-auto text-sm sm:text-base leading-relaxed ${
                   isLight ? 'text-slate-600' : 'text-slate-400'
                 }`}>
