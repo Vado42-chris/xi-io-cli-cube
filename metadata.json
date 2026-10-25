@@ -1,0 +1,6 @@
+{
+  "name": "TempTransport - Cold Chain & Transport Tracker",
+  "description": "Temperature-controlled transport logistics, real-time cold chain telemetry, excursion monitoring, and fleet management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
