@@ -1,6 +1,6 @@
 # Cube repair candidate — 2026-10-25
 
-Reconciled base: `991513e2cd1b9ad8bfe0ba5694486a29b09c216f` (original continuation base `39fb50dc37dc1f845abde16d7c21b05b8e2b790c`) in `Vado42-chris/xi-io-cli-cube`.
+Reconciled base: `283931aecca0db6afa09ce59367368308c505a7a` (original continuation base `39fb50dc37dc1f845abde16d7c21b05b8e2b790c`) in `Vado42-chris/xi-io-cli-cube`.
 
 Scope: existing offline installer/receipt guide, not a native editor or host broker.
 
@@ -10,8 +10,8 @@ Executed in an isolated Linux cloud workspace with Node v24.22.1:
 - clean npm dependency installation: PASS;
 - `npm run lint`: PASS;
 - `npm run build`: PASS;
-- `npm test`: 64 PASS / 1 optional byte oracle SKIP without external oracle;
-- same tests with independently fetched pinned installer bytes: 65 PASS / 0 SKIP (57 source/parser tests plus 8 explicitly labeled illustrative simulations, not installation acceptance);
+- `npm test`: 66 PASS / 1 optional byte oracle SKIP without external oracle;
+- same tests with independently fetched pinned installer bytes: 67 PASS / 0 SKIP (58 source/parser tests plus 9 explicitly labeled illustrative simulations, not installation acceptance);
 - `node scripts/verify-installer-contract.mjs`: 15/15 PASS;
 - React server rendering: PASS;
 - `git diff --check`: PASS.
@@ -45,3 +45,7 @@ The incoming eight simulations are retained under their published filename but a
 The pinned CLI has no package manifest/build pipeline. Its source pane now shows authenticated `gh repo clone`, exact detached checkout, `node --check install.mjs`, then the existing `node install.mjs --ref <pin>` flow. The primary gh-api installer route is unchanged. No editor subcommand is introduced.
 
 Version comparison now accepts only bounded JSON with `schema: xiio.cli.version/v1`, `product: xi-io: CLI`, a complete source SHA and both complete SHA-256 fields. Source mismatch or disagreement between running/receipt digests is a reported mismatch; raw hashes, missing receipt digests and arbitrary prose cannot pass. A positive result says REPORTED COMPARISON, never independent installed-host verification. Pinned version source blob `31fa824f81867988c55ec62a8bebab9d806390ec` does not emit Node executable path or wrapper type: these remain NOT_REPORTED and wrapper status UNKNOWN. Extra asserted fields cannot qualify a wrapper. Six regression tests cover these boundaries.
+
+## Latest-main conflict resolution (283931ae)
+
+Preserved the newer BINS exact-commit isolation text and P4 single-writer reconciliation entry. Preserved both newer tests: the pinned-source assertion is a source test; the in-memory BINS Map example is explicitly labeled a simulation, not real BINS acceptance. Restored the generated lockfile so CI can use npm ci. Kept main's separate source-contract and bundled-build jobs, using the full tests and locked dependencies without duplicate builds. The conflicting source-pane npm build chain is replaced by the previously tested pinned Node script flow; no claim about unknown wrappers or fabricated rollback metadata is restored.

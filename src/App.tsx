@@ -281,8 +281,8 @@ export default function App() {
       name: "BINS Version Custody & CAS Collision Refusal",
       owner: "BINS #110",
       status: "REPAIRED IN SOURCE",
-      hosts: { loki: "Commit 7ea3976f (draft expected-version CAS; not merged)", aries: "Physical CAS test pending" },
-      criteria: "Atomic ResourceVersion advance; competing write refused with REFUSED_STALE_VERSION (HTTP 409)."
+      hosts: { loki: "Commit 7ea3976f (historical baseline; draft expected-version CAS; not merged; results strictly isolated to 7ea3976f)", aries: "Physical CAS test pending on newer commits (never carried forward automatically)" },
+      criteria: "Atomic ResourceVersion advance; competing write refused with REFUSED_STALE_VERSION (HTTP 409). Test results strictly tied to exact commit SHA."
     },
     {
       gate: 6,
@@ -316,6 +316,13 @@ export default function App() {
       owner: "CLI #14",
       status: "VERIFIED IN SOURCE",
       detail: "Preserves legacy ~/.local/bin/xi-io-cli; requires explicit SHA-256 confirmation before moving older wrappers aside."
+    },
+    {
+      id: "P4",
+      title: "Shared Repair & Main Reconciliation",
+      owner: "PR #2 (Single Writer)",
+      status: "RECONCILING WITH MAIN",
+      detail: "Canonical shared repair in PR #2 preserved intact as evidence; branch undergoing single-writer reconciliation with synchronized main. Zero duplicate/overlapping PRs."
     }
   ];
 
@@ -1264,6 +1271,9 @@ export default function App() {
                         copiedId={copiedId}
                         onCopy={handleCopy}
                       />
+                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                        The pinned checkout contains Node scripts, not an npm build manifest. Check syntax above, then run the pinned installer below to create its managed wrapper and receipt.
+                      </p>
                     </div>
                     <div>
                       <span className="text-xs text-slate-300 font-mono block mb-1">3. Run the Existing Pinned Installer:</span>

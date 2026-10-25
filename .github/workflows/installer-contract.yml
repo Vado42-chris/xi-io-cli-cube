@@ -1,4 +1,4 @@
-+name: XI-IO CLI Cube static contract
+name: XI-IO CLI Cube static contract
 
 on:
   push:
@@ -20,13 +20,28 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      - name: Install exact locked dependencies
+      - name: Run source/parser regressions and explicitly labeled simulations
+        run: npm test
+      - name: Audit actual page and release configuration
+        run: npm run test:contract
+
+  bundled-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Use Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Install exact locked build dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Typecheck actual application
-        run: npm run lint
-      - name: Build actual application
-        run: npm run build
-      - name: Verify offline bundle boundaries
+      - name: Verify TypeScript and bundle
+        run: |
+          npm run lint
+          npm run build
+      - name: Refuse generated server entrypoint or remote script tag
         run: |
           test -f dist/index.html
           test ! -e dist/server.js
@@ -35,13 +50,3 @@ jobs:
             exit 1
           fi
           echo "SOURCE_BUILD_PASS_NOT_HOST_INSTALL"
-      - name: Exercise positive and hostile cases, without dependencies
-        run: node --test tests/installer-contract.test.mjs
-      - name: Exercise Agent 3's pinned-command and current-source contract
-        run: node --test test/installer-contract.test.mjs
-      - name: Audit actual page and release configuration
-        run: node scripts/verify-installer-contract.mjs
-      - name: Check Cube continuation UI and receipt regressions
-        run: node --test tests/cube-continuation.test.mjs tests/rollback-history.test.mjs test/rollback-history.test.mjs tests/version-readback.test.mjs
-      - name: Run labeled illustrative filesystem simulations (not installation acceptance)
-        run: node --test tests/installation-journey.test.mjs
