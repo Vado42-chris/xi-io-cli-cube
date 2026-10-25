@@ -5,7 +5,7 @@
 - `Vado42-chris/xi-io-cube` (Issue #7 / Cube Applet)
 - `Vado42-chris/xi-io-Switchboard` (PR #65 / Issue #18)
 - `Vado42-chris/xi-io_bins` (PR #110)
-- `@ibal` Native Editor (Aries Worktree / Node #1 / Studio #221)
+- Native Code Editor (Aries Worktree / Node #1 / Studio #221)
 
 ---
 
@@ -60,3 +60,18 @@ To integrate the installable editor without rebuilding or mocking:
 3. **Manifest & Lockfile:** Dependencies for Ollama client and editor runtime.
 4. **Build & Package Configuration:** Scripts to bundle the editor (`package.json` scripts).
 5. **Launcher Wrapper:** Script to launch editor bound to local project directory.
+
+---
+
+## 5. HEX Identity Currentness & Carrier Boundaries (PR #1109)
+
+1. **Hardware Research History vs. Active Installer Delivery:**
+   - **Historical Research:** Early repository README notes discussing a proposed PCIe AI hardware accelerator board are preserved as exploratory hardware architecture history.
+   - **Active Software Reality:** HEX is delivered as the **Native Desktop Application / Tauri Host Carrier**, providing an offline-first, local-first personal computing workspace with standard window framing, Chroma tokens, and skippable sign-in.
+2. **Framework PR #1109 Native Carrier Boundary:**
+   - The standardized native window carrier lives in **framework PR #1109**.
+   - Absence of native Tauri source on `xi-io-HEX/main` is **not** authorization to invent a divergent or mock desktop shell. All delivery work standardizes strictly on the PR #1109 carrier.
+3. **Decoupled Studio Session Gate vs. Local HEX Entry:**
+   - **Studio Private-Workspace Security:** The session gate (`showStudio()` / `finish()`) in Studio protects multi-tenant cloud workspaces and remains active for authenticated sessions.
+   - **Local HEX Independent Path:** Local HEX provides a separate, signed-out, 100% offline entry that skips sign-in, needs no account or billing, and opens the standard HEX window directly.
+
