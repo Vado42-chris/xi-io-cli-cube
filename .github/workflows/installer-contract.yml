@@ -22,5 +22,7 @@ jobs:
           node-version: '22'
       - name: Exercise positive and hostile cases, without dependencies
         run: node --test tests/installer-contract.test.mjs
+      - name: Exercise Agent 3's pinned-command and current-source contract
+        run: node --test test/installer-contract.test.mjs
       - name: Audit actual page and release configuration
         run: node scripts/verify-installer-contract.mjs
