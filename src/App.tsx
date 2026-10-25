@@ -311,7 +311,7 @@ export default function App() {
       name: "Declared API",
       owner: "Switchboard #65",
       status: "STAGED",
-      hosts: { loki: "Candidate 9c568988 in draft", aries: "V1 Linux CLI passed (16:05 UTC record)" },
+      hosts: { loki: "Candidate 96d9368f in draft (editor window recorded)", aries: "Historical bridge proof recorded; today's editor unverified" },
       criteria: "Per-host service declaration and routing signature published in Switchboard service registry."
     },
     {
@@ -444,11 +444,11 @@ export default function App() {
       name: "Switchboard Bridge Daemon",
       category: "Infrastructure Daemon",
       tagline: "Authenticated device-to-cloud router & Ward admission relay",
-      badge: "Draft PR #65 (9c568988)",
+      badge: "Draft PR #65 (96d9368f)",
       badgeColor: "bg-blue-400/15 text-blue-300 border-blue-400/30",
       isInstallable: false,
       description: "Host infrastructure daemon routing cloud instructions through Ward capability admission to local executors.",
-      releaseVersion: "PR #65 (Commit 9c568988)",
+      releaseVersion: "PR #65 (Commit 96d9368f)",
       statusDetail: "Infrastructure Dependency. Managed by host runtime; not a downloadable user package.",
       prerequisites: "Physical host daemon installation; requires valid Ward capability token.",
       icon: Cpu
@@ -777,6 +777,66 @@ export default function App() {
         {activeView === 'status-dashboard' && (
           <section className="space-y-8 mb-10" aria-label="System Diagnostics">
             
+            {/* Section 0: The 5-Point Minimum Acceptance Standard */}
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                    5-Point Minimum Acceptance Contract (Cross-Lane Standard)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Mandatory sequencing for host integration. Governed by <code className="font-mono text-amber-300">docs/CROSS-LANE-INTEGRATION-DIRECTIVE.md</code>
+                  </p>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300">
+                  Shared Specification
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5 text-xs">
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-start gap-3">
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-emerald-400 font-mono text-xs font-bold shrink-0 mt-0.5">1</span>
+                  <div>
+                    <span className="font-semibold text-slate-200">Host Self-Identity:</span>
+                    <span className="text-slate-400 ml-1.5">Each host proves its own identity cryptographically using host private keys. A client cannot choose another host&apos;s identity or self-grant capabilities.</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-start gap-3">
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-emerald-400 font-mono text-xs font-bold shrink-0 mt-0.5">2</span>
+                  <div>
+                    <span className="font-semibold text-slate-200">Strict Auth &amp; Revocation:</span>
+                    <span className="text-slate-400 ml-1.5">Missing authorization, expired sessions, and revoked tokens refuse work immediately. Zero fallback credentials or unauthenticated polling.</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-start gap-3">
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-emerald-400 font-mono text-xs font-bold shrink-0 mt-0.5">3</span>
+                  <div>
+                    <span className="font-semibold text-slate-200">Uniquely Identified Read-Only Roundtrip:</span>
+                    <span className="text-slate-400 ml-1.5">A uniquely identified read-only request reaches the intended running daemon on the host, and its independently checked result returns to this session.</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-start gap-3">
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-emerald-400 font-mono text-xs font-bold shrink-0 mt-0.5">4</span>
+                  <div>
+                    <span className="font-semibold text-slate-200">Idempotency on Disconnect / Restart:</span>
+                    <span className="text-slate-400 ml-1.5">Disconnects, daemon restarts, and lost replies preserve request state. Retries never silently repeat side-effects on the physical host filesystem.</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-start gap-3">
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-emerald-400 font-mono text-xs font-bold shrink-0 mt-0.5">5</span>
+                  <div>
+                    <span className="font-semibold text-slate-200">Scoped Editor Actions &amp; CAS:</span>
+                    <span className="text-slate-400 ml-1.5">Only then enable scoped editor mutations, with human approval bound to the exact project/diff and CAS protection against stale writes (REFUSED_STALE_VERSION HTTP 409).</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Section 1: Canonical Physical Six-Gate Contract */}
             <div>
               <div className="flex items-center justify-between mb-3">

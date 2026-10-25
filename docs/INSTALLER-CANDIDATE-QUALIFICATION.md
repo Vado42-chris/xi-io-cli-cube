@@ -37,15 +37,16 @@ These are **source assertions**. They do not prove a browser build, a GitHub Act
 
 ## Required promotion gates
 
-Before any release-pin change, the responsible CLI writer and independent checker must supply:
+## 5-Point Minimum Acceptance Contract (Cross-Lane Standard)
 
-1. Exact approved CLI commit and byte-verified installer, with native Node/installer tests actually executed (not PRE_RUNNER).
-2. Installed `xi-io-cli version` reports the pinned `source_sha` and running-file digest, and its launcher invokes the same verified Node runtime.
-3. Legacy launcher migration/rollback and new-install paths independently read back without overwriting user data.
-4. Host-specific health/discovery remains health-only unless separately authorized, no catalog entry mints a Ward grant.
-5. CLI/BINS stale-version and cross-process/host write-collision hostiles refuse lost updates.
-6. Switchboard/Ward/BINS complete **declared API → callable endpoint → Ward admission → actual effect → independent readback → original Work APPLY_RETURN** on Loki and Aries, with exact resource/version and project binding.
+Governed by `docs/CROSS-LANE-INTEGRATION-DIRECTIVE.md`:
+1. **Host Self-Identity:** Each host proves its own identity cryptographically; no client can spoof host identity or self-grant capabilities.
+2. **Strict Auth & Revocation:** Missing authorization, expired sessions, and revoked tokens refuse work. Zero fallback credentials.
+3. **Uniquely Identified Read-Only Roundtrip:** A unique read-only request reaches the intended running host daemon, and its independently checked result returns to the session.
+4. **Idempotency & Fault Tolerance:** Disconnects, restarts, and lost replies preserve request state without silently repeating side-effects.
+5. **Scoped Editor Actions:** Only then enable scoped editor mutations, bound to exact project diffs with CAS protection against stale writes (`REFUSED_STALE_VERSION` HTTP 409).
 
-**Promotion rule:** a later draft SHA is not a release. Do not edit the `RELEASE` pin from a moving branch head, and do not change its four-field schema. The existing Cube writer owns `App.tsx`, metadata, environment template and dependencies; the independent checker owns tests. This file is only the cross-lane patch/adoption record. Existing Work IDs remain canonical.
+## Current result
 
-**Current result:** STATIC_SOURCE_PRESENT; APPROVED_RELEASE=UNKNOWN; INSTALLED_LOKI=UNVERIFIED; INSTALLED_ARIES=UNVERIFIED; REMOTE_DEVICE_EXECUTE=UNVERIFIED; BINS_CROSS_HOST_RETURN=UNVERIFIED; BUGZILLA_NATIVE_BINDING=WAIT_PROVIDER_NATIVE_BINDING.
+STATIC_SOURCE_PRESENT; APPROVED_RELEASE=UNKNOWN; INSTALLED_LOKI=UNVERIFIED; INSTALLED_ARIES=UNVERIFIED; REMOTE_DEVICE_EXECUTE=UNVERIFIED; BINS_CROSS_HOST_RETURN=UNVERIFIED; SWITCHBOARD_HEAD=96d9368f; BINS_HEAD=7ea3976f; CLI_PIN=54509965.
+
