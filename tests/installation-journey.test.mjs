@@ -491,21 +491,15 @@ test('installation journey: spending caps are evaluated and enforced before paid
   assert.equal(currentSpentUsd, 9.90, 'No billing occurred for rejected task');
 });
 
-test('installation journey: installer preflight contracts declare P5 identity and metered billing decoupling', () => {
+test('installation journey: optional identity and billing examples do not claim configured authority', () => {
   const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
-
-  assert.ok(
-    appSrc.includes('Optional Identity & Metered Billing Decoupling'),
-    'App.tsx must declare P5 Optional Identity & Metered Billing Decoupling'
-  );
-  assert.ok(
-    appSrc.includes('OpenID Connect'),
-    'App.tsx must document OpenID Connect identity decoupling'
-  );
-  assert.ok(
-    appSrc.includes('HEX Onboarding'),
-    'App.tsx must include HEX Onboarding flow representation'
-  );
+  assert.match(appSrc, /Sign-in remains optional and skippable/);
+  assert.match(appSrc, /Account sign-in is not connected in this build/);
+  assert.match(appSrc, /Choosing this option does not sign in, grant machine access or authorize charges/);
+  assert.match(appSrc, /No account connection, billing service or spending authorization is configured by this page/);
+  assert.match(appSrc, /It does not enforce a service limit or authorize a paid task/);
+  assert.match(appSrc, /EXAMPLE WITHIN CAP/);
+  assert.match(appSrc, /EXAMPLE ABOVE CAP/);
 });
 
 test('installation journey: local HEX install and remote Switchboard are parallel independent paths', () => {

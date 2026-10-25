@@ -244,10 +244,10 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
   // Client 5-Step Guided First-Run Journey State
   const [journeyStep, setJourneyStep] = useState<number>(1);
   const [journeyMode, setJourneyMode] = useState<'local' | 'account'>('local');
-  const [selectedFolder, setSelectedFolder] = useState<string>('~/Projects/my-app');
+  const [selectedFolder, setSelectedFolder] = useState<string>('');
   
   // Local AI readiness state (distinguishes 0 models from daemon offline!)
-  const [ollamaStatus, setOllamaStatus] = useState<'ready' | 'no_models' | 'offline'>('no_models');
+  const [ollamaStatus, setOllamaStatus] = useState<'not_checked' | 'ready' | 'no_models' | 'offline'>('not_checked');
   const [selectedModel, setSelectedModel] = useState<string>('qwen2.5:coder');
   const [isPullingModel, setIsPullingModel] = useState<boolean>(false);
   const [pullProgress, setPullProgress] = useState<number>(0);
@@ -455,21 +455,11 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
     }, 600);
   };
 
-  // Client Journey: Honest Model Pull simulation
+  // No model acquisition adapter is bound; never turn a timer into installed state.
   const handlePullModel = () => {
-    setIsPullingModel(true);
-    setPullProgress(10);
-    const interval = setInterval(() => {
-      setPullProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsPullingModel(false);
-          setOllamaStatus('ready');
-          return 100;
-        }
-        return prev + 25;
-      });
-    }, 400);
+    setIsPullingModel(false);
+    setPullProgress(0);
+    setOllamaStatus('not_checked');
   };
 
   // Client Journey: Task Approval & CAS Check Demonstration
@@ -480,7 +470,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
       setTaskOutcome({
         status: 'conflict_refused',
         exitCode: 3,
-        message: 'CAS Pre-Commit Refusal (Exit Code 3): File was modified by another process since proposal was created. Disk content preserved intact without overwriting.'
+        message: 'Example conflict refusal (simulated code 3). The sample changed; no disk read or write occurred.'
       });
       return;
     }
@@ -494,7 +484,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
     setTaskOutcome({
       status: 'approved',
       exitCode: 0,
-      message: 'Write Verified: Content committed with atomic ResourceVersion advance. You are ready to build!'
+      message: 'Example updated in this page only. No file was written and no installation was verified.'
     });
   };
 
@@ -503,7 +493,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
     setCurrentDiskDigest('9999999999999999999999999999999999999999999999999999999999999999');
     setTaskOutcome({
       status: 'idle',
-      message: 'Simulated external writer modified app.ts on disk. Click "Approve Proposal" to verify that CAS pre-commit check refuses the write!'
+      message: 'Example conflict selected. The sample digest changed; no external process or disk file was used.'
     });
   };
 
@@ -515,214 +505,63 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
     setTaskOutcome({
       status: 'rolled_back',
       exitCode: 0,
-      message: 'Rollback Completed: Atomic restore to previous generation verified.'
+      message: 'Example reset in this page only. No installed files or saved versions were changed.'
     });
   };
 
-  // Canonical Physical Six-Gate Contract (Auditor Mode)
+  // Product purpose and source-package scope are not observations of this computer.
+  // Actual install/readback evidence remains in NativeInstallerPanel and RollbackHistory.
   const PHYSICAL_SIX_GATES = [
-    {
-      gate: 1,
-      name: "Declared API",
-      owner: "Switchboard #65",
-      status: "STAGED",
-      hosts: { loki: "Candidate 96d9368f in draft (editor window recorded)", aries: "Historical bridge proof recorded; today's editor unverified" },
-      criteria: "Per-host service declaration and routing signature published in Switchboard service registry."
-    },
-    {
-      gate: 2,
-      name: "Installed Device Endpoint",
-      owner: "CLI #14 / Device Worker",
-      status: "STAGED",
-      hosts: { loki: "Candidate 5b2d807 in source", aries: "Native Code Editor in worktree" },
-      criteria: "Authenticated native daemon listening on local host socket; verified executable binding."
-    },
-    {
-      gate: 3,
-      name: "Ward Capability Admission",
-      owner: "Ward Perimeter",
-      status: "OPEN",
-      hosts: { loki: "Awaiting capability token binding", aries: "Capability grant scoped to project" },
-      criteria: "Cryptographic capability grant verified against exact resource and version; zero ambient execution."
-    },
-    {
-      gate: 4,
-      name: "Actual Device Effect",
-      owner: "Switchboard Worker",
-      status: "OPEN",
-      hosts: { loki: "Awaiting authorized invocation", aries: "Project-bound Ollama bridge active" },
-      criteria: "Target mutation applied to physical host filesystem; diagnostic PONG is non-qualifying."
-    },
-    {
-      gate: 5,
-      name: "BINS Version Custody & CAS Collision Refusal",
-      owner: "BINS #110",
-      status: "REPAIRED IN SOURCE",
-      hosts: { loki: "Commit 7ea3976f (historical CAS baseline; results strictly isolated to 7ea3976f)", aries: "Physical CAS test pending on newer commits (never carried forward automatically)" },
-      criteria: "Atomic ResourceVersion advance; competing write refused with REFUSED_STALE_VERSION (HTTP 409). Test results strictly tied to exact commit SHA."
-    },
-    {
-      gate: 6,
-      name: "Original Work APPLY_RETURN",
-      owner: "Work Pipeline",
-      status: "OPEN",
-      hosts: { loki: "Awaiting independent readback", aries: "Editor file write/readback verified at bridge" },
-      criteria: "Out-of-band byte readback confirmed; receipt delivered and acknowledged by original Work consumer."
-    }
+    {gate: 1, name: "Service connection", owner: "Switchboard", status: "NOT REPORTED", criteria: "No service connection has been checked by this page."},
+    {gate: 2, name: "Installed software", owner: "HEX", status: "NOT REPORTED", criteria: "Use the native installer's saved plans and actual readback; a source version is not an installed version."},
+    {gate: 3, name: "Permission to use a resource", owner: "Ward", status: "NOT REPORTED", criteria: "Signing in or choosing a folder does not grant access."},
+    {gate: 4, name: "Requested operation", owner: "Switchboard", status: "NOT REPORTED", criteria: "No operation on another computer has been observed here."},
+    {gate: 5, name: "File version protection", owner: "BINS", status: "NOT REPORTED", criteria: "Version and conflict behavior must be checked against the installed service; source changes do not prove it."},
+    {gate: 6, name: "Result returned", owner: "Original request", status: "NOT REPORTED", criteria: "A completed action needs its actual result and independent readback, not a demonstration."},
   ];
 
-  // Installer Preflight Invariants
-  const INSTALLER_PREFLIGHT = [
-    {
-      id: "P1",
-      title: "Node Executable Path Binding",
-      owner: "CLI #14",
-      status: "VERIFIED IN SOURCE",
-      detail: "Repaired launcher pins fs.realpathSync(process.execPath), eliminating ambient PATH lookup in desktop/service sessions."
-    },
-    {
-      id: "P2",
-      title: "Running Digest & SHA Readback",
-      owner: "CLI #14",
-      status: "PASSING ON HOSTS (16:05 UTC)",
-      detail: "Installed binary output matches 54509965 (candidate) verified on Linux hosts (Aries and Loki)."
-    },
-    {
-      id: "P3",
-      title: "Launcher Migration & Rollback Protection",
-      owner: "CLI #14",
-      status: "VERIFIED IN SOURCE",
-      detail: "Preserves legacy ~/.local/bin/xi-io-cli; requires explicit SHA-256 confirmation before moving older wrappers aside."
-    },
-    {
-      id: "P4",
-      title: "Shared Repair & Main Reconciliation",
-      owner: "PR #2 (Single Writer)",
-      status: "RECONCILING WITH MAIN",
-      detail: "Canonical shared repair in PR #2 preserved intact as evidence; branch undergoing single-writer reconciliation with synchronized main. Zero duplicate/overlapping PRs."
-    },
-    {
-      id: "P5",
-      title: "Optional Identity & Metered Billing Decoupling",
-      owner: "HEX #26 / Ward",
-      status: "SPECIFIED IN CONTRACT",
-      detail: "Local product operates 100% offline without account; OpenID Connect identifies user without machine access or billing consent; stable XI-IO workspace ID; durable deduplicated usage records; pre-execution spending caps."
-    }
-  ];
-
-  // Product Catalog
   const SUITE_PRODUCTS = [
-    {
-      id: "cli" as TargetComponentId,
-      name: "XI-IO CLI",
-      category: "Customer Installable Client",
-      tagline: "Local execution runtime & interactive CAS file editor",
-      badge: "V1 Candidate Pinned",
-      badgeColor: "bg-workspace-focus/15 text-workspace-focus border-workspace-border-strong/30",
-      isInstallable: true,
-      description: "Primary operator CLI with bubblewrap containment, whole-file content verification, and interactive edit approvals.",
-      releaseVersion: "54509965 (Historical PR #13 Pin)",
-      statusDetail: "Unapproved Candidate. Verified in static contract audit; passed Linux CLI host read/edit/rollback at 16:05 UTC.",
-      prerequisites: "Node.js 22+, GitHub CLI authenticated (private repo), Ollama tool model.",
-      icon: Terminal
-    },
-    {
-      id: "editor" as TargetComponentId,
-      name: "XI-IO Native Code Editor",
-      category: "Desktop Worktree Package",
-      tagline: "Project-bound Ollama bridge & verified interactive file editor",
-      badge: "Aries Worktree Adapter",
-      badgeColor: "bg-emerald-400/15 text-workspace-success border-emerald-400/30",
-      isInstallable: false,
-      description: "Native editor package in Aries worktree. Re-uses working Ollama bridge and file write/readback; target of the 5-step acceptance loop.",
-      releaseVersion: "Aries Worktree (Node #1 / Cube #7 Scope)",
-      statusDetail: "Active Writer Lane. Narrowed to 5-step lifecycle: install → open project → approved edit/test → save → reopen.",
-      prerequisites: "Aries Linux worktree, qualified CLI binary at 54509965, local project directory.",
-      icon: Code
-    },
-    {
-      id: "studio" as TargetComponentId,
-      name: "XI-IO Studio & KDE Adapters",
-      category: "Desktop Application & Workspaces",
-      tagline: "Native desktop session manager & Plasma workspace extension",
-      badge: "PR #240 in Review",
-      badgeColor: "bg-purple-400/15 text-workspace-text border-purple-400/30",
-      isInstallable: false,
-      description: "Desktop workspace environment with native KDE Plasma integration, D-Bus session controls, and background worker monitors.",
-      releaseVersion: "PR #240 (14 passing local source tests)",
-      statusDetail: "In Desktop Qualification. Isolated from CLI critical path; not yet published as customer installer.",
-      prerequisites: "Linux Desktop / KDE Plasma 6 or standard X11/Wayland desktop session.",
-      icon: Laptop
-    },
-    {
-      id: "web" as TargetComponentId,
-      name: "XI-IO Web Interface",
-      category: "Client Browser Application",
-      tagline: "Sovereign web portal & telemetry-free dashboard",
-      badge: "Architecture Qualified",
-      badgeColor: "bg-blue-400/15 text-workspace-text border-blue-400/30",
-      isInstallable: false,
-      description: "Static single-page web interface connecting to localhost Ward endpoints via loopback CORS.",
-      releaseVersion: "Static bundle (no external tracking scripts)",
-      statusDetail: "Qualified architecture. Zero Google Analytics, zero external fonts, strictly air-gappable.",
-      prerequisites: "Modern web browser with WebAssembly support.",
-      icon: Globe
-    },
-    {
-      id: "switchboard" as TargetComponentId,
-      name: "Switchboard Routing Service",
-      category: "Host Infrastructure Daemon",
-      tagline: "Multi-tenant capability router & remote socket dispatcher",
-      badge: "Framework #18 (Loki/Aries)",
-      badgeColor: "bg-workspace-focus/15 text-workspace-focus border-workspace-border-strong/30",
-      isInstallable: false,
-      description: "Authenticated host routing daemon establishing verified socket endpoints across distinct hardware hosts.",
-      releaseVersion: "PR #65 (Staged in Loki draft 96d9368f)",
-      statusDetail: "Staged on Loki; pending cross-host invocation qualification on Aries.",
-      prerequisites: "Linux kernel 6.x+, systemd socket activation, mutual TLS certificates.",
-      icon: Server
-    },
-    {
-      id: "bins" as TargetComponentId,
-      name: "BINS Version Custody Engine",
-      category: "Storage Engine & Ledger",
-      tagline: "Atomic ResourceVersion custody & multi-agent CAS guard",
-      badge: "PR #110 (Commit 7ea3976f)",
-      badgeColor: "bg-rose-400/15 text-workspace-danger border-rose-400/30",
-      isInstallable: false,
-      description: "Shared storage engine enforcing atomic pair staging, content-addressed versioning, and HTTP 409 collision refusal.",
-      releaseVersion: "PR #110 (Commit 7ea3976f CAS refactor)",
-      statusDetail: "Repaired in Source. Physical cross-host qualification pending on Loki & Aries.",
-      prerequisites: "POSIX filesystem with atomic rename support; BINS store repository.",
-      icon: Layers
-    },
-    {
-      id: "ward" as TargetComponentId,
-      name: "Ward Security Perimeter",
-      category: "Host Security Layer",
-      tagline: "Zero-ambient-authority capability token validator",
-      badge: "Core Security Spec",
-      badgeColor: "bg-cyan-400/15 text-workspace-text border-cyan-400/30",
-      isInstallable: false,
-      description: "Hardware token validator requiring cryptographic resource grants before any process executes.",
-      releaseVersion: "Ward V1 Specification",
-      statusDetail: "Spec complete. Token exchange endpoints under test in Switchboard worker pipeline.",
-      prerequisites: "Local Ward cryptographic keystore; ed25519 signing keys.",
-      icon: ShieldAlert
-    }
+    {id: "cli" as TargetComponentId, name: "XI-IO CLI", icon: Terminal,
+      description: "Command-line tools for local projects and installation diagnostics.",
+      statusDetail: "A Linux component candidate exists. No installed version or current one-click download is reported here.",
+      prerequisites: "The existing component candidate requires Python 3.10+, Bash and Node 22.13+. This computer has not been checked. A model runtime is needed only for AI features."},
+    {id: "editor" as TargetComponentId, name: "XI-IO Code Editor", icon: Code,
+      description: "A project editing workspace under development.",
+      statusDetail: "No editor installation package is connected to this build of HEX.",
+      prerequisites: "Package-specific requirements have not been published here. A particular developer's computer is not a requirement."},
+    {id: "studio" as TargetComponentId, name: "XI-IO Studio", icon: Laptop,
+      description: "A desktop for opening and organizing XI-IO products and workspaces.",
+      statusDetail: "No Studio installation package or launch connection is bound here.",
+      prerequisites: "Supported desktop and runtime requirements must come from the selected Studio package. KDE integration is not a requirement of this installer."},
+    {id: "web" as TargetComponentId, name: "XI-IO Web Interface", icon: Globe,
+      description: "Browser-based product interfaces.",
+      statusDetail: "This preview is a web interface, not proof of an installed desktop app or connected service.",
+      prerequisites: "A compatible browser. Offline operation and service connections have not been checked here."},
+    {id: "switchboard" as TargetComponentId, name: "Switchboard", icon: Server,
+      description: "Connects products and devices through their configured services.",
+      statusDetail: "A local consumer is included in the Linux component candidate. Account enrollment and a working connection are not configured by installing those files.",
+      prerequisites: "The component candidate requires Node 22.13+. The existing consumer also needs a device identity, HTTPS broker and approved host adapters; none are reported by this page."},
+    {id: "bins" as TargetComponentId, name: "BINS", icon: Layers,
+      description: "File search and version-custody components.",
+      statusDetail: "A local search component is included in the Linux candidate. Running search does not grant protected-file access or prove cross-computer atomic writes.",
+      prerequisites: "The component candidate requires Node 22.13+ and an explicitly selected project folder for foreground search. Protected-file access needs a separate approved binding."},
+    {id: "ward" as TargetComponentId, name: "Ward", icon: ShieldAlert,
+      description: "Permission and policy checks used by product operations.",
+      statusDetail: "No standalone Ward installer or enrollment service is connected here.",
+      prerequisites: "Requirements belong to the selected product's permission binding. Do not create keys or change security settings based on this catalog."},
   ];
 
-  // Traceability Matrix Cells (Auditor Mode)
+  // These are checks to perform, not a static table of successful host results.
   const TRACEABILITY_CELLS = [
-    { id: "CELL-01", estate: "platform", name: "Offline Host Installation", contract: "PR #13 / CLI #12", gate: 2, status: "PASS (16:05 UTC)", evidence: "Verified on Aries & Loki hosts; binary output matches SHA 54509965." },
-    { id: "CELL-02", estate: "platform", name: "Node Executable Path Binding", contract: "P1 Invariant / CLI #14", gate: 2, status: "VERIFIED IN SOURCE", evidence: "fs.realpathSync(process.execPath) eliminates ambient PATH lookup." },
-    { id: "CELL-03", estate: "platform", name: "Atomic Rollback Meta Ingestion", contract: "CLI #14 Rollback Manifest", gate: 2, status: "TESTED", evidence: "rollback.json parses prior generations and binary hashes without damage." },
-    { id: "CELL-04", estate: "workspace", name: "BINS CAS Collision Refusal", contract: "PR #110 / Commit 7ea3976f", gate: 5, status: "REPAIRED IN SOURCE", evidence: "HTTP 409 REFUSED_STALE_VERSION on competing write. Evidence strictly isolated to commit 7ea3976f." },
-    { id: "CELL-05", estate: "workspace", name: "Whole-File Content Commit", contract: "Editor Loop Gate 6", gate: 6, status: "PENDING QUALIFICATION", evidence: "Verified at bridge; full byte readback acceptance in flight." },
-    { id: "CELL-06", estate: "workspace", name: "Space-Tolerant Workspace Paths", contract: "File Path Quoting", gate: 4, status: "PASS", evidence: "Directories with whitespace execute without shell word-splitting." },
-    { id: "CELL-07", estate: "device", name: "OIDC Identity Decoupling", contract: "Framework #344 / P5", gate: 3, status: "SPECIFIED IN CONTRACT", evidence: "OpenID token identifies principal without granting machine access or billing consent." },
-    { id: "CELL-08", estate: "device", name: "Metered Billing Deduplication", contract: "Framework #340 / P5", gate: 3, status: "SPECIFIED IN CONTRACT", evidence: "Idempotent event hash prevents double-charging on retried requests." },
-    { id: "CELL-09", estate: "device", name: "Pre-Execution Spending Cap", contract: "Framework #340 / P5", gate: 3, status: "SPECIFIED IN CONTRACT", evidence: "C_reserved = Q_max * R + F evaluated before paid task dispatch." }
+    {id: "CELL-01", estate: "platform", name: "Installed version", contract: "Actual installer readback", gate: 2, status: "NOT REPORTED", evidence: "No installed-version observation supplied."},
+    {id: "CELL-02", estate: "platform", name: "Selected Node executable", contract: "Actual executable path and digest", gate: 2, status: "NOT REPORTED", evidence: "No runtime observation supplied."},
+    {id: "CELL-03", estate: "platform", name: "Saved rollback history", contract: "install-receipt.json and current/previous pointers", gate: 2, status: "NOT REPORTED", evidence: "Use the read-only history tool below. A recorded receipt is not current installed-byte verification."},
+    {id: "CELL-04", estate: "workspace", name: "File conflict protection", contract: "Installed BINS behavior", gate: 5, status: "NOT REPORTED", evidence: "No current service qualification supplied."},
+    {id: "CELL-05", estate: "workspace", name: "Saved file readback", contract: "Actual file operation", gate: 6, status: "NOT REPORTED", evidence: "The sample editor does not write files."},
+    {id: "CELL-06", estate: "workspace", name: "Selected project path", contract: "Explicit path and permission checks", gate: 4, status: "NOT REPORTED", evidence: "Typing a path does not verify access."},
+    {id: "CELL-07", estate: "device", name: "Account connection", contract: "Actual sign-in binding", gate: 3, status: "NOT REPORTED", evidence: "An account choice is not a sign-in."},
+    {id: "CELL-08", estate: "device", name: "Usage records", contract: "Actual service records", gate: 3, status: "NOT REPORTED", evidence: "The calculator below does not record usage."},
+    {id: "CELL-09", estate: "device", name: "Spending authorization", contract: "Explicit service approval", gate: 3, status: "NOT REPORTED", evidence: "A calculation does not authorize charges."},
   ];
 
   const currentComponent = SUITE_PRODUCTS.find((p) => p.id === selectedTarget) || SUITE_PRODUCTS[0];
@@ -969,7 +808,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       <div>
                         <h3 className="font-bold text-base">Step 1: Open the Local Installer</h3>
                         <p className="text-xs text-workspace-muted">
-                          Your operating system was detected as <strong className="capitalize text-workspace-focus">{selectedOS}</strong>.
+                          Selected operating-system guide: <strong className="capitalize text-workspace-focus">{selectedOS}</strong>. Browser hints are not a checked installation target; choose the correct guide below.
                         </p>
                       </div>
                     </div>
@@ -983,7 +822,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       </div>
                       <button
                         type="button"
-                        onClick={() => { setPerspective('auditor'); setActiveView('installer'); }}
+                        onClick={() => { setSelectedTarget('cli'); setPerspective('auditor'); setActiveView('installer'); }}
                         className="min-h-[48px] px-6 py-2.5 rounded-none bg-workspace-focus hover:bg-workspace-focus text-workspace-inverse font-bold text-xs flex items-center gap-2 justify-center transition-all focus-visible:ring-2 focus-visible:ring-workspace-focus"
                       >
                         <Download className="w-4 h-4" />
@@ -994,11 +833,11 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                     {/* SDK Progressive Disclosure: Fallback Command for Developers */}
                     <details className="p-3 rounded-none border border-workspace-border text-xs text-workspace-muted">
                       <summary className="cursor-pointer font-medium text-workspace-text hover:text-workspace-focus select-none py-1">
-                        Need command-line instructions instead? (Developer Reference)
+                        Historical CLI commands (Developer Reference)
                       </summary>
                       <div className="pt-3 space-y-2">
                         <p className="text-[11px]">
-                          Download the pinned CLI candidate directly from GitHub source custody:
+                          These commands reference an older CLI candidate, not the current release or evidence of an installation:
                         </p>
                         <CommandBlock
                           id="step-1-cmd"
@@ -1063,7 +902,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                           <span>Connect Account (Optional)</span>
                         </div>
                         <p className="text-xs leading-relaxed text-workspace-text">
-                          Link to an XI-IO principal via OpenID Connect. Note: Signing in identifies you; it does not grant machine access or authorize charges.
+                          Account sign-in is not connected in this build. Choosing this option does not sign in, grant machine access or authorize charges.
                         </p>
                       </div>
                     </div>
@@ -1091,7 +930,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       <div>
                         <h3 className="font-bold text-base">Step 3: What do you want to work on?</h3>
                         <p className="text-xs text-workspace-muted">
-                          Select a local folder on your computer. All edits are content-addressed and safeguarded against accidental overwrites.
+                          Enter a project path for this example. This page has not selected a folder or checked its permissions.
                         </p>
                       </div>
                     </div>
@@ -1105,21 +944,22 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                           id="folder-input"
                           type="text"
                           value={selectedFolder}
+                          placeholder="Enter a path; access is not checked"
                           onChange={(e) => setSelectedFolder(e.target.value)}
                           className="min-h-[48px] flex-1 px-3 py-2 rounded-none bg-workspace-surface border border-workspace-border-strong text-xs font-mono text-workspace-text focus:outline-none focus:ring-2 focus:ring-workspace-focus"
                         />
                         <button
                           type="button"
-                          onClick={() => setSelectedFolder('~/Projects/my-app')}
+                          onClick={() => setSelectedFolder('/example/project')}
                           className="min-h-[48px] px-4 rounded-none bg-workspace-surface hover:bg-workspace-surface text-workspace-text text-xs font-medium"
                         >
                           Use Sample
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-2 text-xs text-workspace-success pt-1">
-                        <Check className="w-4 h-4" />
-                        <span>Folder permission verified: Read &amp; write access granted on this computer.</span>
+                      <div className="flex items-center gap-2 text-xs text-workspace-muted pt-1">
+                        <Info className="w-4 h-4" />
+                        <span>Access not checked. Typing or selecting a sample path does not grant file permissions.</span>
                       </div>
                     </div>
 
@@ -1153,7 +993,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       <div>
                         <h3 className="font-bold text-base">Step 4: Set Up Your Local AI</h3>
                         <p className="text-xs text-workspace-muted">
-                          Private inference runs directly on your hardware. Differentiates empty model libraries from an offline daemon.
+                          Local AI has not been checked. The examples below illustrate possible states; they do not contact or install a model runtime.
                         </p>
                       </div>
                     </div>
@@ -1164,19 +1004,20 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         <div>
                           <div className="text-xs font-semibold text-workspace-text flex items-center gap-2">
                             <span>Local AI Status:</span>
+                            {ollamaStatus === 'not_checked' && <span>Not checked on this computer</span>}
                             {ollamaStatus === 'ready' && (
                               <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-workspace-success border border-emerald-500/30 text-[11px] font-mono">
-                                Ready: {selectedModel} Active
+                                Example: {selectedModel} ready
                               </span>
                             )}
                             {ollamaStatus === 'no_models' && (
                               <span className="px-2 py-0.5 rounded bg-workspace-focus/20 text-workspace-focus border border-workspace-border-strong/30 text-[11px] font-mono">
-                                Ollama Running (0 models downloaded)
+                                Example: runtime running with no models
                               </span>
                             )}
                             {ollamaStatus === 'offline' && (
                               <span className="px-2 py-0.5 rounded bg-rose-500/20 text-workspace-danger border border-rose-500/30 text-[11px] font-mono">
-                                Daemon Unreachable (localhost:11434)
+                                Example: runtime unavailable
                               </span>
                             )}
                           </div>
@@ -1184,7 +1025,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
 
                         {/* Interactive State Toggle (Audit Verification) */}
                         <div className="flex items-center gap-1.5 text-[11px]">
-                          <span className="text-workspace-muted">Test State:</span>
+                          <span className="text-workspace-muted">Preview example:</span>
                           {(['ready', 'no_models', 'offline'] as const).map((st) => (
                             <button
                               key={st}
@@ -1206,9 +1047,9 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                           <div className="flex items-start gap-2">
                             <Info className="w-4 h-4 text-workspace-focus shrink-0 mt-0.5" />
                             <div>
-                              <strong className="text-workspace-focus">Ollama is running, but no models are installed yet.</strong>
+                              <strong className="text-workspace-focus">Example: a runtime with no installed models.</strong>
                               <p className="text-[11px] text-workspace-text mt-1">
-                                Your daemon is active and responsive. To enable programming assistance, download the recommended model (4.7 GB) or run <code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-focus">ollama run qwen2.5:coder</code> in your terminal.
+                                This is not a reading of your computer. Model installation is not connected here. A separately configured runtime may offer commands such as <code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-focus">ollama run qwen2.5:coder</code> in your terminal.
                               </p>
                             </div>
                           </div>
@@ -1217,13 +1058,13 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                             <button
                               type="button"
                               onClick={handlePullModel}
-                              disabled={isPullingModel}
+                              disabled={true} title="Model download is not connected in this build"
                               className="min-h-[48px] px-4 py-2 rounded-none bg-workspace-focus hover:bg-workspace-focus text-workspace-inverse font-bold text-xs flex items-center gap-2"
                             >
                               {isPullingModel ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                              <span>{isPullingModel ? `Downloading... ${pullProgress}%` : 'Download Recommended Model (qwen2.5:coder)'}</span>
+                              <span>{'Model download not connected'}</span>
                             </button>
-                            <span className="text-[11px] text-workspace-muted font-mono">Requires ~4.7 GB disk space</span>
+                            <span className="text-[11px] text-workspace-muted font-mono">Download size and available disk space have not been checked.</span>
                           </div>
                         </div>
                       )}
@@ -1233,10 +1074,10 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         <div className="p-3.5 rounded-none bg-workspace-surface border border-emerald-500/40 text-xs text-workspace-success">
                           <div className="flex items-center gap-2 font-semibold text-workspace-success mb-1">
                             <CheckCircle2 className="w-4 h-4 text-workspace-success" />
-                            <span>Local Model Verified and Connected</span>
+                            <span>Example only — no model connection verified</span>
                           </div>
                           <p className="text-[11px] text-workspace-text">
-                            Model <code className="font-mono text-workspace-success">{selectedModel}</code> is loaded in memory. Ready to assist with refactors, bugs, and tests.
+                            Model <code className="font-mono text-workspace-success">{selectedModel}</code> is a sample selection. This page has not checked whether it is installed or loaded.
                           </p>
                         </div>
                       )}
@@ -1246,10 +1087,10 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         <div className="p-3.5 rounded-none bg-workspace-surface border border-rose-500/40 text-xs text-workspace-danger">
                           <div className="flex items-center gap-2 font-semibold text-workspace-danger mb-1">
                             <AlertCircle className="w-4 h-4 text-workspace-danger" />
-                            <span>Ollama Daemon Not Running</span>
+                            <span>Example only — runtime state not checked</span>
                           </div>
                           <p className="text-[11px] text-workspace-text">
-                            Start Ollama by launching the Ollama app or running <code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-danger">ollama serve</code> in your terminal. You can also proceed in offline mode without AI.
+                            If a real check reports an unavailable runtime, its own setup guide may suggest <code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-danger">ollama serve</code> in your terminal. You can also proceed in offline mode without AI.
                           </p>
                         </div>
                       )}
@@ -1257,7 +1098,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       {/* Prompt & Honest Microphone Affordance (NO FAKE RECORDING ANIMATION) */}
                       <div className="pt-2 space-y-2">
                         <label htmlFor="user-prompt" className="block text-xs font-semibold text-workspace-text">
-                          Try asking your local assistant:
+                          Example assistant prompt (not sent):
                         </label>
                         <div className="relative flex items-center">
                           <input
@@ -1329,7 +1170,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       <div>
                         <h3 className="font-bold text-base">Step 5: Try One Safe Task (CAS Pre-Commit Guard)</h3>
                         <p className="text-xs text-workspace-muted">
-                          Experience human-in-the-loop approval and content-addressed write protection with instant 1-click rollback.
+                          Interactive example only. These controls change sample text in this page, not project files. They do not test the installed editor or file permissions.
                         </p>
                       </div>
                     </div>
@@ -1362,7 +1203,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                           className="min-h-[48px] px-5 py-2.5 rounded-none bg-workspace-focus hover:bg-workspace-focus text-workspace-inverse font-bold text-xs flex items-center gap-1.5 transition-all focus-visible:ring-2 focus-visible:ring-emerald-400"
                         >
                           <Check className="w-4 h-4" />
-                          <span>Approve Proposal (Commit Write)</span>
+                          <span>Apply Example (No File Write)</span>
                         </button>
 
                         <button
@@ -1371,7 +1212,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                           className="min-h-[48px] px-4 py-2 rounded-none bg-workspace-surface hover:bg-workspace-surface text-workspace-text text-xs font-medium border border-workspace-border-strong flex items-center gap-1.5"
                         >
                           <AlertTriangle className="w-4 h-4 text-workspace-focus" />
-                          <span>Simulate Intervening Write (Test Collision)</span>
+                          <span>Change Example Digest</span>
                         </button>
 
                         <button
@@ -1380,7 +1221,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                           className="min-h-[48px] px-4 py-2 rounded-none bg-workspace-surface hover:bg-workspace-surface text-workspace-text text-xs font-medium border border-workspace-border-strong flex items-center gap-1.5"
                         >
                           <RotateCcw className="w-4 h-4 text-workspace-text" />
-                          <span>Undo / Rollback</span>
+                          <span>Reset Example</span>
                         </button>
                       </div>
 
@@ -1402,9 +1243,9 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                             {taskOutcome.status === 'approved' && <CheckCircle2 className="w-4 h-4 text-workspace-success" />}
                             {taskOutcome.status === 'rolled_back' && <RotateCcw className="w-4 h-4 text-workspace-text" />}
                             <span>
-                              {taskOutcome.status === 'conflict_refused' && 'Safe Collision Refusal (Exit Code 3)'}
-                              {taskOutcome.status === 'approved' && 'Write Committed & Verified'}
-                              {taskOutcome.status === 'rolled_back' && 'Rollback Complete'}
+                              {taskOutcome.status === 'conflict_refused' && 'Example conflict refused'}
+                              {taskOutcome.status === 'approved' && 'Example changed — no file write'}
+                              {taskOutcome.status === 'rolled_back' && 'Example reset — no disk rollback'}
                             </span>
                           </div>
                           <div>{taskOutcome.message}</div>
@@ -1418,8 +1259,8 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         <div className="flex items-center gap-3">
                           <Sparkles className="w-6 h-6 text-workspace-success shrink-0" />
                           <div>
-                            <div className="font-bold text-sm text-workspace-text">You&apos;re ready!</div>
-                            <div>Your local environment is verified, protected, and running offline.</div>
+                            <div className="font-bold text-sm text-workspace-text">Example complete</div>
+                            <div>Your computer has not been tested or changed by this example.</div>
                           </div>
                         </div>
                         <button
@@ -1545,8 +1386,10 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
 
                           </div>
                           <p className="text-xs text-workspace-muted">{prod.description}</p>
+                          <p className="text-xs text-workspace-text" data-product-availability={prod.id}>{prod.statusDetail}</p>
+                          <p className="text-xs text-workspace-muted">Installed on this computer: not reported</p>
                           <div className="text-[11px] font-mono text-workspace-text">
-                            <strong>Prerequisites:</strong> {prod.prerequisites}
+                            <strong>Requirements:</strong> {prod.prerequisites}
                           </div>
                         </div>
                       );
@@ -1558,7 +1401,10 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
               {/* AUDITOR TAB 2: INSTALL & COMPILE GUIDE */}
               <div className={activeView === 'installer' ? 'block' : 'hidden'}>
                 <section className="space-y-6">
-                  <NativeInstallerPanel />
+                  <div className={['cli', 'bins', 'switchboard'].includes(selectedTarget) ? 'block' : 'hidden'}><NativeInstallerPanel /></div>
+                  {!['cli', 'bins', 'switchboard'].includes(selectedTarget) && <section role="status" className="p-5 border border-workspace-border space-y-2">
+                    <h3>{currentComponent.name}</h3><p>{currentComponent.statusDetail}</p><p>{currentComponent.prerequisites}</p>
+                  </section>}
                   {/* Selected target switcher */}
                   <div className="p-4 rounded-none bg-workspace-canvas border border-workspace-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
@@ -1586,9 +1432,11 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
 
                   {/* Independent Parallel Delivery Statement */}
                   <div className="p-4 rounded-none bg-workspace-canvas border border-workspace-border-strong/30 text-xs text-workspace-text leading-relaxed">
-                    <strong className="text-workspace-text">Parallel Independent Delivery Path:</strong> Local HEX installation and first launch must proceed alongside remote Switchboard work, not wait behind it. Sign-in remains optional and skippable. Neither product should wait for the other to become usable.
+                    <strong className="text-workspace-text">Local setup and account connection:</strong> Local setup does not require sign-in. Installing component files does not configure an account, enroll a device or establish a remote connection.
                   </div>
 
+                  <details className="space-y-3"><summary className="cursor-pointer text-sm text-workspace-muted">Historical CLI developer reference — not an installer for the selected product</summary>
+                  <p className="text-xs text-workspace-muted">The commands below are pinned to an older CLI candidate ({RELEASE.sha.slice(0, 8)}), not the current release or evidence of what is installed. They do not describe requirements for other products. Current native setup and its actual readback are above.</p>
                   {/* OS Selection Tabs */}
                   <div className="space-y-2">
                     <label className="block text-xs text-workspace-muted">Select Operating System:</label>
@@ -1625,9 +1473,9 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       <ul className="space-y-1.5 text-workspace-text">
                         <li>Node.js 22 or newer</li>
                         <li>
-                          GitHub CLI installed and signed in: <code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-focus">gh auth login</code> (the repo is private)
+                          For this historical source-fetch command only, GitHub CLI access may be needed: <code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-focus">gh auth login</code> (not required to inspect this UI or use a packaged local installer)
                         </li>
-                        <li>Ollama running with at least one installed model that supports tools</li>
+                        <li>AI features require a separately configured compatible model runtime; this is not a file-install prerequisite.</li>
                         {selectedOS === 'linux' && (
                           <li className="text-workspace-text">
                             <strong>Linux only:</strong> bubblewrap (<code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-focus">sudo apt install bubblewrap</code>) — without it, commands stay off and reading/edits still work
@@ -1645,7 +1493,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                           cliMode === 'script' ? 'bg-workspace-focus text-workspace-inverse' : 'bg-workspace-surface text-workspace-muted'
                         }`}
                       >
-                        Script Installation (Recommended)
+                        Historical CLI Script Reference
                       </button>
                       <button
                         type="button"
@@ -1788,6 +1636,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       </div>
                     </div>
                   </div>
+                  </details>
                 </section>
               </div>
 
@@ -1795,15 +1644,15 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
               {activeView === 'status-dashboard' && (
                 <section className="space-y-6" aria-label="System Diagnostics">
                   <div>
-                    <h3 className="text-base font-bold text-workspace-text">Physical Six-Gate Contract: Remote Host Operations Only &amp; Traceability Matrix</h3>
+                    <h3 className="text-base font-bold text-workspace-text">This computer: checks not yet reported</h3>
                     <p className="text-xs text-workspace-muted">
-                      Measuring true remote host effects, BINS version custody, and deduplicating coverage against contracts.
+                      This page has not queried your computers or services. Source availability, sample results and historical records do not establish current device status.
                     </p>
                   </div>
 
                   {/* 6 Physical Gates */}
                   <div className="space-y-3">
-                    <h4 className="text-xs font-bold font-mono text-workspace-focus uppercase">1. Six Physical Host Gates</h4>
+                    <h4 className="text-xs font-bold font-mono text-workspace-focus uppercase">Connection and operation checks</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {PHYSICAL_SIX_GATES.map((g) => (
                         <div key={g.gate} className="p-3 rounded-none bg-workspace-canvas border border-workspace-border text-xs space-y-1">
@@ -1816,7 +1665,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                           <div className="text-workspace-muted">Owner: {g.owner}</div>
                           <div className="text-[11px] text-workspace-text">{g.criteria}</div>
                           <div className="pt-1 text-[10px] font-mono text-workspace-muted">
-                            Loki: {g.hosts.loki} | Aries: {g.hosts.aries}
+                            This computer: not reported
                           </div>
                         </div>
                       ))}
@@ -1826,7 +1675,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                   {/* Traceability Matrix Deduplication */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-bold font-mono text-workspace-focus uppercase">2. Traceability Matrix (Deduplicated)</h4>
+                      <h4 className="text-xs font-bold font-mono text-workspace-focus uppercase">Evidence still needed</h4>
                       <div className="flex gap-1 text-[11px]">
                         {(['platform', 'workspace', 'device'] as const).map((est) => (
                           <button
@@ -1845,7 +1694,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
 
                     <div className="p-4 rounded-none bg-workspace-canvas border border-workspace-border text-xs">
                       <p className="text-workspace-muted text-xs mb-3">
-                        A single qualification traceability matrix deduplicating the 27 matrix cells and 27 scenarios against actual contracts.
+                        These entries are not test results. Use actual native readback or explicitly selected receipt files before relying on an installed state.
                       </p>
                       <div className="space-y-2">
                         {TRACEABILITY_CELLS.filter((c) => c.estate === selectedEstate).map((cell) => (
@@ -1855,7 +1704,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                               <div className="text-[11px] text-workspace-muted">Contract: {cell.contract} (Gate {cell.gate})</div>
                             </div>
                             <div className="text-right">
-                              <span className="px-2 py-0.5 rounded text-[10px] bg-workspace-surface text-workspace-success border border-emerald-800">
+                              <span className="px-2 py-0.5 rounded text-[10px] bg-workspace-surface text-workspace-muted border border-workspace-border">
                                 {cell.status}
                               </span>
                             </div>
@@ -1901,7 +1750,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                   <div>
                     <h3 className="text-base font-bold text-workspace-text">HEX Onboarding, Identity &amp; Metered Economics (5.5)</h3>
                     <p className="text-xs text-workspace-muted">
-                      P5 Optional Identity &amp; Metered Billing Decoupling: OpenID Connect identity without automatic charges.
+                      Planning examples only. No account connection, billing service or spending authorization is configured by this page.
                     </p>
                   </div>
 
@@ -1909,7 +1758,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                   <div className="p-4 rounded-none bg-workspace-canvas border border-workspace-border text-xs space-y-3">
                     <div className="font-bold text-workspace-text">Preauthorization Spending Cap Evaluation:</div>
                     <p className="text-workspace-text">
-                      Pre-execution spending caps enforce: <code className="font-mono text-workspace-focus">C_reserved = Q_max * R + F</code> before paid tasks execute.
+                      This example calculates a proposed cap: <code className="font-mono text-workspace-focus">C_reserved = Q_max * R + F</code> It does not enforce a service limit or authorize a paid task.
                     </p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div>
@@ -1951,7 +1800,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       </div>
                     </div>
                     <div className="p-2.5 rounded bg-workspace-surface font-mono text-xs text-workspace-focus">
-                      Calculated C_reserved: ${(meteredMaxUnits * meteredRate + meteredFixedFee).toFixed(2)} | Status: {(meteredMaxUnits * meteredRate + meteredFixedFee) <= meteredBudgetCap ? 'APPROVED (Under Cap)' : 'REFUSED_SPENDING_CAP_EXCEEDED'}
+                      Calculated C_reserved: ${(meteredMaxUnits * meteredRate + meteredFixedFee).toFixed(2)} | Status: {(meteredMaxUnits * meteredRate + meteredFixedFee) <= meteredBudgetCap ? 'EXAMPLE WITHIN CAP' : 'EXAMPLE ABOVE CAP'}
                     </div>
                   </div>
 

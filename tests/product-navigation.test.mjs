@@ -69,14 +69,47 @@ test('actual tablet rail and product controls share selected views across the Sh
       return accepted;
     }
     selectedRail('Setup'); selectedProduct('Setup');
+    assert.match(shadow.textContent, /Selected operating-system guide/);
+    assert.doesNotMatch(shadow.textContent, /operating system was detected/);
     assert.equal(rail('Data'), null, 'unbound generic navigation is not shown');
     await click(rail('Software')); selectedRail('Software'); selectedProduct('Tools & Diagnostics'); selectedProduct('1. HEX Software Suite');
     assert.ok(shadow.textContent.includes('Software reference catalog.'));
+    const componentPanel = panel();
+    const ids = ['cli', 'editor', 'studio', 'web', 'switchboard', 'bins', 'ward'];
+    for (const id of ids) {
+      await click(rail('Software'));
+      const availability = shadow.querySelector(`[data-product-availability="${id}"]`);
+      const card = availability?.closest('[role="button"]');
+      assert.ok(card);
+      assert.match(card.textContent, /Installed on this computer: not reported/);
+      assert.doesNotMatch(card.textContent, /Aries|Loki|54509965|verified socket|mutual TLS|409|qualified CLI|D-Bus|background monitors/i);
+      await click(card);
+      assert.equal(panel(), componentPanel, 'product selection retains actual installer recovery state');
+      assert.equal(Boolean(panel().closest('.hidden')), !['cli', 'bins', 'switchboard'].includes(id));
+      const reference = [...shadow.querySelectorAll('details')].find(el => el.querySelector('summary')?.textContent.includes('Historical CLI developer reference'));
+      assert.ok(reference && !reference.open, 'unrelated old CLI commands are closed historical reference');
+      assert.match(reference.textContent, /not the current release or evidence of what is installed/);
+      assert.match(reference.textContent, /do not describe requirements for other products/);
+    }
+    await click(rail('Software'));
+    await click(shadow.querySelector('[data-product-availability="cli"]').closest('[role="button"]'));
     await click(rail('Install')); selectedRail('Install'); selectedProduct('2. Install & Compile');
     const retainedPanel = panel(); assert.ok(retainedPanel); assert.equal(retainedPanel.closest('.hidden'), null);
     assert.ok(retainedPanel.textContent.includes('Native HEX is required.'));
     await click(rail('Status')); selectedRail('Status'); selectedProduct('3. System Diagnostics');
-    assert.ok(shadow.querySelector('[aria-label="System Diagnostics"]'));
+    const diagnostics = shadow.querySelector('[aria-label="System Diagnostics"]');
+    assert.ok(diagnostics);
+    assert.match(diagnostics.textContent, /has not queried your computers or services/);
+    assert.doesNotMatch(diagnostics.textContent, /Aries|Loki|PASS|16:05|rollback\.json|100% offline/);
+    assert.equal((diagnostics.textContent.match(/NOT REPORTED/g) || []).length, 9);
+    await click(button('Load Canary Receipt'));
+    assert.match(diagnostics.textContent, /Valid BINS CAS conflict receipt schema/);
+    assert.equal((diagnostics.textContent.match(/NOT REPORTED/g) || []).length, 9, 'a synthetic schema example never qualifies this device');
+    for (const estate of ['workspace', 'device', 'platform']) {
+      await click([...diagnostics.querySelectorAll('button')].find(el => el.textContent.trim() === estate));
+      assert.equal((diagnostics.textContent.match(/NOT REPORTED/g) || []).length, 9);
+      assert.doesNotMatch(diagnostics.textContent, /PASS|16:05/);
+    }
     assert.equal(panel(), retainedPanel, 'switching tools does not remount the installer'); assert.ok(panel().closest('.hidden'));
     await click(rail('Onboarding')); selectedRail('Onboarding'); selectedProduct('4. Onboarding');
     assert.ok(shadow.textContent.includes('HEX Onboarding, Identity'));
@@ -94,6 +127,28 @@ test('actual tablet rail and product controls share selected views across the Sh
     assert.notEqual(theme.getAttribute('data-product-theme'), before);
     const account = Array.from(shadow.querySelectorAll('[role="button"]')).find(el => el.textContent.includes('Connect an account'));
     await click(account); assert.equal(account.getAttribute('aria-pressed'), 'true');
+    assert.match(shadow.textContent, /Account sign-in is not connected in this build/);
+    await click(button('Continue to Workspace Folder'));
+    assert.equal(shadow.querySelector('#folder-input').value, '');
+    assert.match(shadow.textContent, /does not grant file permissions/);
+    await click(button('Use Sample'));
+    assert.equal(shadow.querySelector('#folder-input').value, '/example/project');
+    assert.match(shadow.textContent, /Access not checked/);
+    await click(button('Next: Set Up Local AI'));
+    assert.match(shadow.textContent, /Not checked on this computer/);
+    await click(button('Empty (0 Models)'));
+    assert.equal(button('Model download not connected').disabled, true);
+    await click(button('ready'));
+    assert.match(shadow.textContent, /Example only — no model connection verified/);
+    await click(button('Next: Try a Safe Task'));
+    assert.match(shadow.textContent, /Interactive example only/);
+    await click(button('Apply Example'));
+    assert.match(shadow.textContent, /No file was written and no installation was verified/);
+    await click(button('Change Example Digest'));
+    await click(button('Apply Example'));
+    assert.match(shadow.textContent, /Example conflict refusal/);
+    await click(button('Reset Example'));
+    assert.match(shadow.textContent, /No installed files or saved versions were changed/);
     const sites = ['xi-io.ca', 'xi-io.com', 'xi-io.org', 'xi-io.net', 'xi-io.io', 'x42s.com'];
     const links = Array.from(shadow.querySelectorAll('footer a'));
     assert.equal(links.length, sites.length);
@@ -111,4 +166,17 @@ test('actual tablet rail and product controls share selected views across the Sh
     }
     assert.deepEqual(errors, []);
   } finally { dom.window.close(); }
+});
+
+// Pure observed-state projection: arbitrary device labels, source metadata and
+// partial receipts are not live installed evidence. This is not a native test.
+test('unreported or historical installation data never becomes current device success', async () => {
+  const {installerStatus} = await import('../src/lib/nativeInstaller.mjs');
+  for (const name of ['Aries', 'Loki', 'Any customer computer']) {
+    for (const value of [null, {}, {hostname:name}, {hostname:name, source_sha:'a'.repeat(40)}, {hostname:name, phase:'INSTALLED_READBACK_VERIFIED'}]) {
+      assert.notEqual(installerStatus(value).tone, 'success');
+    }
+  }
+  assert.notEqual(installerStatus({phase:'APPLY_OUTCOME_UNCERTAIN', hostname:'Aries'}, true).tone, 'success');
+  assert.match(installerStatus({phase:'INSTALLED_READBACK_VERIFIED'}, true).message, /services not started.*Remote connection is not configured/);
 });

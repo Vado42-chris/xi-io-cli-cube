@@ -53,7 +53,11 @@ test('new regression: actual UI uses validator and does not equate local command
   assert.match(app,/draft expected-version CAS; not merged/);
   assert.doesNotMatch(app,/BASELINE_ROLLBACK_MANIFEST|parseRollbackManifest|QUALIFIED_ACTIVE|QUALIFIED_ROLLBACK_TARGET/);
   assert.equal((app.match(/<RollbackHistory \/>/g)||[]).length,1);
-  assert.match(app,/Remote Host Operations Only/);
+  assert.match(app,/This page has not queried your computers or services/);
+  assert.match(app,/Source availability, sample results and historical records do not establish current device status/);
+  const checks = app.match(/const PHYSICAL_SIX_GATES = \[([\s\S]*?)\n  \];/)[1];
+  assert.equal((checks.match(/status: \"NOT REPORTED\"/g) || []).length, 6);
+  assert.doesNotMatch(checks, /PASS|Aries|Loki|16:05/);
 });
 test('new regression: UI sample generator produces a valid synthetic receipt', () => {
   const source=app.match(/const handleGenerateCanaryReceipt = \(\) => \{([\s\S]*?)\n  \};/)[1];

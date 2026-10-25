@@ -55,7 +55,7 @@ export default function NativeInstallerPanel() {
     <div><h3 className="font-bold text-workspace-text">Install on this computer</h3>
       <p className="text-sm text-workspace-muted">Local Linux candidate · CLI, BINS and Switchboard files · No sign-in required</p></div>
     {!native ? <p role="status" className="text-sm text-workspace-focus">Native HEX is required. This browser preview cannot inspect, install or roll back files. The guides below are not proof of an installation.</p> : <>
-      <p className="text-xs text-workspace-muted">Requires system Python 3.10+, bash and your selected Node 22.13+. Preparing a plan runs that Node executable to check its identity/version, but does not install the payload. Same capabilities on either computer; no fixed Loki/Aries role.</p>
+      <p className="text-xs text-workspace-muted">Requires system Python 3.10+, bash and your selected Node 22.13+. Preparing a plan runs that Node executable to check its identity/version, but does not install the payload. Choose the intended installation folder on this computer.</p>
       <fieldset disabled={busy || unknown} className="grid gap-3 sm:grid-cols-2">
         <label className="text-xs text-workspace-text">Absolute installation folder<input aria-label="Installation folder" value={prefix} onChange={e => {edit(); setPrefix(e.target.value);}} className="mt-1 w-full rounded bg-workspace-surface border border-workspace-border-strong p-2 font-mono" /></label>
         <label className="text-xs text-workspace-text">Absolute Node executable<input aria-label="Node executable" value={node} onChange={e => {edit(); setNode(e.target.value);}} className="mt-1 w-full rounded bg-workspace-surface border border-workspace-border-strong p-2 font-mono" /></label>
