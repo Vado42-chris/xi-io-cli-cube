@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useThemeMode, setThemeMode } from './shared/window-frame.mjs';
 import brandPlate from './assets/brand/7d133412d_blue-bg.png';
 import TabletBackdrop from './components/TabletBackdrop';
+import ExternalSiteLink from './components/ExternalSiteLink';
 import RollbackHistory from './components/RollbackHistory';
 import NativeInstallerPanel from './components/NativeInstallerPanel';
 import { validateCasReceipt } from './cas-receipt.mjs';
@@ -221,15 +222,20 @@ const ROSETTA_LEXICON = [
   }
 ];
 
-export default function App({ embedded = false }: { embedded?: boolean }) {
-  // Primary Experience Modes
-  const [perspective, setPerspective] = useState<PerspectiveMode>('client');
+export type ProductNavigation = { perspective: PerspectiveMode; activeView: ActiveView };
+
+export default function App({ embedded = false, navigation, onNavigate }: { embedded?: boolean; navigation?: ProductNavigation; onNavigate?: (patch: Partial<ProductNavigation>) => void }) {
+  // The tablet and product controls share the same views; standalone keeps its local state.
+  const [localNavigation, setLocalNavigation] = useState<ProductNavigation>({perspective: 'client', activeView: 'catalog'});
+  const {perspective, activeView} = navigation ?? localNavigation;
+  const navigate = (patch: Partial<ProductNavigation>) => onNavigate ? onNavigate(patch) : setLocalNavigation(current => ({...current, ...patch}));
+  const setPerspective = (next: PerspectiveMode) => navigate({perspective: next});
+  const setActiveView = (next: ActiveView) => navigate({activeView: next});
   const theme = useThemeMode();
   const setTheme = setThemeMode;
   const [comfort, setComfort] = useState<ComfortScale>('standard');
 
   // Active View in Auditor / Developer Perspective
-  const [activeView, setActiveView] = useState<ActiveView>('catalog');
   const [selectedTarget, setSelectedTarget] = useState<TargetComponentId>('cli');
   const [selectedOS, setSelectedOS] = useState<OperatingSystem>('linux');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -1778,7 +1784,7 @@ export default function App({ embedded = false }: { embedded?: boolean }) {
                       <div>If a LAUNCHER_OWNERSHIP_CONFLICT occurs, older wrappers in ~/.local/bin are preserved.</div>
                       <div>If PATH needs updating, run the add_to_path helper command.</div>
                       <div>
-                        Need assistance? <a href={RELEASE.issueUrl} target="_blank" rel="noopener noreferrer" className="text-workspace-focus underline">Report a problem (V1 issue)</a>.
+                        Need assistance? <ExternalSiteLink href={RELEASE.issueUrl} className="text-workspace-focus underline">Report a problem (V1 issue)</ExternalSiteLink>.
                       </div>
                     </div>
                   </div>
@@ -1995,12 +2001,12 @@ export default function App({ embedded = false }: { embedded?: boolean }) {
                 <ul className="flex flex-wrap gap-2">
                   {['xi-io.ca', 'xi-io.com', 'xi-io.org', 'xi-io.net', 'xi-io.io', 'x42s.com'].map((site) => (
                     <li key={site}>
-                      <a
+                      <ExternalSiteLink
                         href={`https://${site}`}
                         className={`inline-flex min-h-[44px] items-center rounded-none px-3 py-2 font-medium underline decoration-transparent underline-offset-4 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-workspace-focus focus-visible:ring-offset-2 ${isLight ? 'text-workspace-focus focus-visible:ring-offset-white' : 'text-workspace-focus focus-visible:ring-offset-workspace-canvas'}`}
                       >
                         {site}
-                      </a>
+                      </ExternalSiteLink>
                     </li>
                   ))}
                 </ul>

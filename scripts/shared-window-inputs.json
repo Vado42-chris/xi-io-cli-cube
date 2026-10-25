@@ -51,7 +51,7 @@
     {
       "path": "src/components/framework/NativeProductWindowShell.jsx",
       "base_git_blob": null,
-      "sha256": "018b960e072b399f9cf43a0f414f2ec577908a06f5942531f11e2bdca9a63860"
+      "sha256": "20b2b7563cda307aa4b1e98125fc4d5db7e3f23c9f6f10d04995d33f32a3cb9c"
     },
     {
       "path": "src/components/framework/registry.jsx",

@@ -24,12 +24,13 @@ test('Cube is self-contained and shares one existing appearance store',()=>{
  assert.match(host,/NativeProductWindowShell.*from '\.\/shared\/window-frame.mjs'/);
  assert.match(host,/controlsAvailable=\{nativeInstallerAvailable\(\)\}/);
  assert.match(host,/attachShadow\(\{mode: 'open'\}\)/);
- assert.match(host,/<App embedded \/>/);
+ assert.match(host,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} \/>/);
  assert.doesNotMatch(app,/Traffic Light Window Dots|bg-rose-500\/80/);
 });
 test('unbound product/context is honest, with no fake authority or navigation',()=>{
  const host=read('../src/SharedProductHost.tsx');
- assert.match(host,/canonical HEX Chroma\/route binding was not/);
+ assert.match(host,/Owner-directed HEX accent uses the existing Node cyan-500 token/);
+ assert.match(host,/id: 'hex', title: 'XI-IO HEX', theme: 'cyan-500'/);
  assert.match(host,/Account tools\/settings and Return to Studio remain unbound/);
 
  assert.match(host,/isAuthenticated=\{false\}/);

@@ -41,6 +41,8 @@ jobs:
         run: |
           npm run lint
           npm run build
+      - name: Verify real product navigation and shared-frame consumer
+        run: npm run test:interaction
       - name: Refuse generated server entrypoint or remote script tag
         run: |
           test -f dist/index.html

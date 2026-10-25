@@ -51,7 +51,7 @@
     {
       "path": "src/components/framework/NativeProductWindowShell.jsx",
       "base_git_blob": null,
-      "sha256": "018b960e072b399f9cf43a0f414f2ec577908a06f5942531f11e2bdca9a63860"
+      "sha256": "20b2b7563cda307aa4b1e98125fc4d5db7e3f23c9f6f10d04995d33f32a3cb9c"
     },
     {
       "path": "src/components/framework/registry.jsx",
@@ -173,14 +173,14 @@
   "font_qualification": "CANONICAL_REMOTE_FONT_IMPORT_RETAINED_NATIVE_CSP_FALLBACK_NOT_VISUALLY_QUALIFIED",
   "consumer_css_input": {
     "path": "src/SharedProductHost.tsx",
-    "sha256": "67e8f93970ccdbbc21b019d4a6bbf71b5d0a0fd304ca4dbeef2f6b2feb2aa530"
+    "sha256": "9f131f0598a408e4cf15ae093d2fbca456a6a00ce0e8186fb102085d3a3ed112"
   },
   "generator_tools": {
     "vite": "8.3.5",
     "@vitejs/plugin-react": "6.1.2"
   },
   "generator_source_sha256": "cb69756be91d2aabb1d984e20952864e9c11e59bf8c5e0798d4c524c15409f60",
-  "consumer_installed_lock_sha256": "791a3a3635b973f8a71a5350a906e52ac3a93a1c525c2eb8c5ecd8062152f10d",
+  "consumer_installed_lock_sha256": "c3f218faeacf5c9620411ae971ae4b3f8997091d6d9addb530cf80c353f22f20",
   "consumer_tool_qualification": "EXISTING_INSTALLED_CACHE_NOT_UPSTREAM_LOCKED_RELEASE",
   "qualification": "DERIVED_LOCAL_UNPUBLISHED_NODE_PATCH_NOT_MAIN_BASELINE",
   "dependency_lock_sha256": "31195574ff1da30b49c6c6104ac5aedef21110d43175735cd273fd8122c7b00d",
@@ -188,8 +188,8 @@
   "artifact_files": [
     {
       "path": "window-frame.mjs",
-      "sha256": "9a50f8b9a01582a71fc985a19480e23d0f6d7dcd7c97b65011b6e5befa52ad9e",
-      "bytes": 416651
+      "sha256": "864684a2a5a140892b9f779e60dfe75fa639d784c2158a09da977e15640b1176",
+      "bytes": 416740
     },
     {
       "path": "window-frame.css",
@@ -206,5 +206,6 @@
   "product_payloads_included": false,
   "provider_calls_on_open": "NONE_IN_PRESENTATION_IMPORT_GRAPH",
   "browser_native_controls": "DISABLED",
-  "native_runtime": "NOT_RUN"
+  "native_runtime": "NOT_RUN",
+  "consumer_binding_review": "Existing cyan-500 product binding; canonical inputs and generated artifact bytes unchanged from reviewed click generation. Rebuilt CSS is byte-identical."
 }

@@ -10,7 +10,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "node --test test/installer-contract.test.mjs tests/installer-contract.test.mjs tests/cube-continuation.test.mjs tests/rollback-history.test.mjs test/rollback-history.test.mjs tests/installation-journey.test.mjs tests/version-readback.test.mjs",
-    "test:contract": "node scripts/verify-installer-contract.mjs"
+    "test:contract": "node scripts/verify-installer-contract.mjs",
+    "test:interaction": "node --experimental-vm-modules --test tests/product-navigation.test.mjs tests/shared-window-consumer.test.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -25,6 +26,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
+    "jsdom": "26.1.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"
   }

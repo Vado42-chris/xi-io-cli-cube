@@ -13968,39 +13968,41 @@ function hx(e, t) {
 	}) : Promise.reject(/* @__PURE__ */ Error("The native window connection is unavailable."));
 }
 // ../shared-node/src/components/framework/NativeProductWindowShell.jsx
-function gx({ product: e, isAuthenticated: t = !1, children: n, Frame: r = lx, bindingForCurrent: i = void 0, renderWorkspace: a = void 0, controlsAvailable: o = !0 }) {
-	let [c, u] = h({}), [d, f] = h(null), p = s(async (e, t) => {
+function gx({ product: e, isAuthenticated: t = !1, children: n, Frame: r = lx, bindingForCurrent: i = void 0, renderWorkspace: a = void 0, controlsAvailable: o = !0, ...c }) {
+	let { tabs: u, activeTab: d, onTabChange: f } = c, [p, m] = h({}), [g, _] = h(null), b = s(async (e, t) => {
 		if (!o) return null;
 		try {
 			let n = await hx(e, t);
-			return n.closed || u(n), f(null), n;
+			return n.closed || m(n), _(null), n;
 		} catch {
-			return f("The window controls could not reach the desktop. Alt+F4 can still close this window."), null;
+			return _("The window controls could not reach the desktop. Alt+F4 can still close this window."), null;
 		}
 	}, [o]);
 	l(() => {
 		if (!o) return;
 		let e = () => {
-			p("state");
+			b("state");
 		};
 		return e(), addEventListener("resize", e), addEventListener("focus", e), () => {
 			removeEventListener("resize", e), removeEventListener("focus", e);
 		};
-	}, [p, o]);
-	let m = (a = null, s = null, l = null) => {
-		let u = a ? i(a) : {
+	}, [b, o]);
+	let x = (a = null, s = null, c = null) => {
+		let l = a ? i(a) : {
 			title: e.title,
 			theme: e.theme,
-			windowId: `window:native:${e.id}`
+			windowId: `window:native:${e.id}`,
+			tabs: u,
+			activeTab: d
 		}, m = s ? /* @__PURE__ */ y("div", {
 			role: "alert",
 			className: "p-4 text-sm",
 			children: [
 				s,
 				" ",
-				l && /* @__PURE__ */ v("button", {
+				c && /* @__PURE__ */ v("button", {
 					type: "button",
-					onClick: l,
+					onClick: c,
 					children: "Retry"
 				})
 			]
@@ -14010,7 +14012,7 @@ function gx({ product: e, isAuthenticated: t = !1, children: n, Frame: r = lx, b
 			children: "Reading this product…"
 		}) : n;
 		return /* @__PURE__ */ v(r, {
-			...u,
+			...l,
 			toolRuntime: a ? void 0 : cx,
 			toolsEnabled: !!a,
 			isActive: !0,
@@ -14024,22 +14026,22 @@ function gx({ product: e, isAuthenticated: t = !1, children: n, Frame: r = lx, b
 				height: innerHeight
 			},
 			nativeWindow: {
-				state: c,
-				perform: p,
+				state: p,
+				perform: b,
 				available: o
 			},
-			onTabChange: a?.onTabChange,
-			onClose: () => p("close"),
-			onMinimize: () => p("minimize"),
-			onPin: a ? () => f("Pinning is unavailable until the native desktop save connection is verified. This window will stay open.") : void 0,
+			onTabChange: a ? a.onTabChange : f,
+			onClose: () => b("close"),
+			onMinimize: () => b("minimize"),
+			onPin: a ? () => _("Pinning is unavailable until the native desktop save connection is verified. This window will stay open.") : void 0,
 			children: /* @__PURE__ */ y("div", {
 				className: "flex h-full min-h-0 flex-col",
 				"data-native-product": e.id,
-				"data-chroma-key": u.theme,
-				children: [d && /* @__PURE__ */ v("p", {
+				"data-chroma-key": l.theme,
+				children: [g && /* @__PURE__ */ v("p", {
 					role: "alert",
 					className: "px-4 py-2 text-xs",
-					children: d
+					children: g
 				}), /* @__PURE__ */ v("div", {
 					className: "relative min-h-0 flex-1 overflow-auto [&>.fixed]:absolute",
 					children: m
@@ -14049,7 +14051,7 @@ function gx({ product: e, isAuthenticated: t = !1, children: n, Frame: r = lx, b
 	};
 	return /* @__PURE__ */ v("div", {
 		className: "dark relative h-dvh min-h-0 overflow-hidden bg-background text-foreground",
-		children: /* @__PURE__ */ v(fx, { children: t ? a(m) : m() })
+		children: /* @__PURE__ */ v(fx, { children: t ? a(x) : x() })
 	});
 }
 // ../shared-node/src/lib/themeModeStore.js
