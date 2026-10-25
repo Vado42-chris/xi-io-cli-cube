@@ -2122,6 +2122,33 @@ export default function App() {
             </div>
           )}
 
+          <footer
+            aria-label="About the maker"
+            className={`border-t px-6 py-6 sm:px-8 space-y-4 text-sm ${isLight ? 'border-slate-200 bg-white text-slate-600' : 'border-slate-800 bg-slate-950/50 text-slate-400'}`}
+          >
+            <p className="max-w-2xl leading-relaxed">
+              I’m one disabled UX designer trying to make the world a little better, one useful tool at a time. I’m building software for people who need it, especially when another subscription is one too many.
+            </p>
+            <div className="space-y-2">
+              <p>If you like what I’m building, have a look around:</p>
+              <nav aria-label="Explore my other sites">
+                <ul className="flex flex-wrap gap-2">
+                  {['xi-io.ca', 'xi-io.com', 'xi-io.org', 'xi-io.net', 'xi-io.io', 'x42s.com'].map((site) => (
+                    <li key={site}>
+                      <a
+                        href={`https://${site}`}
+                        className={`inline-flex min-h-[44px] items-center rounded-lg px-3 py-2 font-medium underline decoration-transparent underline-offset-4 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 ${isLight ? 'text-amber-700 focus-visible:ring-offset-white' : 'text-amber-300 focus-visible:ring-offset-slate-950'}`}
+                      >
+                        {site}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            </div>
+            <p className="text-xs">More to come. There’s always another idea.</p>
+          </footer>
+
         </div>
       </div>
     </div>
