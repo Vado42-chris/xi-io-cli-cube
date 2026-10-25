@@ -18,7 +18,7 @@ test('rollback history: malformed, primitive, unexpected schema, missing fields 
   for (const field of Object.keys(receipt())) {const value=receipt();delete value[field];assert.throws(()=>parse(value),field);}
 });
 test('rollback history: contract bounds reject old Node, invalid timestamp, identity mismatch, oversized bytes',()=>{
-  for (const change of [{node:'20.1.0'},{installed_at:'2026-02-30T16:05:00.000Z'},{generation:'aaaaaaaaaaaa-20261025T160500Z'},{models_installed:1},{repo:'not-a-repo'}]) assert.throws(()=>parse({...receipt(),...change}));
+  for (const change of [{node:'20.1.0'},{installed_at:'2026-02-30T16:05:00.000Z'},{generation:'../../outside'},{models_installed:1},{repo:'not-a-repo'}]) assert.throws(()=>parse({...receipt(),...change}));
   assert.throws(()=>parseInstallReceipt(' '.repeat(MAX_RECEIPT_BYTES+1)));
 });
 test('rollback history: exact duplicates collapse; conflicting source/hash/metadata records are retained and flagged',()=>{
@@ -51,13 +51,14 @@ test('rollback history: mixed selections preserve valid rows and visibly report 
 test('rollback history: untrusted text stays text; diagnostics integration is read-only owner-selected input',()=>{
   const value=parse({...receipt(),ref:'<img src=x onerror=alert(1)>'});assert.equal(value.ref,'<img src=x onerror=alert(1)>');
   const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
-  const ui=readFileSync(new URL('../src/RollbackHistory.tsx',import.meta.url),'utf8');
+  const ui=readFileSync(new URL('../src/components/RollbackHistory.tsx',import.meta.url),'utf8');
   const parser=readFileSync(new URL('../src/rollback-history.mjs',import.meta.url),'utf8');
-  assert.match(app,/import RollbackHistory from '\.\/RollbackHistory'/);
-  assert.match(app,/activeView === 'status-dashboard'[\s\S]*?aria-label="System Diagnostics">\s*<RollbackHistory \/>/);
-  assert.match(ui,/type="file"[^>]*multiple[^>]*onChange=\{selectReceipts\}/);
-  assert.match(ui,/\{row\.receipt\.ref\}/);assert.match(ui,/RECORDED \/ UNVERIFIED/);
-  assert.match(ui,/current and previous as separate plaintext pointers/);
+  assert.match(app,/import RollbackHistory from '\.\/components\/RollbackHistory'/);
+  assert.match(app,/activeView === 'status-dashboard'[\s\S]*?aria-label="System Diagnostics">[\s\S]*?<RollbackHistory \/>/);
+  assert.match(ui,/type="file" multiple/);
+  assert.match(ui,/onChange=\{e=>void inspect\(e.currentTarget.files\)\}/);
+  assert.match(ui,/\{row\.sourceSha/);assert.match(ui,/Not independently verified/);
+  assert.match(ui,/plain-text/);
   assert.doesNotMatch(ui+parser,/dangerouslySetInnerHTML|innerHTML|\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\b|localStorage|showDirectoryPicker|writeFile|child_process/);
   assert.doesNotMatch(ui,/<button/);
 });

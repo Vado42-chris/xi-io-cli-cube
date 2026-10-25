@@ -12,7 +12,8 @@ export function parseInstallReceipt(source) {
     if (!text(value[field])) throw new Error(`Missing or invalid ${field}`);
   }
   if (!/^[0-9a-f]{40}$/.test(value.source_sha)) throw new Error('source_sha must be a 40-character commit SHA');
-  if (!/^[0-9a-f]{12}-\d{8}T\d{6}Z(?:-[A-Za-z0-9]{6})?$/.test(value.generation) || !value.generation.startsWith(value.source_sha.slice(0, 12) + '-')) throw new Error('generation does not match the recorded source SHA format');
+  // Generation is a bounded opaque basename, never interpreted as a path or authority.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,150}$/.test(value.generation)) throw new Error('generation must be a bounded basename');
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.installed_at) || !Number.isFinite(Date.parse(value.installed_at)) || new Date(value.installed_at).toISOString() !== value.installed_at) throw new Error('installed_at must be a valid installer UTC timestamp');
   if (!/^[\w.-]+\/[\w.-]+$/.test(value.repo)) throw new Error('repo must be owner/name');
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(value.node) || Number(value.node.split('.')[0]) < 22) throw new Error('Pinned installer requires Node 22 or newer');

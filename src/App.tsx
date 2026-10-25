@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import RollbackHistory from './RollbackHistory';
 import { validateCasReceipt } from './cas-receipt.mjs';
 import React, { useState, useEffect, useRef } from 'react';
+import RollbackHistory from './components/RollbackHistory';
 import { 
   Check, 
   Copy, 
@@ -745,7 +745,6 @@ export default function App() {
         {/* TAB 3: SYSTEM DIAGNOSTICS & QUALIFICATION GATES */}
         {activeView === 'status-dashboard' && (
           <section className="space-y-8 mb-10" aria-label="System Diagnostics">
-            <RollbackHistory />
             
             {/* Section 0: The 5-Point Minimum Acceptance Standard */}
             <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
@@ -920,6 +919,9 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {/* Read-only CLI receipt history: no installed-host access or automatic probes. */}
+            <RollbackHistory />
 
             {/* Section 3: Installer Preflight Invariants */}
             <div className="pt-4 border-t border-slate-800/80">

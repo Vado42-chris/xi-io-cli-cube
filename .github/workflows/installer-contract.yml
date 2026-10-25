@@ -27,4 +27,4 @@ jobs:
       - name: Audit actual page and release configuration
         run: node scripts/verify-installer-contract.mjs
       - name: Check Cube continuation UI and receipt regressions
-        run: node --test tests/cube-continuation.test.mjs tests/rollback-history.test.mjs
+        run: node --test tests/cube-continuation.test.mjs tests/rollback-history.test.mjs test/rollback-history.test.mjs
