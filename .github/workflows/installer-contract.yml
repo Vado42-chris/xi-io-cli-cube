@@ -1,4 +1,4 @@
-name: XI-IO CLI Cube static contract
++name: XI-IO CLI Cube static contract
 
 on:
   push:
@@ -26,6 +26,15 @@ jobs:
         run: npm run lint
       - name: Build actual application
         run: npm run build
+      - name: Verify offline bundle boundaries
+        run: |
+          test -f dist/index.html
+          test ! -e dist/server.js
+          if grep -Ein '<(script|link)[^>]+(src|href)="https?://' dist/index.html; then
+            echo "EXTERNAL_SCRIPT_OR_STYLESHEET_NOT_OFFLINE"
+            exit 1
+          fi
+          echo "SOURCE_BUILD_PASS_NOT_HOST_INSTALL"
       - name: Exercise positive and hostile cases, without dependencies
         run: node --test tests/installer-contract.test.mjs
       - name: Exercise Agent 3's pinned-command and current-source contract
@@ -34,3 +43,5 @@ jobs:
         run: node scripts/verify-installer-contract.mjs
       - name: Check Cube continuation UI and receipt regressions
         run: node --test tests/cube-continuation.test.mjs tests/rollback-history.test.mjs test/rollback-history.test.mjs
+      - name: Run labeled illustrative filesystem simulations (not installation acceptance)
+        run: node --test tests/installation-journey.test.mjs

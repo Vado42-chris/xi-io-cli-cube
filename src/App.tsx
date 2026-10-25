@@ -752,10 +752,10 @@ export default function App() {
                 <div>
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
                     <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                    5-Point Minimum Acceptance Contract (Cross-Lane Standard)
+                    5-Point Minimum Acceptance Contract (Remote Host Operations Only)
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Mandatory sequencing for host integration. Governed by <code className="font-mono text-amber-300">docs/CROSS-LANE-INTEGRATION-DIRECTIVE.md</code>
+                    Governs remote operations only. Does not block already-authorized local editor work on Linux. Governed by <code className="font-mono text-amber-300">docs/CROSS-LANE-INTEGRATION-DIRECTIVE.md</code>
                   </p>
                 </div>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-300">
@@ -768,7 +768,7 @@ export default function App() {
                   <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-emerald-400 font-mono text-xs font-bold shrink-0 mt-0.5">1</span>
                   <div>
                     <span className="font-semibold text-slate-200">Host Self-Identity:</span>
-                    <span className="text-slate-400 ml-1.5">Each host proves its own identity cryptographically using host private keys. A client cannot choose another host&apos;s identity or self-grant capabilities.</span>
+                    <span className="text-slate-400 ml-1.5">Consumes the existing Ward/session identity contract. A client cannot choose another host&apos;s identity or self-grant capabilities.</span>
                   </div>
                 </div>
 
@@ -800,7 +800,7 @@ export default function App() {
                   <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-emerald-400 font-mono text-xs font-bold shrink-0 mt-0.5">5</span>
                   <div>
                     <span className="font-semibold text-slate-200">Scoped Editor Actions &amp; CAS:</span>
-                    <span className="text-slate-400 ml-1.5">Only then enable scoped editor mutations, with human approval bound to the exact project/diff and CAS protection against stale writes (REFUSED_STALE_VERSION HTTP 409).</span>
+                    <span className="text-slate-400 ml-1.5">Local CLI edit safety requires whole-file pre-commit check (exit code 3); distributed storage requires BINS ResourceVersion CAS (REFUSED_STALE_VERSION HTTP 409).</span>
                   </div>
                 </div>
               </div>
@@ -951,6 +951,7 @@ export default function App() {
                 ))}
               </div>
             </div>
+
 
           </section>
         )}
