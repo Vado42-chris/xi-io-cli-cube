@@ -1,0 +1,18 @@
+{
+  "accepted_owner_lock": "xi-io-node@053b4da87b644846adf4b15fe04d7986c0b0f51d/package-lock.json",
+  "subset_package_count": 178,
+  "sha256": "31195574ff1da30b49c6c6104ac5aedef21110d43175735cd273fd8122c7b00d",
+  "direct_versions": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "framer-motion": "11.16.4",
+    "lucide-react": "0.475.0",
+    "@radix-ui/react-context-menu": "2.2.16",
+    "clsx": "2.1.1",
+    "tailwind-merge": "3.3.1",
+    "tailwindcss": "3.4.17",
+    "postcss": "8.5.6",
+    "autoprefixer": "10.4.21",
+    "tailwindcss-animate": "1.0.7"
+  }
+}

@@ -1,5 +1,6 @@
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
-import './index.css';
+import SharedProductHost from './SharedProductHost';
+import './shared/window-frame.css';
+import './shared/frame-theme.css';
 
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(<SharedProductHost />);

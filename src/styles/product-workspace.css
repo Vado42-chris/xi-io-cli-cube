@@ -1,0 +1,78 @@
+/* Current closest .ca visual baseline: framework 50d7368, ca-site.css.
+ * Functional product adaptation, not its marketing layout or product accent.
+ * Canonical shared tablet chrome remains outside this contained product CSS. */
+@theme inline {
+  --color-workspace-canvas: var(--workspace-canvas);
+  --color-workspace-surface: var(--workspace-surface);
+  --color-workspace-text: var(--workspace-text);
+  --color-workspace-muted: var(--workspace-muted);
+  --color-workspace-border: var(--workspace-border);
+  --color-workspace-border-strong: var(--workspace-border-strong);
+  --color-workspace-focus: var(--workspace-focus);
+  --color-workspace-inverse: var(--workspace-inverse);
+  --color-workspace-success: var(--workspace-success);
+  --color-workspace-danger: var(--workspace-danger);
+}
+[data-hex-workspace] {
+  --workspace-canvas: #050505;
+  --workspace-surface: rgba(12,12,13,.82);
+  --workspace-text: #f4f4f2;
+  --workspace-muted: #a7a7a3;
+  --workspace-border: rgba(255,255,255,.12);
+  --workspace-border-strong: rgba(255,255,255,.23);
+  --workspace-focus: #fff;
+  --workspace-inverse: #050505;
+  --workspace-success: hsl(128 4% 49%);
+  --workspace-danger: hsl(2 58% 58%);
+  color-scheme: dark;
+  font-family: Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  position: relative;
+  isolation: isolate;
+}
+/* Existing Node light reading values, not a second appearance preference. */
+[data-hex-workspace][data-product-theme="light"] {
+  --workspace-canvas: hsl(25 16% 100%);
+  --workspace-surface: hsl(25 16% 100% / .92);
+  --workspace-text: hsl(25 16% 3.9%);
+  --workspace-muted: hsl(25 16% 45.1%);
+  --workspace-border: hsl(25 16% 89.8%);
+  --workspace-border-strong: hsl(25 16% 45.1%);
+  --workspace-focus: hsl(25 16% 9%);
+  --workspace-inverse: hsl(25 16% 98%);
+  --workspace-success: hsl(128 8% 34%);
+  --workspace-danger: hsl(2 62% 42%);
+  color-scheme: light;
+}
+[data-hex-workspace] :where(button,input,select,textarea,[role="button"]):focus-visible {
+  outline: 2px solid var(--workspace-focus);
+  outline-offset: 3px;
+}
+[data-hex-workspace] :where(input,select,textarea) { accent-color: var(--workspace-focus); }
+[data-hex-workspace] :where(.bg-workspace-surface) { backdrop-filter: blur(14px); }
+[data-hex-workspace] .hex-workspace-heading { border: 0; background: transparent; }
+[data-hex-workspace] .hex-workspace-heading h1 { letter-spacing: -.035em; line-height: 1.15; }
+@media (prefers-reduced-motion: reduce) {
+  [data-hex-workspace] *, [data-hex-workspace] *::before, [data-hex-workspace] *::after {
+    animation: none !important; transition: none !important; scroll-behavior: auto !important;
+  }
+}
+
+/* Existing .ca plate, atmosphere and shadow layers, inside this product only. */
+.ca-brand-field { position: sticky; top: 0; height: 100dvh; margin-bottom: -100dvh;
+  z-index: -1; pointer-events: none; overflow: hidden; background: var(--workspace-canvas); }
+.ca-brand-plate { position: absolute; inset: -8%;
+  background-image: var(--workspace-plate-image); background-repeat: no-repeat;
+  background-position: 50% 46%; background-size: max(1500px,120vw) auto;
+  filter: grayscale(100%) brightness(.33) contrast(1.08); opacity: .72;
+  transform: translate3d(var(--ca-plate-x,0px),calc(var(--ca-plate-y,0px) + var(--ca-plate-scroll,0px)),0) scale(1.06);
+  transition: transform 80ms linear; will-change: transform; }
+.ca-atmosphere { position: absolute; inset: 0; opacity: .38;
+  background-image: radial-gradient(circle at 20% 20%,color-mix(in srgb,var(--workspace-focus) 18%,transparent) 0 1px,transparent 2px),radial-gradient(circle at 78% 35%,rgba(255,255,255,.12) 0 1px,transparent 2px);
+  background-size: 190px 190px,260px 260px; animation: ca-drift 22s ease-in-out infinite alternate; }
+.ca-vignette { position: absolute; inset: 0; background: rgba(5,5,5,.42);
+  box-shadow: inset 0 0 180px 60px rgba(0,0,0,.72); }
+@keyframes ca-drift { from {transform:translate3d(-10px,4px,0);opacity:.3} to {transform:translate3d(14px,-10px,0);opacity:.48} }
+[data-hex-workspace][data-product-theme="light"] .ca-brand-plate { opacity: .08; }
+[data-hex-workspace][data-product-theme="light"] .ca-vignette { background: hsl(25 16% 100% / .85); box-shadow: none; }
+@media (max-width:700px) { .ca-brand-plate {background-size:auto 118vh;background-position:48% 48%;} }
+@media (prefers-reduced-motion:reduce) { .ca-brand-plate {transform:none!important;transition:none!important} .ca-atmosphere {animation:none!important} }

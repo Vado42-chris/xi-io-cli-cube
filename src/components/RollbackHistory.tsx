@@ -54,60 +54,60 @@ export default function RollbackHistory(){
 
   return (
     <section aria-labelledby="rollback-history-title"
-      className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      className="rounded-none border border-workspace-border bg-workspace-surface/70 p-5">
       <div className="flex items-start gap-3">
-        <FileClock className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden="true"/>
+        <FileClock className="mt-0.5 h-5 w-5 shrink-0 text-workspace-focus" aria-hidden="true"/>
         <div className="min-w-0">
-          <h3 id="rollback-history-title" className="text-base font-semibold text-white">
+          <h3 id="rollback-history-title" className="text-base font-semibold text-workspace-text">
             Rollback History
           </h3>
-          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+          <p className="mt-1 text-xs leading-relaxed text-workspace-muted">
             Inspect previously recorded CLI generations without executing commands or contacting a server.
-            The V1 installer writes <code className="text-amber-300">versions/&lt;generation&gt;/install-receipt.json</code>
-            and plain-text <code className="text-amber-300">current</code> / <code className="text-amber-300">previous</code> pointers.
+            The V1 installer writes <code className="text-workspace-focus">versions/&lt;generation&gt;/install-receipt.json</code>
+            and plain-text <code className="text-workspace-focus">current</code> / <code className="text-workspace-focus">previous</code> pointers.
             Select those files, or choose the installation folder if supported (32 relevant files maximum, 64 KiB each).
           </p>
         </div>
       </div>
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start">
-        <label className="flex-1 text-xs text-slate-300" htmlFor="rollback-files">
+        <label className="flex-1 text-xs text-workspace-text" htmlFor="rollback-files">
           Select receipt or pointer files
           <input id="rollback-files" type="file" multiple
             aria-label="Select CLI install-receipt.json and current or previous files"
             onChange={e=>void inspect(e.currentTarget.files)}
-            className="mt-1.5 block w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-xs text-slate-300
-              file:mr-3 file:rounded-md file:border-0 file:bg-slate-700 file:px-3 file:py-1.5
-              file:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400"/>
+            className="mt-1.5 block w-full rounded-none border border-workspace-border-strong bg-workspace-canvas p-2 text-xs text-workspace-text
+              file:mr-3 file:rounded-none file:border-0 file:bg-workspace-surface file:px-3 file:py-1.5
+              file:text-workspace-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-workspace-focus"/>
         </label>
-        <label className="flex-1 text-xs text-slate-300" htmlFor="rollback-folder">
+        <label className="flex-1 text-xs text-workspace-text" htmlFor="rollback-folder">
           Select CLI install folder (supported browsers)
-          <span className="mt-1.5 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 p-2">
-            <FolderOpen className="h-4 w-4 shrink-0 text-amber-400" aria-hidden="true"/>
+          <span className="mt-1.5 flex items-center gap-2 rounded-none border border-workspace-border-strong bg-workspace-canvas p-2">
+            <FolderOpen className="h-4 w-4 shrink-0 text-workspace-focus" aria-hidden="true"/>
             <input ref={folderRef} id="rollback-folder" type="file" multiple
               aria-label="Select a CLI installation folder for read-only rollback history"
               onChange={e=>void inspect(e.currentTarget.files)}
-              className="min-w-0 w-full text-xs text-slate-300
-                file:mr-3 file:rounded-md file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-slate-100
-                focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400"/>
+              className="min-w-0 w-full text-xs text-workspace-text
+                file:mr-3 file:rounded-none file:border-0 file:bg-workspace-surface file:px-3 file:py-1.5 file:text-workspace-text
+                focus-visible:outline focus-visible:outline-2 focus-visible:outline-workspace-focus"/>
           </span>
         </label>
       </div>
 
       <div aria-live="polite" className="mt-4 space-y-2 text-xs">
         {!selected
-          ? <p className="rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-slate-400">
+          ? <p className="rounded-none border border-workspace-border bg-workspace-canvas/70 p-3 text-workspace-muted">
               No local rollback metadata selected. No versions are assumed to be installed or qualified.
             </p>
           : busy
-            ? <p className="text-slate-400">Reading selected metadata locally…</p>
+            ? <p className="text-workspace-muted">Reading selected metadata locally…</p>
             : <>
-                <p className="text-slate-400">
-                  Metadata: <strong className="text-slate-200">{history.state}</strong>.
+                <p className="text-workspace-muted">
+                  Metadata: <strong className="text-workspace-text">{history.state}</strong>.
                   {' '}Recorded generations: {history.records.length}.
                   {' '}No binary or BINS content was independently read back.
                 </p>
                 {history.issues.length>0&&(
-                  <div role="status" className="rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-amber-200">
+                  <div role="status" className="rounded-none border border-workspace-border-strong bg-workspace-surface/30 p-3 text-workspace-focus">
                     <div className="flex gap-2"><AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true"/>
                       Some metadata could not be trusted:
                     </div>
@@ -115,40 +115,40 @@ export default function RollbackHistory(){
                   </div>
                 )}
                 {history.records.length===0&&(
-                  <p className="rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-slate-400">
+                  <p className="rounded-none border border-workspace-border bg-workspace-canvas/70 p-3 text-workspace-muted">
                     No recognized CLI install receipts found. This does not prove an installation is absent.
                   </p>
                 )}
                 {history.records.map((row,index)=>(
                   <article key={(row.generation||'unknown')+'-'+index}
-                    className="rounded-lg border border-slate-800 bg-slate-950/80 p-3">
+                    className="rounded-none border border-workspace-border bg-workspace-canvas/80 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="break-all font-mono text-slate-100">
+                      <span className="break-all font-mono text-workspace-text">
                         {row.generation||'Generation not recorded (legacy v1)'}
                       </span>
-                      <span className="rounded border border-slate-700 px-2 py-0.5 font-mono text-slate-300">
+                      <span className="rounded border border-workspace-border-strong px-2 py-0.5 font-mono text-workspace-text">
                         {row.pointerState==='PREVIOUS_POINTER'?'Previous pointer (metadata)'
                           :row.pointerState==='CURRENT_POINTER'?'Current pointer (metadata)'
                           :'Pointer state unknown'}
                       </span>
                     </div>
-                    {row.conflict&&<p className="mt-2 text-rose-300">POTENTIAL CONFLICT: differing records for the same reported scope/generation; none is authoritative.</p>}
-                    <p className="mt-2 break-all text-slate-400">Recorded scope: {row.repo||'unknown repo'} / {row.prefix||'unknown prefix'} / {row.platform||'unknown platform'}. Host identity not supplied.</p>
+                    {row.conflict&&<p className="mt-2 text-workspace-danger">POTENTIAL CONFLICT: differing records for the same reported scope/generation; none is authoritative.</p>}
+                    <p className="mt-2 break-all text-workspace-muted">Recorded scope: {row.repo||'unknown repo'} / {row.prefix||'unknown prefix'} / {row.platform||'unknown platform'}. Host identity not supplied.</p>
                     <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-                      <div><dt className="text-slate-500">Source commit (Git SHA-1)</dt>
-                        <dd className="break-all font-mono text-slate-300">{row.sourceSha||'UNKNOWN'}</dd></div>
-                      <div><dt className="text-slate-500">Recorded CLI entry bytes (SHA-256)</dt>
-                        <dd className="break-all font-mono text-slate-300">{row.cliFileSha256||'NOT RECORDED'}</dd></div>
-                      <div><dt className="text-slate-500">Recorded installation time</dt>
-                        <dd className="text-slate-300">{row.installedAt||'UNKNOWN'}</dd></div>
-                      <div><dt className="text-slate-500">Qualification</dt>
-                        <dd className="text-amber-300">Not independently verified</dd></div>
+                      <div><dt className="text-workspace-muted">Source commit (Git SHA-1)</dt>
+                        <dd className="break-all font-mono text-workspace-text">{row.sourceSha||'UNKNOWN'}</dd></div>
+                      <div><dt className="text-workspace-muted">Recorded CLI entry bytes (SHA-256)</dt>
+                        <dd className="break-all font-mono text-workspace-text">{row.cliFileSha256||'NOT RECORDED'}</dd></div>
+                      <div><dt className="text-workspace-muted">Recorded installation time</dt>
+                        <dd className="text-workspace-text">{row.installedAt||'UNKNOWN'}</dd></div>
+                      <div><dt className="text-workspace-muted">Qualification</dt>
+                        <dd className="text-workspace-focus">Not independently verified</dd></div>
                     </dl>
                   </article>
                 ))}
               </>
         }
-        <p className="text-slate-500">
+        <p className="text-workspace-muted">
           Privacy: selected files are parsed in this browser only; no upload, token read, network call,
           execution, installation or rollback occurs. Selection order is not rollback order. Receipts can precede failed install checks; pointers are unverified metadata, not current runtime proof. Recorded SHA-256 is not proof that a binary
           on disk still matches it. Node executable hashes are not recorded by these CLI receipts.

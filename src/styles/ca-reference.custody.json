@@ -1,0 +1,29 @@
+{
+  "repository": "Vado42-chris/xi-io.net",
+  "ref": "50d7368f0ca3d148bb4d55971fbd447cdb6eaceb",
+  "path": "apps/public-site/src/styles/ca-site.css",
+  "git_blob": "3ffb0b5ddb7d50deb38e5dbf6630a14c66212610",
+  "sha256": "019aef1c6f729cea1baf56d8ed7f4b010214100830089f0a086a51662c3067f7",
+  "use": "Current closest family visual baseline, not final design. Neutral materials, typography, borders and square functional modules; marketing layout and ca-specific accent are not adopted as HEX identity.",
+  "frame_owner": "Canonical Node shared tablet; not restyled by this product CSS.",
+  "light_reading_source": "Node053b4da src/index.css existing light theme values; common tablet chrome remains canonical dark.",
+  "font_status": "Inter preferred; existing local/system fallback when no local Inter is installed. No remote font dependency added.",
+  "asset": {
+    "repository": "Vado42-chris/xi-io-node",
+    "commit": "9be59f0ec3a259e081cee1bb4942aa3ee6a53285",
+    "path": "public/brand/7d133412d_blue-bg.png",
+    "git_blob": "0dab949092b553360bf5884674686569d38b43de",
+    "sha256": "0cdfc4c4674c60856fdcf316b8d0ea82d54ae7b72ab6d7aa0a70aee0da9d1733",
+    "bytes": 1107994,
+    "consumer_path": "src/assets/brand/7d133412d_blue-bg.png",
+    "treatment": "Exact PNG; existing .ca plate filter/opacity, pointer and scroll parallax, atmosphere and vignette/shadow layers adapted to product-local React lifecycle. Reduced-motion and cleanup preserved. No provider runtime or replacement artwork. Light reading uses existing Node values."
+  },
+  "behavior_reference": {
+    "path": "apps/public-site/src/layouts/CaSiteLayout.astro",
+    "git_blob": "09deef06cc995e6072958d97f4856d007160365a",
+    "sha256": "324e6e39f56c5b125919863139f9205874d4d3dbf68d0db46bc5d7ca3eec9090",
+    "scope": "Pointer/scroll variables are product-local, never document-global; same smoothing/travel/scroll coefficients. Neutral focus atmosphere does not assign ca red as HEX Chroma.",
+    "consumer_adapter": "src/components/TabletBackdrop.tsx",
+    "reuse": "Existing .ca layers and motion adapted into a reusable tablet-content slot. Default in this consumer; canonical Node/default-all-products adoption not yet published or runtime verified."
+  }
+}
