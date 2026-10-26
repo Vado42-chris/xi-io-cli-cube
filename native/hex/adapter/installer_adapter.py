@@ -142,9 +142,9 @@ def installed(p, expected_sha=None, expected_generation=None):
 
 # Exact upstream PR15 launcher-only path, packaged beside (not replacing) the
 # offline transport adaptation. These hashes are authority, not mutable metadata.
-REPAIR_REF='b56adb5cbf34bcd9102f46df297aa42395ef41eb'
+REPAIR_REF='0f2b444abbe8f7a99c5f4520b1222c568eba6dd1'
 REPAIR_INSTALLER='launcher-repair.install.mjs'
-REPAIR_SHA256='118a7df1e952602aaf9b9c93d4e8aae62c527f15150463e8b2cb0645da3ab137'
+REPAIR_SHA256='61fd09c0d0de09fb2b3aec4e94b34d013cd35ddc60eb44f86443a5d2b5812a4d'
 REPAIR_VERIFY_SHA256='de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912'
 
 def repair_source():
@@ -256,17 +256,44 @@ def repair_readback(p,expected_launcher_sha):
     demand(all(launcher[k]==p['launcher_before'][k] for k in ['mode','uid','gid']),'REPAIRED_LAUNCHER_METADATA_CHANGED')
     demand(digest(file_bytes(Path(p['backup'])))==p['original_launcher_sha256'],'ORIGINAL_LAUNCHER_BACKUP_CHANGED')
     actual=json.loads(run([p['launcher'],'version'],30))
-    demand(actual.get('state')=='PASS' and actual.get('integrity_verified') is True and actual.get('generation')==history['current'],'ACTUAL_LAUNCHER_VERSION_NOT_VERIFIED')
+    receipt=history['receipts']['current']
+    legacy=receipt['source_sha'] in {'385c85d53f99ac2f9e6c4fecb6d3c76ee772590d','16d0fb4101d0674f8bd57858ac04d7fabf02aed2'}
+    if legacy:
+        want={'schema':'xiio.cli.version/v1','product':'xi-io: CLI','source_sha':receipt['source_sha'],'ref':receipt['ref'],'generation':history['current'],'current':history['current'],'previous':history['previous'],'platform':sys.platform,'running_file_sha256':receipt['files']['src/xiio.mjs'],'receipt_file_sha256':receipt['files']['src/xiio.mjs']}
+        version_verified=all(actual.get(k)==v for k,v in want.items()) and 'state' not in actual and 'integrity_verified' not in actual
+    else:
+        version_verified=actual.get('state')=='PASS' and actual.get('integrity_verified') is True and actual.get('generation')==history['current']
+    demand(version_verified,'ACTUAL_LAUNCHER_VERSION_NOT_VERIFIED')
     demand(actual.get('source_sha')==history['receipts']['current']['source_sha'],'ACTUAL_LAUNCHER_SOURCE_MISMATCH')
     demand(repair_snapshot(p)==p['preservation_before'] and repair_launcher(Path(p['launcher']))==launcher,'REPAIR_READBACK_CONCURRENT_CHANGE')
     return {'generation':history['current'],'previous':history['previous'],'source_sha':actual['source_sha'],'launcher':p['launcher'],'launcher_sha256':launcher['sha256'],'version_readback':actual,'history_unchanged':True,'actual_launcher_version_verified':True,'doctor_and_local_read_verified':False,'full_cli_acceptance':False}
+
+def repair_uncertain_observation(base,p,view):
+    # Diagnostics only. Never execute the launcher, resolve an intent, amend a
+    # journal, or promote an uncertain operation on the strength of file presence.
+    observed={'effects_authorized':False,'recovery_performed':False,'errors':[]}
+    def check(name,fn):
+        try: observed[name]=fn()
+        except Exception as e: observed['errors'].append({'check':name,'error':str(e)[:512]})
+    check('launcher',lambda:repair_launcher(Path(p['launcher'])))
+    live=observed.get('launcher',{}).get('sha256')
+    observed['launcher_bytes']='ORIGINAL' if live==p['original_launcher_sha256'] else ('EXPECTED_REPAIR' if live==p['expected_launcher_sha256'] else ('DIFFERENT' if live else 'UNOBSERVED'))
+    check('backup_matches_original',lambda:digest(file_bytes(Path(p['backup'])))==p['original_launcher_sha256'])
+    check('generation_history_bytes_unchanged',lambda:repair_snapshot(p)==p['preservation_before'])
+    check('node_bytes_unchanged',lambda:digest(file_bytes(Path(p['node']['path'])))==p['node']['sha256'])
+    check('repair_source_unchanged',lambda:repair_source()==p['repair_source'])
+    check('canonical_artifacts',lambda:sorted(x.name for x in Path(p['launcher']).parent.glob(Path(p['launcher']).name+'.repair-*'))[:64])
+    op=observation(base,p,'apply_repair')
+    observed['recorded_outcome']=op['final_state'] if op else None
+    observed['recorded_failure']=(op['events'][-1].get('details',{}).get('failure') if op else None)
+    return {**view,'uncertain_observation':observed,'observation_current':False,'full_cli_acceptance':False,'do_not_retry':True,'recovery_required':True}
 
 def handle_repair(req,base,p):
     act=req['action'];view=repair_project(base,p)
     if act=='inspect':return view
     if act=='readback':
         if view['phase']=='PREPARED_REPAIR_NOT_APPLIED':return view
-        demand(not view['do_not_retry'],'INCOMPLETE_REPAIR_REQUIRES_CANONICAL_RECOVERY_NO_RETRY')
+        if view['do_not_retry']:return repair_uncertain_observation(base,p,view)
         op=observation(base,p,'apply_repair')
         rb=repair_readback(p,op['events'][-1]['details'].get('launcher_sha256'))
         return {**view,'readback':rb,'observation_current':True}
@@ -296,8 +323,8 @@ def handle_repair(req,base,p):
         rb=repair_readback(p,result.get('launcher_sha256'))
         journal.finish('passed','Actual launcher version verified; complete prefix history preserved',expected_action='apply_repair',details={'approval_digest':p['approval_digest'],'launcher_sha256':rb['launcher_sha256'],'preservation_digest':p['preservation_digest'],'generation':rb['generation'],'repair_source_sha256':REPAIR_SHA256})
         return {**repair_project(base,p),'readback':rb,'observation_current':True}
-    except Exception:
-        try:journal.finish('unknown','Launcher repair execution or readback uncertain; canonical recovery requires review',expected_action='apply_repair',details={'approval_digest':p['approval_digest'],'repair_source_sha256':REPAIR_SHA256})
+    except Exception as error:
+        try:journal.finish('unknown','Launcher repair execution or readback uncertain; canonical recovery requires review',expected_action='apply_repair',details={'approval_digest':p['approval_digest'],'repair_source_sha256':REPAIR_SHA256,'failure':str(error)[:2048]})
         except Exception:pass
         raise Refused('REPAIR_OUTCOME_UNCERTAIN_CANONICAL_RECOVERY_REQUIRED_DO_NOT_RETRY')
 

@@ -290,7 +290,14 @@ if (process.argv.includes('--repair-launcher')) {
     if(!bytesAt(launcherPath).equals(desired)||!samePair(history(),before))throw Error('LAUNCHER_OR_GENERATION_READBACK_FAILED');
     const check=spawnSync(launcherPath,['version'],{encoding:'utf8',env:controlledChildEnv(),timeout:30000});
     const observed=JSON.parse(check.stdout||'null');
-    if(check.status!==0||observed?.state!=='PASS'||observed.generation!==before.current||observed.integrity_verified!==true)throw Error('ACTUAL_LAUNCHER_CHECK_FAILED');
+    const receipt=verifyGeneration(PREFIX,before.current);
+    // Exact allowlisted legacy payloads report their running-file and receipt
+    // hashes rather than the newer state/integrity_verified fields. Qualify that
+    // actual contract only after independent full-generation verification.
+    const legacy=SUPPORTED_LEGACY_RELEASES[receipt.source_sha];
+    const legacyVersion=Boolean(legacy)&&observed?.schema==='xiio.cli.version/v1'&&observed.product==='xi-io: CLI'&&observed.source_sha===receipt.source_sha&&observed.ref===receipt.ref&&observed.generation===before.current&&observed.current===before.current&&observed.previous===before.previous&&observed.platform===process.platform&&observed.running_file_sha256===legacy['src/xiio.mjs']&&observed.receipt_file_sha256===legacy['src/xiio.mjs']&&observed.state===undefined&&observed.integrity_verified===undefined;
+    const modernVersion=!legacy&&observed?.state==='PASS'&&observed.generation===before.current&&observed.integrity_verified===true;
+    if(check.status!==0||!(legacyVersion||modernVersion))throw Error('ACTUAL_LAUNCHER_CHECK_FAILED');
     if(!bytesAt(launcherPath).equals(desired)||!samePair(history(),before))throw Error('FINAL_REPAIR_READBACK_FAILED');
     transactionOwned();
     if(!bytesAt(backup).equals(oldBytes))throw Error('LAUNCHER_BACKUP_READBACK_FAILED');

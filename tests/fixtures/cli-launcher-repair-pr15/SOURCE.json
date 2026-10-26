@@ -1,7 +1,7 @@
 {
   "schema": "xiio.hex.test-fixture-source/v1",
   "repository": "Vado42-chris/xi-io-cli",
-  "ref": "b56adb5cbf34bcd9102f46df297aa42395ef41eb",
+  "ref": "0f2b444abbe8f7a99c5f4520b1222c568eba6dd1",
   "modified": false,
   "scope": "Test-only upstream two-generation offline fixture, excluded from native resources",
   "files": {
@@ -10,8 +10,8 @@
       "size": 3970
     },
     "install.mjs": {
-      "sha256": "118a7df1e952602aaf9b9c93d4e8aae62c527f15150463e8b2cb0645da3ab137",
-      "size": 36015
+      "sha256": "61fd09c0d0de09fb2b3aec4e94b34d013cd35ddc60eb44f86443a5d2b5812a4d",
+      "size": 36954
     },
     "scripts/reconcile-service-inventory.mjs": {
       "sha256": "eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e",

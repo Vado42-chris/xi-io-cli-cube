@@ -12,7 +12,7 @@ assert hashlib.sha256((FIXTURE_ROOT/'test/launcher_repair_fixture.py').read_byte
 spec=importlib.util.spec_from_file_location('launcher_repair_fixture',FIXTURE_ROOT/'test/launcher_repair_fixture.py')
 fixture_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture_module)
 Fixture=fixture_module.Fixture;NODE=fixture_module.NODE
-SHA='118a7df1e952602aaf9b9c93d4e8aae62c527f15150463e8b2cb0645da3ab137'
+SHA='61fd09c0d0de09fb2b3aec4e94b34d013cd35ddc60eb44f86443a5d2b5812a4d'
 hash_bytes=lambda b:hashlib.sha256(b).hexdigest()
 assert hash_bytes((FIXTURE_ROOT/'install.mjs').read_bytes())==SHA,'Exact independently qualified PR15 fixture required'
 
@@ -68,7 +68,7 @@ class LauncherRepairIntegration(unittest.TestCase):
         self.assertEqual(broken.returncode,127)
         p=self.prepare();self.assert_no_effect()
         self.assertEqual(p['kind'],'launcher_repair');self.assertEqual(p['phase'],'PREPARED_REPAIR_NOT_APPLIED')
-        self.assertEqual(p['repair_source']['ref'],'b56adb5cbf34bcd9102f46df297aa42395ef41eb')
+        self.assertEqual(p['repair_source']['ref'],'0f2b444abbe8f7a99c5f4520b1222c568eba6dd1')
         self.assertTrue(p['preserved_generation']['current']);self.assertTrue(p['preserved_generation']['previous'])
         self.assertEqual(p['original_launcher_sha256'],hash_bytes(self.original))
         r=self.apply(p);self.assertTrue(r['ok'],r);v=r['result']
@@ -161,7 +161,18 @@ class LauncherRepairIntegration(unittest.TestCase):
         self.assertNotEqual(self.launcher.read_bytes(),self.original);self.assertEqual(snapshot(self.f.prefix),self.before)
         view=self.call({'action':'inspect','plan_id':p['plan_id']})['result']
         self.assertEqual(view['phase'],'LAUNCHER_REPAIR_OUTCOME_UNCERTAIN');self.assertTrue(view['do_not_retry']);self.assertEqual(view['recovery']['owner'],'canonical_cli_installer')
-        self.assertFalse(self.apply(p)['ok']);self.assertFalse(self.call({'action':'readback','plan_id':p['plan_id']})['ok'])
+        self.assertFalse(self.apply(p)['ok'])
+        journal_before=self.journal(p).read_bytes(); launcher_before=self.launcher.read_bytes()
+        observation=self.call({'action':'readback','plan_id':p['plan_id']})
+        self.assertTrue(observation['ok'],observation); observed=observation['result']
+        self.assertTrue(observed['do_not_retry']);self.assertTrue(observed['recovery_required'])
+        self.assertFalse(observed['full_cli_acceptance']);self.assertFalse(observed['observation_current'])
+        self.assertEqual(observed['phase'],'LAUNCHER_REPAIR_OUTCOME_UNCERTAIN')
+        self.assertEqual(observed['uncertain_observation']['launcher_bytes'],'EXPECTED_REPAIR')
+        self.assertTrue(observed['uncertain_observation']['generation_history_bytes_unchanged'])
+        self.assertIn('response was lost',observed['uncertain_observation']['recorded_failure'])
+        self.assertEqual(self.journal(p).read_bytes(),journal_before)
+        self.assertEqual(self.launcher.read_bytes(),launcher_before);self.assertEqual(snapshot(self.f.prefix),self.before)
         self.assertFalse(self.call({'action':'prepare_repair','prefix':str(self.f.prefix),'bin_dir':str(self.bin),'node':NODE})['ok'])
 
     def test_corrupt_journal_and_pending_canonical_intent_block_effect(self):
