@@ -86,12 +86,13 @@ hook="$guard"
 # The final action list is checked while APT owns its transaction lock.
 # No global apt configuration is written or cleared.
 sudo apt-get -o DPkg::Lock::Timeout=0 -o Debug::NoLocking=false \
-  -o APT::Get::Assume-Yes=false -o quiet=0 -o DPkg::ConfigurePending=false \
+  -o APT::Get::Assume-Yes=false -o quiet=0 -o DPkg::ConfigurePending=true \
   -o "DPkg::Pre-Install-Pkgs::=$hook" \
   -o "DPkg::Tools::Options::$hook::Version=3" \
   -o "DPkg::Tools::Options::$hook::InfoFD=0" \
   --no-remove install "$deb"
-[[ "$(dpkg-query -W -f='${Version}' xi-io-hex-dev)" == 0.1.0-dev.6 ]]
+package_state="$(dpkg-query -W -f='${Version} ${Status}' xi-io-hex-dev)" || { echo "PACKAGE_STATE_UNREADABLE: installation is not accepted."; exit 1; }
+[[ "$package_state" == '0.1.0-dev.6 install ok installed' ]] || { printf 'PACKAGE_CONFIGURATION_INCOMPLETE: %s\n' "$package_state"; exit 1; }
 echo "HEX DEV6 installed. Open XI-IO HEX DEV from your applications menu."
 echo "Select Install, then Repair only the existing CLI launcher."
 echo "Existing generation root: $HOME/.local/share/xi-io/cli-v1"
