@@ -287,7 +287,10 @@ def handle_repair(req,base,p):
     try:
         # Sole mutation owner. No --ref/--packaged-source, fetch or generation
         # staging path is reachable. The exact installer owns backup and recovery.
-        result=json.loads(run([p['node']['path'],str(SOURCE/REPAIR_INSTALLER),'--repair-launcher','--prefix',p['prefix'],'--bin-dir',p['bin_dir'],'--expect-launcher-sha256',p['original_launcher_sha256']],90))
+        # No adapter deadline may kill this consequential child at a durable
+        # transaction boundary. The carrier bounds response waiting, retains
+        # process custody/gating, and leaves this owner to record the outcome.
+        result=json.loads(run([p['node']['path'],str(SOURCE/REPAIR_INSTALLER),'--repair-launcher','--prefix',p['prefix'],'--bin-dir',p['bin_dir'],'--expect-launcher-sha256',p['original_launcher_sha256']],None))
         demand(result.get('schema')=='xiio.cli.launcher-repair/v1' and result.get('state')=='LAUNCHER_VERSION_VERIFIED' and result.get('history_unchanged') is True and result.get('actual_launcher_version_verified') is True,'CANONICAL_REPAIR_NOT_VERIFIED')
         demand(result.get('generation')==p['preserved_generation']['current'] and result.get('previous')==p['preserved_generation']['previous'] and result.get('previous_launcher_sha256')==p['original_launcher_sha256'] and result.get('backup')==p['backup'],'CANONICAL_REPAIR_RESULT_MISMATCH')
         rb=repair_readback(p,result.get('launcher_sha256'))

@@ -3,7 +3,7 @@ python3 native/hex/adapter/test_launcher_repair.py
 Optional XIIO_REPAIR_FIXTURE_ROOT selects an independently checked exact checkout.
 The fixture helper and source payload are upstream files, not a fake repair.
 """
-import hashlib, importlib.util, json, os, shutil, subprocess, sys, unittest
+import hashlib, importlib.util, json, os, shutil, subprocess, sys, time, unittest
 from pathlib import Path
 
 HERE=Path(__file__).resolve().parent
@@ -170,6 +170,50 @@ class LauncherRepairIntegration(unittest.TestCase):
         j.unlink();intent=self.bin/'xi-io-cli.repair-intent.json';intent.write_text('{}')
         self.assertFalse(self.apply(p)['ok']);self.assertFalse(self.call({'action':'prepare_repair','prefix':str(self.f.prefix),'bin_dir':str(self.bin),'node':NODE})['ok'])
         intent.unlink();self.assert_no_effect()
+
+    def test_response_deadline_keeps_canonical_transaction_alive_until_receipt(self):
+        p=self.prepare();hook=self.home/'delay-after-capture.mjs'
+        entered=self.home/'durable-child-entered';release=self.home/'release-child';deadline=self.home/'canonical-timeout.json'
+        hook.write_text("import fs from 'node:fs';const rename=fs.renameSync;fs.renameSync=function(a,b){const value=rename.apply(this,arguments);if(String(b).endsWith('-captured')){fs.writeFileSync("+json.dumps(str(entered))+",String(process.pid));const stop=Date.now()+15000;while(!fs.existsSync("+json.dumps(str(release))+")&&Date.now()<stop)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,25);if(!fs.existsSync("+json.dumps(str(release))+"))throw Error('FIXTURE_GATE_NOT_RELEASED');}return value;};")
+        # Instrument only the fixture invocation, not the production deadline or
+        # canonical bytes. Recording the actual argument makes any finite inner
+        # timeout regression fail even though this test uses a short caller wait.
+        program="import sys,json;from pathlib import Path;sys.path.insert(0,"+repr(str(HERE))+");import installer_adapter as a\nreal=a.run\ndef delayed(argv,timeout=60):\n if '--repair-launcher' in argv:\n  Path("+repr(str(deadline))+").write_text(json.dumps(timeout))\n  argv=[argv[0],'--import',"+repr(str(hook))+",*argv[1:]]\n return real(argv,timeout)\na.run=delayed\na.main()"
+        proc=subprocess.Popen(['/usr/bin/python3','-I','-c',program],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=self.env)
+        request={'action':'apply_repair','plan_id':p['plan_id'],'approval_digest':p['approval_digest'],'approved':True}
+        proc.stdin.write(json.dumps(request));proc.stdin.close();proc.stdin=None
+        try:
+            until=time.monotonic()+10
+            while not entered.exists() and proc.poll() is None and time.monotonic()<until:time.sleep(.025)
+            self.assertTrue(entered.exists(),'Canonical child did not reach durable captured boundary')
+            self.assertIsNone(json.loads(deadline.read_text()),'Consequential canonical subprocess must have no adapter kill deadline')
+            child=int(entered.read_text());os.kill(child,0)
+            self.assertTrue((self.bin/'xi-io-cli.repair-intent.json').is_file())
+            self.assertFalse(self.launcher.exists(),'Gate must pause after capture, before launcher publication')
+            with self.assertRaises(subprocess.TimeoutExpired):proc.wait(timeout=.25)
+            self.assertIsNone(proc.poll(),'Response waiting deadline must not kill the adapter owner')
+            os.kill(child,0) # Actual Node child is still alive beyond caller wait.
+            events=[json.loads(line) for line in self.journal(p).read_text().splitlines()]
+            self.assertEqual([e['outcome'] for e in events],['started'])
+            busy=self.call({'action':'inspect','plan_id':p['plan_id']})
+            self.assertFalse(busy['ok']);self.assertEqual(busy['error'],'INSTALLER_BUSY')
+        finally:
+            release.write_text('complete the original transaction')
+            out,err=proc.communicate(timeout=25)
+        self.assertEqual(proc.returncode,0,err);reply=json.loads(out);self.assertTrue(reply['ok'],reply)
+        self.assertEqual(reply['result']['phase'],'LAUNCHER_REPAIR_READBACK_VERIFIED')
+        self.assertEqual(snapshot(self.f.prefix),self.before)
+        self.assertEqual(Path(p['backup']).read_bytes(),self.original)
+        self.assertTrue(self.call({'action':'readback','plan_id':p['plan_id']})['ok'])
+        events=[json.loads(line) for line in self.journal(p).read_text().splitlines()]
+        self.assertEqual([e['outcome'] for e in events],['started','passed'])
+
+    def test_inspect_has_only_declared_state_and_lock_writes_not_target_effects(self):
+        state=self.home/'state/xi-io/installer';self.assertFalse(state.exists())
+        r=self.call({'action':'inspect'});self.assertTrue(r['ok'],r)
+        self.assertTrue(state.is_dir());self.assertTrue((state/'native-adapter.lock').is_file())
+        self.assertFalse((state/'native-plans').exists());self.assertFalse((state/'operations').exists())
+        self.assert_no_effect()
 
     def test_canonical_durable_crash_recovery_not_adapter_retry(self):
         p=self.prepare();hook=self.home/'kill-after-capture.mjs'

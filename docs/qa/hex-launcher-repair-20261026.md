@@ -35,10 +35,14 @@ The canonical installer owns interrupted-transaction recovery. The saved plan ex
 - Existing readiness cases: 3 PASS; existing normal source suite: 78 PASS, 1 optional historical-byte oracle SKIP; existing binding suite: 18 PASS; existing interaction suite: 13 PASS.
 - Source adoption: 6 PASS. Static installer audit: 15 PASS. These are source checks, not installed proof.
 - TypeScript and frontend build: PASS. Vite reports existing large-chunk advisory.
-- Native Rust finite protocol/transport: 11 PASS before the final repair-specific uncertainty projection; final native build/test receipt must supersede this timing detail before delivery.
+- Native Rust finite protocol/transport: 11 PASS including the repair-specific uncertainty projection in the DEV5 build.
 
 Counts describe distinct suites, not a summed marketing score. Canonical CLI's prior 17-case/4-contract qualification remains separate. Original CLI failure evidence remains in CLI PR15; it is not overwritten by this consumer patch.
 
 ## Remaining release gates
 
 Exact GitHub publication/readback, final native package resource verification, real native UI QA, approved owner-machine installation, and installed CLI consumer acceptance. A draft PR, source test, or .deb alone cannot satisfy those gates.
+
+## DEV5 timeout discrepancy, preserved
+
+The carrier retained custody but the Python repair call used subprocess.run(timeout=90), which can kill its child. DEV5 is held; its binary parity did not qualify this failure behavior. The successor removes the adapter-owned kill deadline only for the consequential canonical repair, leaving the carrier response deadline/process tracker and uncertain-state journal in place. Final successor replay remains required. Inspection creates the installer state directory and lock: it is non-installing, not filesystem-write-free.

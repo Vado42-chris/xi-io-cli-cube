@@ -5,6 +5,14 @@
 absolute bundled adapter path. Imports are fixed to adjacent `kernel/`, never
 user-selected paths. Bundle sibling `../cli-source/` unchanged as well.
 
+`inspect` is non-mutating with respect to installed CLI/application targets, not
+a filesystem-read-only operation: every adapter request creates the owner
+`XDG_STATE_HOME/xi-io/installer` directory when missing and opens/creates the
+`native-adapter.lock` coordination file. Inspection alone creates no approval plan
+or operation receipt. Python may also create ordinary import bytecode caches if
+the bundled module directory is writable. Neither effect grants installation
+authority or changes the selected launcher, generations or application profiles.
+
 This is the editable local DEV composition, not a LIVE or connected distribution.
 Its source adoption does not establish owner acceptance or broker admission.
 Upstream CLI source is pinned in `../cli-source/SOURCE.json`; six payload files
@@ -138,6 +146,13 @@ connection and end-to-end workflow verification remain explicitly false/unclaime
 
 Phases: `PREPARED_REPAIR_NOT_APPLIED`,
 `LAUNCHER_REPAIR_READBACK_VERIFIED`, `LAUNCHER_REPAIR_OUTCOME_UNCERTAIN`.
+The canonical consequential repair child has **no adapter-owned kill deadline**.
+The native carrier still bounds its response wait and retains process custody and
+operation gating after that wait expires; the original adapter keeps waiting for
+the original canonical child and records its eventual receipt. A delayed response
+is not permission to kill or launch another repair. Preflight/readback deadlines
+and normal generation-install behavior are unchanged.
+
 Post-start failure, lost response, incomplete or unknown evidence cannot be
 silently retried or bypassed with a fresh plan. Inspection returns
 `do_not_retry=true`, `recovery_required=true`, and exact canonical recovery
@@ -162,6 +177,8 @@ independent checkout; hashes must match, and missing fixture material fails rath
 than skipping. Cases cover actual outside-prefix and inside-prefix launchers,
 current/previous receipt and payload preservation, selected Node/launcher/source/
 verifier/pointer drift, custody, explicit approval, quoted paths, post-effect lost
-response, SIGKILL canonical durable recovery, unknown journal/no-retry behavior,
+response, a real canonical child gated after durable capture surviving a caller
+response deadline and completing its terminal receipt, SIGKILL canonical durable
+recovery, declared inspection state/lock writes, unknown journal/no-retry behavior,
 and refusal to execute a later tampered launcher. All filesystem effects are in
 disposable test fixtures, never the user's installed CLI or application profiles.
