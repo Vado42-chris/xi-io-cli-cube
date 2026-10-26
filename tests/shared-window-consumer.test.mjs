@@ -54,7 +54,7 @@ test('product styling uses the current family baseline, not a hardcoded slate/am
  const files=['../src/App.tsx','../src/components/NativeInstallerPanel.tsx','../src/components/RollbackHistory.tsx'];
  for(const p of files){const body=read(p); assert.doesNotMatch(body,/(?:bg|text|border)-(?:slate|amber)-/); assert.doesNotMatch(body,/text-(?:emerald|red|rose)-[123]00/); assert.doesNotMatch(body,/bg-(?:emerald|rose|red|blue|purple)-9[05]0/);}
  const css=read('../src/styles/product-workspace.css');
- for(const token of ['#050505','rgba(10,28,38,.96)','#f4f4f2','#c1d6df','--chroma-hue,188','prefers-reduced-motion'])assert.ok(css.includes(token));
+ for(const token of ['#050505','rgba(12,12,13,.96)','#f4f4f2','#c1c1c1','--chroma-hue,188','prefers-reduced-motion'])assert.ok(css.includes(token));
  assert.doesNotMatch(css,/#b64a43|ca-hero|ca-nav/);
  assert.match(css,/data-product-theme="light"/);
 });
@@ -66,7 +66,7 @@ test('original carved plate is bundled locally with exact source custody',()=>{
  assert.equal(createHash('sha256').update(bytes).digest('hex'),'0cdfc4c4674c60856fdcf316b8d0ea82d54ae7b72ab6d7aa0a70aee0da9d1733');
  assert.equal(createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`),bytes])).digest('hex'),'0dab949092b553360bf5884674686569d38b43de');
  assert.match(read('../src/App.tsx'),/import brandPlate from '\.\/assets\/brand\/7d133412d_blue-bg\.png'/);
- assert.match(read('../src/styles/product-workspace.css'),/brightness\(\.72\) saturate\(1\.12\) contrast\(1\.08\)/);
+ assert.match(read('../src/styles/product-workspace.css'),/grayscale\(100%\) brightness\(\.72\) contrast\(1\.08\)/);
 });
 
 test('product backdrop retains existing parallax layers with reduced-motion and cleanup',()=>{

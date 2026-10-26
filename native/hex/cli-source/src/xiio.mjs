@@ -466,6 +466,10 @@ async function executeTool(name,args,{root,approve}){
   }
   if(name==='read_workspace_file'||name==='resolve_registry'){
     const rel=String(args?.path||'');if(!rel)throw new Error('PATH_REQUIRED');const p=safe(rel);
+    // A direct read must not block on a FIFO/device or allocate an unbounded file.
+    const st=fs.lstatSync(p);
+    if(!st.isFile())throw new Error('NOT_A_REGULAR_FILE');
+    if(st.size>2*1024*1024)throw new Error('READ_FILE_TOO_LARGE: maximum 2097152 bytes');
     const {buf,text}=readText(p);
     return {path:rel,content:text.slice(0,120000),sha256:sha256(buf),byte_length:buf.length,
       full_content_returned:text.length<=120000,bins_version_qualified:false};
@@ -476,7 +480,12 @@ async function executeTool(name,args,{root,approve}){
     const filters=readOnlyGit(['config','--includes','--null','--name-only','--get-regexp','^filter\\..*\\.(clean|smudge|process)$'],{cwd:root});
     if(filters.status===0)throw new Error('EXTERNAL_GIT_FILTER_CONFIGURED');
     if(filters.status!==1)throw new Error('GIT_CONFIG_INSPECTION_FAILED');
-    return {submodule_contents:'NOT_INSPECTED',branch:readOnlyGit(['branch','--show-current'],{cwd:root}).stdout,status:readOnlyGit(['status','--short','--ignore-submodules=all'],{cwd:root}).stdout,head:readOnlyGit(['rev-parse','HEAD'],{cwd:root}).stdout};
+    const observed={branch:readOnlyGit(['branch','--show-current'],{cwd:root}),status:readOnlyGit(['status','--short','--ignore-submodules=all'],{cwd:root}),head:readOnlyGit(['rev-parse','HEAD'],{cwd:root})};
+    // Exit status is evidence; stdout alone cannot establish a successful read.
+    // Do not expose stderr/error strings, which can carry repository secrets.
+    const checks=Object.fromEntries(Object.entries(observed).map(([key,r])=>[key,{status:r.status,signal:r.signal,error_present:!!r.error,stderr_present:!!r.stderr}]));
+    if(Object.values(observed).some(r=>r.status!==0||r.signal||r.error))return {state:'FAIL',reason:'GIT_INSPECTION_FAILED',submodule_contents:'NOT_INSPECTED',checks};
+    return {submodule_contents:'NOT_INSPECTED',branch:observed.branch.stdout,status:observed.status.stdout,head:observed.head.stdout,checks};
   }
   if(name==='list_registries'){
     const files=[];const re=/(ack|registry|current)/i;
@@ -613,13 +622,12 @@ function ollamaTools(){
     list_workspace:{path:{type:'string'}},search_workspace:{query:{type:'string'}},read_workspace_file:{path:{type:'string'}},
     git_status:{},list_registries:{},resolve_registry:{path:{type:'string'}},
     edit_workspace_file:{path:{type:'string'},old_text:{type:'string'},new_text:{type:'string'},content:{type:'string'},expected_sha256:{type:'string'}},
-    run_workspace_command:{command:{type:'string'}},
+    run_workspace_command:{command:{type:'string'}},install_dependencies:{},
     list_services:{},call_service:{service:{type:'string'},method:{type:'string'},path:{type:'string'},body:{type:'string'}}
   };
   return toolCatalog().map(t=>({type:'function',function:{name:t.name,description:t.description,parameters:{type:'object',properties:defs[t.name],additionalProperties:false}}}));
 }
-// A model that cannot call tools often prints a tool call as text instead.
-// That text did nothing, and the person must be told so.
+// Text resembling a call is not a call. Earlier real tool outcomes still count.
 const TOOL_NAMES=['list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','run_xiio_command','runtime_status'];
 function looksLikeToolCall(text){
   const t=String(text||'');
@@ -627,20 +635,109 @@ function looksLikeToolCall(text){
   const m=t.match(/[{[][\s\S]*[}\]]/);if(!m)return false;
   try{const j=JSON.parse(m[0]);const o=Array.isArray(j)?j[0]:j;return !!o&&typeof o==='object'&&(('name' in o&&('arguments' in o||'parameters' in o))||'tool_calls' in o||'function_call' in o);}catch{return false;}
 }
-const FAKE_TOOL_NOTICE='Nothing was run. The model wrote text that looks like a tool call instead of actually calling a tool. Ask again, or pick a model with tool support using /models and /model NAME.';
-function toolFallbackText(results){
-  if(!results.length)return '';
-  if(results.length===1){
-    const out=results[0].result;
-    if(out&&typeof out.content==='string')return out.content;
-    if(out&&typeof out.readback==='string')return out.readback;
+// Provider prose is never an execution receipt. Both consumer paths and /read
+// render the same host-observed results; failures never erase earlier facts.
+const MAX_NATIVE_CALLS=8;
+const isRecord=(value)=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+const meaningfulReply=(value)=>typeof value==='string'&&value.trim()!==''&&!/^(null|undefined)$/i.test(value.trim());
+function providerMessage(body){
+  if(!isRecord(body)||body.error!==undefined||!isRecord(body.message))throw new Error('PROVIDER_ENVELOPE_INVALID');
+  const msg=body.message;
+  if(msg.role!=='assistant'||typeof msg.content!=='string'||(body.done!==undefined&&body.done!==true))throw new Error('PROVIDER_MESSAGE_INVALID');
+  if(msg.tool_calls!==undefined&&(!Array.isArray(msg.tool_calls)||msg.tool_calls.length>MAX_NATIVE_CALLS))throw new Error('PROVIDER_TOOL_CALLS_INVALID');
+  return msg;
+}
+function validateToolArgs(name,args){
+  const def=ollamaTools().find(t=>t.function.name===name)?.function.parameters;
+  if(!def)throw new Error('UNKNOWN_TOOL');
+  if(!isRecord(args)||Object.keys(args).some(k=>!Object.hasOwn(def.properties,k)||typeof args[k]!=='string'))throw new Error('TOOL_ARGUMENTS_INVALID');
+  const required={search_workspace:['query'],read_workspace_file:['path'],resolve_registry:['path'],edit_workspace_file:['path'],run_workspace_command:['command'],call_service:['service']};
+  if((required[name]||[]).some(k=>typeof args[k]!=='string'||!args[k].trim()))throw new Error('TOOL_REQUIRED_ARGUMENT_MISSING');
+  if(name==='edit_workspace_file'){
+    if(args.old_text!==undefined){if(!args.old_text||typeof args.new_text!=='string')throw new Error('EDIT_REPLACEMENT_INVALID');}
+    else if(typeof args.content!=='string')throw new Error('EDIT_CONTENT_REQUIRED');
   }
-  return 'Tool result:\n'+results.map(x=>x.name+': '+JSON.stringify(x.result,null,2)).join('\n');
+  return args;
+}
+function nativeCalls(msg){
+  // Validate the ENTIRE batch before executing any part of it.
+  return (msg.tool_calls||[]).map(call=>{
+    if(!isRecord(call)||!isRecord(call.function)||(call.type!==undefined&&call.type!=='function')||typeof call.function.name!=='string')throw new Error('PROVIDER_TOOL_CALL_INVALID');
+    let args=call.function.arguments;
+    if(typeof args==='string'){try{args=JSON.parse(args);}catch{throw new Error('TOOL_ARGUMENT_JSON_INVALID');}}
+    return {name:call.function.name,args:validateToolArgs(call.function.name,args)};
+  });
+}
+function executionFact(name,args,result){
+  let state='SUCCEEDED',reason=null;
+  if(!toolCatalog().some(t=>t.name===name)||!isRecord(result)){state='FAILED';reason='TOOL_RESULT_INVALID';}
+  else if(result.state==='FAIL'){state='FAILED';reason=typeof result.reason==='string'?result.reason:'TOOL_FAILED';}
+  else if(result.state==='PARTIAL'){state='PARTIAL';reason='TOOL_REPORTED_PARTIAL';}
+  else if(result.state!==undefined&&!(name==='edit_workspace_file'&&result.state==='LOCAL_CAS_COMMITTED')){state='FAILED';reason='TOOL_STATE_UNQUALIFIED';}
+  else if(name==='run_workspace_command'||name==='install_dependencies'){
+    if(result.status!==0||result.timed_out!==false||result.signal||typeof result.stdout!=='string'||typeof result.stderr!=='string'){state='FAILED';reason=result?.timed_out?'TOOL_TIMED_OUT':'TOOL_EXIT_NOT_ZERO';}
+  }else if(name==='call_service'){
+    if(!Number.isInteger(result.status)||!(result.status>=200&&result.status<300)||['service','method','url','body'].some(k=>typeof result[k]!=='string')){state='FAILED';reason='SERVICE_HTTP_NOT_SUCCESS';}
+  }else if(name==='edit_workspace_file'){
+    if(result?.readback_matches!==true){state='FAILED';reason='EDIT_READBACK_UNVERIFIED';}
+  }else if(name==='read_workspace_file'||name==='resolve_registry'){
+    if(typeof result.content!=='string'||result.path!==args.path||typeof result.sha256!=='string'||!/^[a-f0-9]{64}$/.test(result.sha256)||!Number.isSafeInteger(result.byte_length)||result.byte_length<0||typeof result.full_content_returned!=='boolean'){
+      state='FAILED';reason='READ_RESULT_INVALID';
+    }else if(result.full_content_returned){
+      const bytes=Buffer.from(result.content,'utf8');
+      if(bytes.length!==result.byte_length||sha256(bytes)!==result.sha256){state='FAILED';reason='READ_RESULT_DIGEST_MISMATCH';}
+    }else if(Buffer.byteLength(result.content,'utf8')>result.byte_length){state='FAILED';reason='READ_RESULT_INVALID';}
+    else{state='PARTIAL';reason='READ_CONTENT_TRUNCATED';}
+  }else{
+    const strings=value=>Array.isArray(value)&&value.every(x=>typeof x==='string');
+    const valid=name==='list_workspace'?typeof result.path==='string'&&Array.isArray(result.entries)&&result.entries.every(x=>isRecord(x)&&typeof x.name==='string'&&['file','dir','link'].includes(x.type))
+      :name==='search_workspace'?typeof result.query==='string'&&strings(result.matches)
+      :name==='list_registries'?strings(result.files)
+      :name==='list_services'?Array.isArray(result.services)&&result.services.every(x=>isRecord(x)&&typeof x.service==='string')
+      :name==='git_status'?typeof result.branch==='string'&&typeof result.status==='string'&&typeof result.head==='string'&&/^[a-f0-9]{40,64}$/.test(result.head)
+      :false;
+    if(!valid){state='FAILED';reason='TOOL_RESULT_INVALID';}
+  }
+  return {name,arguments:args,state,reason,result};
+}
+async function executeObservedTool(name,args,context){
+  let result;
+  try{result=await executeTool(name,args,context);}catch(error){result={state:'FAIL',reason:error instanceof Error?error.message:'TOOL_FAILED'};}
+  return executionFact(name,args,result);
+}
+function toolFallbackText(results,{text='',error=null,source='provider'}={}){
+  const firstFailed=results.find(r=>r.state==='FAILED');
+  const firstPartial=results.find(r=>r.state==='PARTIAL');
+  const firstRed=results.find(r=>r.reason)?.reason||error||null;
+  const state=firstFailed?'FAILED':error?(results.length?'PARTIAL':'FAILED'):firstPartial?'PARTIAL':results.length?'TOOL_RESULTS_RECORDED':'NO_TOOL_EXECUTION';
+  const receipt={schema:'xiio.cli.execution-return/v1',source,state,first_red:firstRed,provider_error:error,
+    request_fulfillment:'NOT_EVALUATED',tool_results:results};
+  // JSON escapes terminal-control bytes and preserves exact returned strings.
+  // A successful read is evidence of that read, not acceptance of requested
+  // formatting (for example, a request for only the first ten lines).
+  return {text:'Actual execution receipt (CLI-observed, not model claims):\n'+JSON.stringify(receipt,null,2)
+    +(results.length?'':'\nNo tools were executed.')
+    +(meaningfulReply(text)?'\nModel reply (unverified narrative; not an execution receipt):\n'+text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0')):''),
+    fake_tool_call:false,receipt};
+}
+function finishToolTurn(messages,results,{text='',error=null,source='provider'}={}){
+  if(!error&&!meaningfulReply(text)&&source==='provider')error='MODEL_ANSWER_EMPTY_OR_NULL';
+  if(!error&&looksLikeToolCall(text))error='MODEL_TEXT_IS_NOT_A_TOOL_CALL';
+  const answer=toolFallbackText(results,{text,error,source});
+  // Preserve the terminal outcome in this in-memory conversation, not a claim
+  // that a failed/empty/no-tool turn completed the user's task.
+  messages.push({role:'assistant',content:answer.text});
+  return answer;
+}
+async function providerReply(convo,{model,mode}){
+  const res=await fetch('http://127.0.0.1:11434/api/chat',{signal:AbortSignal.timeout(300000),method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,messages:convo,stream:false,...(mode==='native'?{tools:ollamaTools()}:{format:structuredSchema(),options:{temperature:0}})})});
+  if(!res.ok)throw new Error('OLLAMA_HTTP_'+res.status);
+  return providerMessage(await res.json());
 }
 // Structured tool mode (default). Small local models are unreliable at free-form
 // tool calling: they invent tool names, wrap calls in prose, or loop. Ollama's
-// `format` (a JSON schema) constrains every reply to one real tool or an answer,
-// so the model cannot emit an unknown tool. The CLI still validates every field
+// `format` requests one real tool or an answer. A provider can still violate
+// that schema; the CLI validates every returned action and field
 // and every edit/command still needs the human's yes. XIIO_TOOL_MODE=native keeps
 // the old provider tool-calling path.
 const STRUCTURED_TOOLS=['list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','install_dependencies','list_services','call_service'];
@@ -648,7 +745,7 @@ const STRUCTURED_FIELDS=['path','query','content','old_text','new_text','expecte
 function structuredSchema(){
   const properties={tool:{type:'string',enum:[...STRUCTURED_TOOLS,'answer']}};
   for(const f of STRUCTURED_FIELDS)properties[f]={type:'string'};
-  return {type:'object',properties,required:['tool',...STRUCTURED_FIELDS]};
+  return {type:'object',properties,required:['tool',...STRUCTURED_FIELDS],additionalProperties:false};
 }
 const STRUCTURED_GUIDE=['Reply ONLY with one JSON object: {"tool":..., "path":"", "query":"", "content":"", "old_text":"", "new_text":"", "command":"", "text":""}. Use "" for fields a tool does not need.',
   'tool="answer": text = your reply to the person. Use it when the task is done or you need to ask something.',
@@ -665,83 +762,71 @@ function structuredArgs(d){
     case 'list_workspace':return {path:g('path')||'.'};
     case 'search_workspace':return {query:g('query')};
     case 'read_workspace_file':case 'resolve_registry':return {path:g('path')};
-    case 'edit_workspace_file':return g('old_text')?{path:g('path'),old_text:g('old_text'),new_text:g('new_text'),...(g('expected_sha256')?{expected_sha256:g('expected_sha256')}:{})}:{path:g('path'),content:g('content')};
+    case 'edit_workspace_file':return g('old_text')?{path:g('path'),old_text:g('old_text'),new_text:g('new_text'),...(g('expected_sha256')?{expected_sha256:g('expected_sha256')}:{})}:{path:g('path'),content:g('content'),...(g('expected_sha256')?{expected_sha256:g('expected_sha256')}:{})};
     case 'run_workspace_command':return {command:g('command')};
     case 'call_service':return {service:g('service'),method:g('method')||'GET',path:g('path')||'/',body:g('body')};
     default:return {};
   }
 }
-async function ollamaChatStructured(messages,{model,root,approve}){
-  const convo=[...messages];
-  if(convo[0]?.role==='system')convo[0]={...convo[0],content:convo[0].content+'\n'+STRUCTURED_GUIDE};
-  let lastError=null;const results=[];
-  for(let turn=0;turn<12;turn++){
-    const res=await fetch('http://127.0.0.1:11434/api/chat',{signal:AbortSignal.timeout(300000),method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,messages:convo,stream:false,format:structuredSchema(),options:{temperature:0}})});
-    if(!res.ok){let detail='';try{detail=(await res.json()).error||'';}catch{}throw new Error('OLLAMA_HTTP_'+res.status+(detail?': '+detail:''));}
-    const body=await res.json();const raw=String(body.message?.content||'');
-    convo.push({role:'assistant',content:raw});
-    let d;try{d=JSON.parse(raw);}catch{d=null;}
-    if(!d||typeof d!=='object'||!(d.tool==='answer'||STRUCTURED_TOOLS.includes(d.tool))){
-      lastError='MODEL_REPLY_NOT_A_VALID_ACTION';
-      convo.push({role:'user',content:'TOOL RESULT: invalid reply. Reply with exactly one JSON object as instructed.'});continue;
-    }
-    if(d.tool==='answer'){
-      const text=String(d.text||'').trim();
-      messages.push({role:'assistant',content:text});
-      if(looksLikeToolCall(text))return {text,fake_tool_call:true};
-      // The model's words never stand alone: the CLI states what each tool
-      // actually did, so "Done" after a failure cannot read as success.
-      const facts=results.map(({name,result:r})=>{
-        if(r?.state==='FAIL')return '  ✗ '+name+' failed: '+r.reason;
-        if(name==='run_workspace_command')return (r?.status===0?'  ✓ ':'  ✗ ')+'command exit '+(r?.status??'none')+(r?.timed_out?' (timed out)':'');
-        if(name==='install_dependencies')return (r?.status===0?'  ✓ ':'  ✗ ')+'npm ci exit '+(r?.status??'none');
-        if(name==='call_service')return (r?.status>=200&&r?.status<300?'  ✓ ':'  ✗ ')+r?.method+' '+r?.url+' → HTTP '+r?.status;
-        if(name==='edit_workspace_file')return (r?.readback_matches?'  ✓ ':'  ✗ ')+'wrote '+r?.path+(r?.readback_matches?' (read back OK)':' (read back FAILED)');
-        return '  ✓ '+name;
-      });
-      const body=text||(results.length?toolFallbackText(results):'');
-      return {text:facts.length?'What actually happened:\n'+facts.join('\n')+'\n\n'+body:body,fake_tool_call:false};
-    }
-    let out;try{out=await executeTool(d.tool,structuredArgs(d),{root,approve});lastError=null;}catch(e){out={state:'FAIL',reason:String(e.message||e)};lastError=out.reason;}
-    results.push({name:d.tool,result:out});
-    convo.push({role:'user',content:'TOOL RESULT for '+d.tool+': '+JSON.stringify(out).slice(0,20000)});
-    // A declined approval ends the turn: the person said no.
-    if(out.state==='FAIL'&&out.reason==='HUMAN_APPROVAL_REQUIRED'){messages.push({role:'assistant',content:'Declined.'});return {text:'Okay, I did not make that change (HUMAN_APPROVAL_REQUIRED).',fake_tool_call:false};}
+function structuredAction(msg){
+  if(msg.tool_calls?.length)throw new Error('STRUCTURED_NATIVE_CALLS_UNEXPECTED');
+  let d;try{d=JSON.parse(msg.content);}catch{throw new Error('MODEL_REPLY_NOT_A_VALID_ACTION');}
+  if(!isRecord(d)||typeof d.tool!=='string'||!(d.tool==='answer'||STRUCTURED_TOOLS.includes(d.tool)))throw new Error('MODEL_REPLY_NOT_A_VALID_ACTION');
+  if(Object.keys(d).some(k=>k!=='tool'&&(!STRUCTURED_FIELDS.includes(k)||typeof d[k]!=='string')))throw new Error('STRUCTURED_FIELD_INVALID');
+  if(d.tool==='answer'){
+    if(!meaningfulReply(d.text))throw new Error('MODEL_ANSWER_EMPTY_OR_NULL');
+    return {name:'answer',text:d.text.trim()};
   }
-  throw new Error('TOOL_LOOP_LIMIT'+(lastError?': last error was '+lastError:''));
+  // Fields are checked before projection; wrong types are never silently erased.
+  const args=structuredArgs(d);
+  if(d.tool==='edit_workspace_file'){
+    if(d.old_text){if(typeof d.new_text!=='string')throw new Error('EDIT_REPLACEMENT_INVALID');}
+    else if(typeof d.content!=='string')throw new Error('EDIT_CONTENT_REQUIRED');
+  }
+  return {name:d.tool,args:validateToolArgs(d.tool,args)};
+}
+async function ollamaChatStructured(messages,{model,root,approve}){
+  const convo=[...messages],results=[];
+  if(convo[0]?.role==='system')convo[0]={...convo[0],content:convo[0].content+'\n'+STRUCTURED_GUIDE};
+  for(let turn=0;turn<12;turn++){
+    let msg,action;
+    try{msg=await providerReply(convo,{model,mode:'structured'});action=structuredAction(msg);}
+    catch(error){return finishToolTurn(messages,results,{error:error instanceof Error?error.message:'PROVIDER_REQUEST_FAILED'});}
+    convo.push({role:'assistant',content:msg.content});
+    if(action.name==='answer')return finishToolTurn(messages,results,{text:action.text});
+    const fact=await executeObservedTool(action.name,action.args,{root,approve});
+    results.push(fact);
+    convo.push({role:'user',content:'TOOL RESULT for '+action.name+': '+JSON.stringify(fact.result).slice(0,20000)});
+    if(fact.reason==='HUMAN_APPROVAL_REQUIRED')return finishToolTurn(messages,results,{error:'HUMAN_APPROVAL_REQUIRED'});
+  }
+  return finishToolTurn(messages,results,{error:'TOOL_LOOP_LIMIT'});
 }
 async function ollamaChat(messages,opts){
   if(String(process.env.XIIO_TOOL_MODE||'structured').toLowerCase()!=='native')return ollamaChatStructured(messages,opts);
   return ollamaChatNative(messages,opts);
 }
 async function ollamaChatNative(messages,{model,root,approve}){
-  let lastToolResults=[];
+  const convo=[...messages],results=[];
   for(let turn=0;turn<12;turn++){
-    const res=await fetch('http://127.0.0.1:11434/api/chat',{signal:AbortSignal.timeout(300000),method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,messages,stream:false,tools:ollamaTools()})});
-    if(!res.ok){let detail='';try{detail=(await res.json()).error||'';}catch{}if(/does not support tools/i.test(detail))throw new Error('MODEL_HAS_NO_TOOL_SUPPORT: '+model+' cannot use tools; pick another with /models and /model NAME');throw new Error('OLLAMA_HTTP_'+res.status+(detail?': '+detail:''));}
-    const body=await res.json();const msg=body.message||{};messages.push(msg);
-    const calls=Array.isArray(msg.tool_calls)?msg.tool_calls:[];
-    if(!calls.length){
-      const text=String(msg.content||'').trim();
-      if(looksLikeToolCall(text))return {text,fake_tool_call:true};
-      if(!text&&lastToolResults.length)return {text:toolFallbackText(lastToolResults),fake_tool_call:false,tool_result_fallback:true};
-      return {text,fake_tool_call:false};
-    }
-    lastToolResults=[];
-    for(const call of calls){
-      const name=call.function?.name;let args=call.function?.arguments||{};
-      if(typeof args==='string'){try{args=JSON.parse(args);}catch{args={};}}
-      let out;try{out=await executeTool(name,args,{root,approve});}catch(e){out={state:'FAIL',reason:String(e.message||e)};}
-      lastToolResults.push({name,result:out});
-      messages.push({role:'tool',tool_name:name,content:JSON.stringify(out)});
+    let msg,calls;
+    try{msg=await providerReply(convo,{model,mode:'native'});calls=nativeCalls(msg);}
+    catch(error){return finishToolTurn(messages,results,{error:error instanceof Error?error.message:'PROVIDER_REQUEST_FAILED'});}
+    if(!calls.length)return finishToolTurn(messages,results,{text:msg.content.trim()});
+    // Keep only validated provider fields in the conversation.
+    convo.push({role:'assistant',content:msg.content,tool_calls:msg.tool_calls});
+    for(const {name,args} of calls){
+      const fact=await executeObservedTool(name,args,{root,approve});
+      results.push(fact);
+      convo.push({role:'tool',tool_name:name,content:JSON.stringify(fact.result)});
+      if(fact.reason==='HUMAN_APPROVAL_REQUIRED')return finishToolTurn(messages,results,{error:'HUMAN_APPROVAL_REQUIRED'});
     }
   }
-  throw new Error('TOOL_LOOP_LIMIT');
+  return finishToolTurn(messages,results,{error:'TOOL_LOOP_LIMIT'});
 }
 function printMenu(){
   process.stdout.write('\nxi-io: CLI\nWhat would you like to do?\n\n');
   for(const [n,,label] of MENU)process.stdout.write('  '+n+'. '+label+'\n');
-  process.stdout.write('\nOr just tell me what you need in plain language.\n\n');
+  process.stdout.write('\nOr just tell me what you need in plain language.\n/read PATH — deterministic workspace text read; no model required (consumer hotpatch).\n\n');
 }
 const MODEL_FILE=path.join(CONFIG_DIR,'model');
 function savedModel(){try{return fs.readFileSync(MODEL_FILE,'utf8').trim()||null;}catch{return null;}}
@@ -805,12 +890,20 @@ async function interactive(flags,args=[]){
         process.stdout.write(rows.files.length?'I found '+rows.files.length+' ACK/current/registry candidates. Tell me what you are working on and I will resolve only the relevant ones.\n':'I did not find a local ACK/current registry in this workspace.\n');
         continue;
       }
+      if(cmd==='/read'||cmd.startsWith('/read ')){
+        const file=cmd.slice(5).trim();
+        if(!file||file.length>4096||/[\x00-\x1f\x7f]/.test(file)){
+          process.stdout.write(toolFallbackText([],{source:'direct_read',error:'READ_PATH_INVALID'}).text+'\n');continue;
+        }
+        const fact=await executeObservedTool('read_workspace_file',{path:file},{root});
+        process.stdout.write(toolFallbackText([fact],{source:'direct_read'}).text+'\n');
+        continue;
+      }
       if(!model){process.stdout.write('No local model selected. No request sent.\n');continue;}
       messages.push({role:'user',content:input});
       try{
         const answer=await ollamaChat(messages,{model,root,approve});
-        if(answer.fake_tool_call)process.stdout.write(FAKE_TOOL_NOTICE+'\nWhat the model wrote:\n'+answer.text+'\n');
-        else process.stdout.write((answer.text||'I completed the tool turn but have no text to add.')+'\n');
+        process.stdout.write(answer.text+'\n');
       }
       catch(e){process.stdout.write('I could not complete that locally: '+String(e.message||e)+'.\n');}
     }

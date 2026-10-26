@@ -1,10 +1,10 @@
 {
   "schema": "xiio.cli.packaged-source/v1",
-  "source_sha": "d53a1d0219f5b1707c6c1bbedfb262082179ceab",
+  "source_sha": "aff03d8181afce44602e3a35d732736bdef6f5d2",
   "files": {
     "src/xiio.mjs": {
-      "sha256": "561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b",
-      "size": 79672
+      "sha256": "108fb492d32a9538ccf2c4c64eebcd67c7f1b76810a9a3ede9019c88355e5485",
+      "size": 86499
     },
     "src/file-edit-cas.mjs": {
       "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",

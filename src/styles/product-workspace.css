@@ -15,15 +15,18 @@
 }
 [data-hex-workspace] {
   --workspace-canvas: #050505;
-  --workspace-surface: rgba(10,28,38,.96);
+  --workspace-surface: rgba(12,12,13,.96);
   --workspace-text: #f4f4f2;
-  --workspace-muted: #c1d6df;
-  --workspace-border: hsl(var(--chroma-hue,188) 80% 62% / .28);
-  --workspace-border-strong: hsl(var(--chroma-hue,188) 85% 65% / .65);
-  --workspace-focus: hsl(var(--chroma-hue,188) 95% 70%);
+  --workspace-muted: #c1c1c1;
+  --workspace-border: rgba(255,255,255,.22);
+  --workspace-border-strong: rgba(255,255,255,.48);
+  --workspace-focus: #f4f4f2;
+  --workspace-link: hsl(var(--chroma-hue,188) 95% 70%);
+  --workspace-control: rgba(255,255,255,.06);
+  --workspace-control-hover: rgba(255,255,255,.12);
   --workspace-inverse: #050505;
-  --workspace-success: hsl(128 4% 49%);
-  --workspace-danger: hsl(2 58% 58%);
+  --workspace-success: #d0d0d0;
+  --workspace-danger: #f4f4f2;
   color-scheme: dark;
   font-family: Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   position: relative;
@@ -31,16 +34,19 @@
 }
 /* Existing Node light reading values, not a second appearance preference. */
 [data-hex-workspace][data-product-theme="light"] {
-  --workspace-canvas: hsl(25 16% 100%);
-  --workspace-surface: hsl(25 16% 100% / .92);
-  --workspace-text: hsl(25 16% 3.9%);
-  --workspace-muted: hsl(25 16% 45.1%);
-  --workspace-border: hsl(25 16% 89.8%);
-  --workspace-border-strong: hsl(25 16% 45.1%);
-  --workspace-focus: hsl(var(--chroma-hue,188) 85% 25%);
-  --workspace-inverse: hsl(25 16% 98%);
-  --workspace-success: hsl(128 8% 34%);
-  --workspace-danger: hsl(2 62% 42%);
+  --workspace-canvas: hsl(0 0% 100%);
+  --workspace-surface: hsl(0 0% 100% / .92);
+  --workspace-text: hsl(0 0% 3.9%);
+  --workspace-muted: hsl(0 0% 33%);
+  --workspace-border: hsl(0 0% 80%);
+  --workspace-border-strong: hsl(0 0% 45.1%);
+  --workspace-focus: hsl(0 0% 9%);
+  --workspace-link: hsl(var(--chroma-hue,188) 85% 25%);
+  --workspace-control: rgba(0,0,0,.05);
+  --workspace-control-hover: rgba(0,0,0,.1);
+  --workspace-inverse: hsl(0 0% 98%);
+  --workspace-success: hsl(0 0% 27%);
+  --workspace-danger: hsl(0 0% 9%);
   color-scheme: light;
 }
 [data-hex-workspace] :where(button,input,select,textarea,[role="button"]):focus-visible {
@@ -63,7 +69,7 @@
 .ca-brand-plate { position: absolute; inset: -8%;
   background-image: var(--workspace-plate-image); background-repeat: no-repeat;
   background-position: 50% 46%; background-size: max(1500px,120vw) auto;
-  filter: brightness(.72) saturate(1.12) contrast(1.08); opacity: .72;
+  filter: grayscale(100%) brightness(.72) contrast(1.08); opacity: .72;
   transform: translate3d(var(--ca-plate-x,0px),calc(var(--ca-plate-y,0px) + var(--ca-plate-scroll,0px)),0) scale(1.06);
   transition: none; }
 .ca-atmosphere { position: absolute; inset: 0; opacity: .38;
@@ -73,50 +79,185 @@
   box-shadow: inset 0 0 150px 35px rgba(0,0,0,.48); }
 @keyframes ca-drift { from {transform:translate3d(-10px,4px,0);opacity:.3} to {transform:translate3d(14px,-10px,0);opacity:.48} }
 [data-hex-workspace][data-product-theme="light"] .ca-brand-plate { opacity: .08; }
-[data-hex-workspace][data-product-theme="light"] .ca-vignette { background: hsl(25 16% 100% / .85); box-shadow: none; }
+[data-hex-workspace][data-product-theme="light"] .ca-vignette { background: hsl(0 0% 100% / .85); box-shadow: none; }
 @media (max-width:700px) { .ca-brand-plate {background-size:auto 118vh;background-position:48% 48%;} }
 @media (prefers-reduced-motion:reduce) { .ca-brand-plate {transform:none!important;transition:none!important} .ca-atmosphere {animation:none!important} }
 
 /* Chroma identity comes from the existing shared frame; atmosphere remains
  * behind readable surfaces, never as a dark layer over text. */
-[data-hex-workspace] .ca-atmosphere {
-  opacity: .7;
-  background-image:
-    radial-gradient(ellipse at 12% 16%,hsl(var(--chroma-hue,188) 95% 54% / .32),transparent 55%),
-    radial-gradient(ellipse at 88% 70%,hsl(var(--chroma-hue,188) 90% 40% / .22),transparent 58%),
-    radial-gradient(circle at 20% 20%,hsl(var(--chroma-hue,188) 95% 80% / .35) 0 1px,transparent 2px);
-  background-size: 100% 100%,100% 100%,190px 190px;
+/* Node SystemCursor's local radial light replaces the prior broad cyan wash.
+ * The source defaults/profile live in source-owned-light, not in this stylesheet. */
+[data-hex-workspace] .ca-brand-field { isolation: isolate; }
+[data-hex-workspace] .ca-cursor-light {
+  /* panelShadow.accentCss uses the owner's hue at 74% saturation / 60% lightness. */
+  --cursor-glow: var(--chroma-hue,188) 74% 60%;
+  position: absolute;
+  left: 0; top: 0;
+  width: var(--ca-light-diameter,0px); height: var(--ca-light-diameter,0px);
+  transform: translate3d(calc(var(--ca-light-x,0px) - 50%),calc(var(--ca-light-y,0px) - 50%),0);
+  mix-blend-mode: screen;
+  pointer-events: none;
 }
 [data-hex-workspace] .hex-product-toolbar,
 [data-hex-workspace] .hex-workspace-layout section,
 [data-hex-workspace] .hex-installer-panel {
   border: 1px solid var(--workspace-border-strong);
   background-color: var(--workspace-surface);
-  box-shadow: inset 0 1px 0 hsl(var(--chroma-hue,188) 95% 75% / .2),0 12px 36px rgb(0 0 0 / .28);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05),var(--workspace-source-shadow,0 0 50px -10px rgba(0,0,0,.2));
 }
 [data-hex-workspace] .hex-product-toolbar { border-bottom: 2px solid var(--workspace-focus); }
-[data-hex-workspace] .hex-installer-panel { background-image: linear-gradient(120deg,hsl(var(--chroma-hue,188) 80% 50% / .08),transparent 55%); }
+[data-hex-workspace] .hex-installer-panel { background-image: none; }
 [data-hex-workspace] .hex-installer-panel > div:first-child {
-  padding: 12px 16px; margin: -4px -4px 20px;
+  padding: 12px; margin: 0 0 12px;
   border-left: 4px solid var(--workspace-focus);
-  background: hsl(var(--chroma-hue,188) 80% 55% / .12);
+  background: var(--workspace-control);
 }
 [data-hex-workspace] .hex-installer-panel h3 { font-size: 1.25rem; color: var(--workspace-text); }
 [data-hex-workspace] .hex-installer-panel :where(p,label,summary,button) { font-size: .9375rem; line-height: 1.6; }
 [data-hex-workspace] .hex-installer-panel fieldset {
-  padding: 16px; border: 1px solid var(--workspace-border); background: var(--workspace-canvas);
+  padding: 12px; border: 1px solid var(--workspace-border); background: var(--workspace-canvas);
 }
 [data-hex-workspace] .hex-installer-panel input:not([type="checkbox"]) {
   color: var(--workspace-text); background: var(--workspace-canvas); font-size: .875rem;
   min-height: 44px; border-color: var(--workspace-border-strong);
 }
 [data-hex-workspace] .hex-installer-panel input[type="checkbox"] { width: 18px; height: 18px; vertical-align: middle; margin-right: 7px; }
-[data-hex-workspace] .hex-installer-panel button:not(:disabled) { border-color: var(--workspace-border-strong); background: hsl(var(--chroma-hue,188) 75% 45% / .12); }
-[data-hex-workspace] .hex-installer-panel button:not(:disabled):hover { background: hsl(var(--chroma-hue,188) 85% 50% / .23); }
-[data-hex-workspace] [role="tab"][aria-selected="true"] { box-shadow: 0 0 18px hsl(var(--chroma-hue,188) 95% 55% / .2); }
+[data-hex-workspace] .hex-installer-panel button:not(:disabled) { border-color: var(--workspace-border-strong); background: var(--workspace-control); }
+[data-hex-workspace] .hex-installer-panel button:not(:disabled):hover { background: var(--workspace-control-hover); }
+[data-hex-workspace] [role="tab"][aria-selected="true"] { box-shadow: inset 0 -3px 0 currentColor; }
 [data-hex-workspace] .hex-installer-panel [aria-label="Detected installation requirements"] {
   padding: 16px; border-left: 3px solid var(--workspace-border-strong); background: var(--workspace-canvas);
 }
 [data-hex-workspace][data-comfort="comfortable"] .hex-installer-panel :where(p,label,summary,button,input) { font-size: 1rem; }
 [data-hex-workspace][data-comfort="compact"] .hex-installer-panel :where(p,label,summary,button) { font-size: .875rem; }
 [data-hex-workspace][data-product-theme="light"] .ca-atmosphere { opacity: .2; }
+
+/* Product-local evidence drawers: native scrolling, not a wheel handler.
+ * The shared outer scrolling plane is styled by the HEX consumer host. */
+[data-hex-workspace] :where(*) {
+  scrollbar-width: auto;
+  scrollbar-color: var(--workspace-focus) var(--workspace-canvas);
+}
+[data-hex-workspace] ::-webkit-scrollbar { width: 16px; height: 16px; }
+[data-hex-workspace] ::-webkit-scrollbar-track { background: var(--workspace-canvas); }
+[data-hex-workspace] ::-webkit-scrollbar-thumb {
+  background: var(--workspace-focus);
+  background-clip: padding-box;
+  border: 3px solid var(--workspace-canvas);
+  border-radius: 8px;
+  min-height: 44px;
+}
+[data-hex-workspace] ::-webkit-scrollbar-thumb:hover { background-color: var(--workspace-text); }
+[data-hex-workspace] ::-webkit-scrollbar-corner { background: var(--workspace-canvas); }
+[data-hex-workspace] .hex-installer-disclosure {
+  min-width: 0;
+  border: 1px solid var(--workspace-border-strong);
+  background: var(--workspace-canvas);
+}
+[data-hex-workspace] .hex-installer-disclosure > summary {
+  min-height: 48px;
+  padding: 12px 16px;
+  color: var(--workspace-text);
+  font-weight: 600;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+[data-hex-workspace] .hex-installer-disclosure > summary::marker { color: var(--workspace-focus); }
+[data-hex-workspace] .hex-installer-disclosure > summary:hover { background: var(--workspace-control-hover); }
+[data-hex-workspace] .hex-installer-disclosure[open] > summary { border-bottom: 1px solid var(--workspace-border); }
+[data-hex-workspace] .hex-installer-disclosure > p { padding: 12px 16px; }
+[data-hex-workspace] .hex-detail-scroll {
+  max-height: min(24rem, 55vh);
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: auto;
+  scroll-behavior: auto;
+  color: var(--workspace-text);
+}
+[data-hex-workspace] .hex-detail-scroll button { overflow-wrap: anywhere; white-space: normal; }
+[data-hex-workspace] :where(.hex-detail-scroll, .hex-installer-disclosure > summary):focus-visible {
+  outline: 2px solid var(--workspace-focus);
+  outline-offset: -3px;
+}
+@media (forced-colors: active) {
+  [data-hex-workspace] :where(*) { scrollbar-color: auto; }
+  [data-hex-workspace] .hex-installer-disclosure { border-color: ButtonText; }
+  [data-hex-workspace] .hex-detail-scroll:focus-visible,
+  [data-hex-workspace] .hex-installer-disclosure > summary:focus-visible { outline-color: Highlight; }
+}
+
+@media (forced-colors: active) { [data-hex-workspace] .ca-cursor-light { display: none; } }
+
+/* Owner palette: cyan is reserved for hyperlinks, the source-owned lamp and
+ * the shared window. Reading surfaces, actions and status cues remain neutral. */
+[data-hex-workspace] a[href] {
+  color: var(--workspace-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+[data-hex-workspace] [role="alert"] {
+  border-left: 3px solid var(--workspace-focus);
+  padding: 12px;
+  background: var(--workspace-control);
+}
+
+
+/* Empire OS responsive-grid/v1, Node 053b4da, responsiveGrid.mjs.
+ * Exact source declaration: 4/8/12 columns; 0/768/1024px; 12px margin/gutter.
+ * Product groups retain their order and behavior. These are their placements,
+ * not a claim to reproduce the complete Studio three-screen interaction shell.
+ * Query the actual product field, not the wider native/desktop viewport. */
+[data-hex-workspace] { container: hex-workspace / inline-size; }
+[data-hex-workspace] .hex-workspace-layout {
+  --empire-grid-columns: 4;
+  --empire-grid-gutter: 12px;
+  --empire-grid-margin: 12px;
+  width: 100%; max-width: none; min-width: 0;
+  box-sizing: border-box;
+  padding: var(--empire-grid-margin);
+}
+[data-hex-workspace] :is(.hex-workspace-frame,.hex-product-body,.hex-responsive-grid) {
+  display: grid;
+  grid-template-columns: repeat(var(--empire-grid-columns),minmax(0,1fr));
+  gap: var(--empire-grid-gutter);
+  min-width: 0;
+  align-items: start;
+}
+[data-hex-workspace] :is(.hex-workspace-frame,.hex-product-body) > *,
+[data-hex-workspace] .hex-responsive-grid > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+[data-hex-workspace] .hex-grid-quarters > * { grid-column: span 2; }
+[data-hex-workspace] :is(.hex-product-toolbar,.hex-workspace-heading,.hex-journey-panel,.hex-product-footer,.hex-installer-panel),
+[data-hex-workspace] .hex-product-body > section {
+  padding: var(--empire-grid-gutter);
+}
+[data-hex-workspace] .hex-product-toolbar > div { min-width: 0; width: 100%; }
+[data-hex-workspace] :is(input,select,textarea,fieldset) { min-width: 0; max-width: 100%; }
+[data-hex-workspace] button { max-width: 100%; }
+/* Preserve real touch targets: min-width resets must not defeat control utilities. */
+[data-hex-workspace] .hex-step-pager { flex-shrink: 0; max-width: 100%; }
+[data-hex-workspace] .hex-step-pager > button { min-width: 44px; min-height: 44px; flex: 0 0 44px; }
+[data-hex-workspace] :is(button,label,p,summary) { overflow-wrap: anywhere; }
+[data-hex-workspace] .hex-responsive-grid > [role="button"] { height: 100%; }
+@container hex-workspace (min-width: 768px) {
+  [data-hex-workspace] .hex-workspace-layout { --empire-grid-columns: 8; }
+  [data-hex-workspace] :is(.hex-grid-halves,.hex-grid-thirds) > * { grid-column: span 4; }
+  [data-hex-workspace] .hex-grid-thirds > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+@container hex-workspace (min-width: 1024px) {
+  [data-hex-workspace] .hex-workspace-layout { --empire-grid-columns: 12; }
+  [data-hex-workspace] .hex-grid-halves > * { grid-column: span 6; }
+  [data-hex-workspace] .hex-grid-thirds > *,
+  [data-hex-workspace] .hex-grid-thirds > :last-child:nth-child(odd) { grid-column: span 4; }
+  [data-hex-workspace] .hex-grid-quarters > * { grid-column: span 3; }
+}
+[data-hex-workspace] .hex-responsive-grid > .hex-grid-full { grid-column: 1 / -1; }

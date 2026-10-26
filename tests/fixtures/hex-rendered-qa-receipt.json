@@ -1,0 +1,93 @@
+{
+  "reported_by": "Root task agent conducting actual rendered QA",
+  "reported_at_utc": "2026-10-26T22:45:38Z",
+  "method": "Actual rendered production-page/browser and extracted DEV8 native app; not JSDOM geometry",
+  "wide_browser": {
+    "viewport_width": 1180,
+    "pager": {
+      "count": 5,
+      "widths": [
+        44,
+        44,
+        44,
+        44,
+        44
+      ],
+      "heights": [
+        44,
+        44,
+        44,
+        44,
+        44
+      ],
+      "x": [
+        896,
+        946,
+        996,
+        1046,
+        1096
+      ]
+    },
+    "result": "PASS"
+  },
+  "narrow_browser": {
+    "viewport_width": 640,
+    "surface": "640px iframe loading exact unchanged production page",
+    "pager": {
+      "count": 5,
+      "widths": [
+        44,
+        44,
+        44,
+        44,
+        44
+      ],
+      "heights": [
+        44,
+        44,
+        44,
+        44,
+        44
+      ],
+      "x": [
+        356,
+        406,
+        456,
+        506,
+        556
+      ]
+    },
+    "document": {
+      "clientWidth": 640,
+      "scrollWidth": 640
+    },
+    "work_plane": {
+      "clientWidth": 559,
+      "scrollWidth": 559
+    },
+    "horizontal_overflow": false,
+    "groups": "Existing groups stack",
+    "toolbar": "Wraps",
+    "result": "PASS"
+  },
+  "native_dev8": {
+    "window_widths_observed": [
+      1188,
+      1440
+    ],
+    "light_dark_toggle": "OBSERVED",
+    "package_availability": {
+      "cli": true,
+      "bins": false,
+      "switchboard": false
+    },
+    "global_containment_and_neutral_scrollbars": "Included in binary",
+    "narrow_640": "NOT_QUALIFIED: native edge-resize input did not establish 640px"
+  },
+  "qa_only_fixture": {
+    "path": "dist/__qa/narrow.html",
+    "created_after_native_package": true,
+    "included_in_native_package": false
+  },
+  "qualification": "Root-observed scoped readback; not owner Aries installed acceptance, not narrow Tauri acceptance, not full Oct25 section interaction parity"
+}
