@@ -1,0 +1,22 @@
+{
+  "status": "IMMUTABLE_ARTIFACT_COMMIT_PINNED_LOCAL_SOURCE_QUALIFICATION",
+  "source_script_sha256": "c82f23e84959cfc72fc3888b7dae777d97235a5a60cd965b4efc0d866bd2f78d",
+  "draft_script_sha256": "6815a3139404e2f356a3aab2d9cfa1bdfe695a24cd3199e1e544ab591a93edf0",
+  "draft_guard_sha256": "1b13f206deeea42ee04da379da3101ab91b56427ee6b700bcc6f606a2d5771d3",
+  "replacement_fields": {
+    "0.1.0-dev.6": "0.1.0-dev.7",
+    "7f2aa8af513adde056a687c98dd8e53fa27e78b27d75c7ead2ad582c8f5a85f3": "8fa60db63942ce2e809a948a00ce1204f069a5bb1c6369658de3cb3f5be816f9",
+    "6664296": "6665294",
+    "2b162224ab9ad0e1dbc128d41bdcd90ca16acac9": "b0b4e7845b1d4f95498c8cac7e9c1e8e929e61a2",
+    "xiio-hex-dev6.": "xiio-hex-dev7.",
+    "HEX DEV6 installed": "HEX DEV7 installed"
+  },
+  "artifact": {
+    "version": "0.1.0-dev.7",
+    "size": 6665294,
+    "sha256": "8fa60db63942ce2e809a948a00ce1204f069a5bb1c6369658de3cb3f5be816f9"
+  },
+  "pending": "External publication/readback and owner installation/acceptance are separate; local final-byte qualification does not assert them.",
+  "artifact_commit": "b0b4e7845b1d4f95498c8cac7e9c1e8e929e61a2",
+  "final_script_sha256": "f5724a7a07fdcaafec48b8e86ed7bfa4dfe3f30628498b6f0e638adfec9913f6"
+}
