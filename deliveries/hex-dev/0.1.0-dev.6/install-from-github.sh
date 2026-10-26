@@ -29,7 +29,7 @@ fi
 printf '\nThis installs/updates only XI-IO HEX DEV. It does NOT repair the CLI automatically.\nNo Node download, model move, service startup or CLI generation replacement.\n'
 read -r -p 'Type INSTALL to proceed with the displayed package change: ' approval
 [[ "$approval" == INSTALL ]] || { echo "Cancelled; nothing installed."; exit 1; }
-sudo apt-get --no-remove install "$deb"
+sudo apt-get -o DPkg::Lock::Timeout=0 --no-remove install "$deb"
 [[ "$(dpkg-query -W -f='${Version}' xi-io-hex-dev)" == 0.1.0-dev.6 ]]
 echo "HEX DEV6 installed. Open XI-IO HEX DEV from your applications menu."
 echo "Select Install, then Repair only the existing CLI launcher."
