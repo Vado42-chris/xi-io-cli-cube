@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "XI-IO HEX DEV",
+  "version": "0.1.0-dev.4",
+  "identifier": "com.xiio.hex.dev",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
+      "capabilities": [
+        "hex-local"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "resources": {
+      "../../adapter/": "adapter/",
+      "../../cli-source/": "cli-source/"
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "python3 (>= 3.10)",
+          "bash",
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
+      }
+    },
+    "icon": [
+      "icons/icon.png"
+    ],
+    "shortDescription": "DEV candidate for the XI-IO HEX local CLI installer; not a LIVE release",
+    "longDescription": "Separately named development candidate of the existing HEX installer. Installs and tests only explicitly selected CLI payloads after review. Package isolation is not DEV/TEST/LIVE workspace provisioning, Ward admission, authenticated host connectivity, or permission to modify an existing LIVE installation."
+  }
+}

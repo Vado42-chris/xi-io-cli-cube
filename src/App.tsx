@@ -10,6 +10,8 @@ import TabletBackdrop from './components/TabletBackdrop';
 import ExternalSiteLink from './components/ExternalSiteLink';
 import RollbackHistory from './components/RollbackHistory';
 import NativeInstallerPanel from './components/NativeInstallerPanel';
+import LocalJourneyControls from './components/LocalJourneyControls';
+import {selectNativeDirectory} from './lib/nativeDirectory.mjs';
 import { validateCasReceipt } from './cas-receipt.mjs';
 import { compareVersionReport } from './version-readback.mjs';
 import { 
@@ -245,6 +247,15 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
   const [journeyStep, setJourneyStep] = useState<number>(1);
   const [journeyMode, setJourneyMode] = useState<'local' | 'account'>('local');
   const [selectedFolder, setSelectedFolder] = useState<string>('');
+  const [localCheckPlanId, setLocalCheckPlanId] = useState<string>('');
+  const [folderSelectionMessage, setFolderSelectionMessage] = useState('');
+  async function chooseWorkspaceFolder() {
+    try {
+      const selected = await selectNativeDirectory('workspace');
+      if (selected !== null) setSelectedFolder(selected);
+      setFolderSelectionMessage(selected === null ? 'Directory selection cancelled.' : 'Directory selected. Access still requires its existing permission checks.');
+    } catch (error) { setFolderSelectionMessage(String(error instanceof Error ? error.message : error)); }
+  }
   
   // Local AI readiness state (distinguishes 0 models from daemon offline!)
   const [ollamaStatus, setOllamaStatus] = useState<'not_checked' | 'ready' | 'no_models' | 'offline'>('not_checked');
@@ -784,15 +795,15 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         type="button"
                         onClick={() => setJourneyStep(s)}
                         aria-label={`Jump to step ${s}`}
+                        aria-current={journeyStep === s ? 'step' : undefined}
+                        title="Navigation only — not a completed check"
                         className={`min-h-[44px] min-w-[36px] rounded-none font-mono text-xs font-bold transition-all ${
                           journeyStep === s
                             ? 'bg-workspace-focus text-workspace-inverse ring-2 ring-workspace-focus/50'
-                            : journeyStep > s
-                              ? 'bg-emerald-500/20 text-workspace-success border border-emerald-500/40'
-                              : 'bg-workspace-surface text-workspace-muted'
+                            : 'bg-workspace-surface text-workspace-muted'
                         }`}
                       >
-                        {journeyStep > s ? '✓' : s}
+                        {s}
                       </button>
                     ))}
                   </div>
@@ -930,7 +941,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       <div>
                         <h3 className="font-bold text-base">Step 3: What do you want to work on?</h3>
                         <p className="text-xs text-workspace-muted">
-                          Enter a project path for this example. This page has not selected a folder or checked its permissions.
+                          Choose your project directory using the native folder picker. Selecting a directory does not grant permissions.
                         </p>
                       </div>
                     </div>
@@ -950,16 +961,16 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         />
                         <button
                           type="button"
-                          onClick={() => setSelectedFolder('/example/project')}
+                          onClick={() => void chooseWorkspaceFolder()}
                           className="min-h-[48px] px-4 rounded-none bg-workspace-surface hover:bg-workspace-surface text-workspace-text text-xs font-medium"
                         >
-                          Use Sample
+                          Choose Folder
                         </button>
                       </div>
 
                       <div className="flex items-center gap-2 text-xs text-workspace-muted pt-1">
                         <Info className="w-4 h-4" />
-                        <span>Access not checked. Typing or selecting a sample path does not grant file permissions.</span>
+                        <span>{folderSelectionMessage || 'Access not checked. Selecting a directory does not grant file permissions.'}</span>
                       </div>
                     </div>
 
@@ -993,152 +1004,12 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       <div>
                         <h3 className="font-bold text-base">Step 4: Set Up Your Local AI</h3>
                         <p className="text-xs text-workspace-muted">
-                          Local AI has not been checked. The examples below illustrate possible states; they do not contact or install a model runtime.
+                          Check the local runtime and installed models without starting, installing or loading anything.
                         </p>
                       </div>
                     </div>
 
-                    {/* Ollama Readiness State Card */}
-                    <div className="p-4 rounded-none bg-workspace-canvas border border-workspace-border space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-workspace-border">
-                        <div>
-                          <div className="text-xs font-semibold text-workspace-text flex items-center gap-2">
-                            <span>Local AI Status:</span>
-                            {ollamaStatus === 'not_checked' && <span>Not checked on this computer</span>}
-                            {ollamaStatus === 'ready' && (
-                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-workspace-success border border-emerald-500/30 text-[11px] font-mono">
-                                Example: {selectedModel} ready
-                              </span>
-                            )}
-                            {ollamaStatus === 'no_models' && (
-                              <span className="px-2 py-0.5 rounded bg-workspace-focus/20 text-workspace-focus border border-workspace-border-strong/30 text-[11px] font-mono">
-                                Example: runtime running with no models
-                              </span>
-                            )}
-                            {ollamaStatus === 'offline' && (
-                              <span className="px-2 py-0.5 rounded bg-rose-500/20 text-workspace-danger border border-rose-500/30 text-[11px] font-mono">
-                                Example: runtime unavailable
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Interactive State Toggle (Audit Verification) */}
-                        <div className="flex items-center gap-1.5 text-[11px]">
-                          <span className="text-workspace-muted">Preview example:</span>
-                          {(['ready', 'no_models', 'offline'] as const).map((st) => (
-                            <button
-                              key={st}
-                              type="button"
-                              onClick={() => setOllamaStatus(st)}
-                              className={`px-2 py-0.5 rounded font-mono capitalize ${
-                                ollamaStatus === st ? 'bg-workspace-focus text-workspace-inverse font-bold' : 'bg-workspace-surface text-workspace-text'
-                              }`}
-                            >
-                              {st === 'no_models' ? 'Empty (0 Models)' : st}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Display when: 0 models installed (CRITICAL AUDIT FIX) */}
-                      {ollamaStatus === 'no_models' && (
-                        <div className="p-3.5 rounded-none bg-workspace-surface/30 border border-workspace-border-strong/40 text-xs text-workspace-focus space-y-3">
-                          <div className="flex items-start gap-2">
-                            <Info className="w-4 h-4 text-workspace-focus shrink-0 mt-0.5" />
-                            <div>
-                              <strong className="text-workspace-focus">Example: a runtime with no installed models.</strong>
-                              <p className="text-[11px] text-workspace-text mt-1">
-                                This is not a reading of your computer. Model installation is not connected here. A separately configured runtime may offer commands such as <code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-focus">ollama run qwen2.5:coder</code> in your terminal.
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-3 pt-1">
-                            <button
-                              type="button"
-                              onClick={handlePullModel}
-                              disabled={true} title="Model download is not connected in this build"
-                              className="min-h-[48px] px-4 py-2 rounded-none bg-workspace-focus hover:bg-workspace-focus text-workspace-inverse font-bold text-xs flex items-center gap-2"
-                            >
-                              {isPullingModel ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                              <span>{'Model download not connected'}</span>
-                            </button>
-                            <span className="text-[11px] text-workspace-muted font-mono">Download size and available disk space have not been checked.</span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Display when: Ready */}
-                      {ollamaStatus === 'ready' && (
-                        <div className="p-3.5 rounded-none bg-workspace-surface border border-emerald-500/40 text-xs text-workspace-success">
-                          <div className="flex items-center gap-2 font-semibold text-workspace-success mb-1">
-                            <CheckCircle2 className="w-4 h-4 text-workspace-success" />
-                            <span>Example only — no model connection verified</span>
-                          </div>
-                          <p className="text-[11px] text-workspace-text">
-                            Model <code className="font-mono text-workspace-success">{selectedModel}</code> is a sample selection. This page has not checked whether it is installed or loaded.
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Display when: Daemon Offline */}
-                      {ollamaStatus === 'offline' && (
-                        <div className="p-3.5 rounded-none bg-workspace-surface border border-rose-500/40 text-xs text-workspace-danger">
-                          <div className="flex items-center gap-2 font-semibold text-workspace-danger mb-1">
-                            <AlertCircle className="w-4 h-4 text-workspace-danger" />
-                            <span>Example only — runtime state not checked</span>
-                          </div>
-                          <p className="text-[11px] text-workspace-text">
-                            If a real check reports an unavailable runtime, its own setup guide may suggest <code className="font-mono bg-workspace-surface px-1 py-0.5 rounded text-workspace-danger">ollama serve</code> in your terminal. You can also proceed in offline mode without AI.
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Prompt & Honest Microphone Affordance (NO FAKE RECORDING ANIMATION) */}
-                      <div className="pt-2 space-y-2">
-                        <label htmlFor="user-prompt" className="block text-xs font-semibold text-workspace-text">
-                          Example assistant prompt (not sent):
-                        </label>
-                        <div className="relative flex items-center">
-                          <input
-                            id="user-prompt"
-                            type="text"
-                            value={promptText}
-                            onChange={(e) => setPromptText(e.target.value)}
-                            className="min-h-[48px] w-full px-3 py-2 pr-12 rounded-none bg-workspace-surface border border-workspace-border-strong text-xs text-workspace-text focus:outline-none focus:ring-2 focus:ring-workspace-focus"
-                            placeholder="e.g. Add unit tests for calculation..."
-                          />
-                          {/* Microphone Button with Honest Non-Fake Action */}
-                          <button
-                            type="button"
-                            onClick={handleMicrophoneClick}
-                            aria-label="Microphone voice input"
-                            className={`min-h-[44px] min-w-[40px] absolute right-1.5 p-2 rounded-none flex items-center justify-center transition-all ${
-                              micStatus === 'checking'
-                                ? 'bg-workspace-focus/20 text-workspace-focus'
-                                : 'text-workspace-muted hover:text-workspace-text'
-                            }`}
-                          >
-                            {micStatus === 'checking' ? (
-                              <RefreshCw className="w-4 h-4 animate-spin text-workspace-focus" />
-                            ) : micStatus === 'unsupported' ? (
-                              <MicOff className="w-4 h-4 text-workspace-muted" />
-                            ) : (
-                              <Mic className="w-4 h-4" />
-                            )}
-                          </button>
-                        </div>
-
-                        {/* Honest Microphone Message Display */}
-                        {micMessage && (
-                          <div role="status" aria-live="polite" className="p-2.5 rounded bg-workspace-surface border border-workspace-border text-[11px] text-workspace-text flex items-start gap-2">
-                            <Info className="w-3.5 h-3.5 text-workspace-focus shrink-0 mt-0.5" />
-                            <span>{micMessage}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <LocalJourneyControls step={4} workspace={selectedFolder} planId={localCheckPlanId} onPlanId={setLocalCheckPlanId} />
 
                     <div className="flex justify-between pt-2">
                       <button
@@ -1170,108 +1041,12 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       <div>
                         <h3 className="font-bold text-base">Step 5: Try One Safe Task (CAS Pre-Commit Guard)</h3>
                         <p className="text-xs text-workspace-muted">
-                          Interactive example only. These controls change sample text in this page, not project files. They do not test the installed editor or file permissions.
+                          Review and approve one fixed disposable local file test using the installed CLI CAS guard. Existing project files remain unchanged.
                         </p>
                       </div>
                     </div>
 
-                    {/* Interactive File Preview and Proposal */}
-                    <div className="p-4 rounded-none bg-workspace-canvas border border-workspace-border space-y-3">
-                      <div className="flex items-center justify-between text-xs pb-2 border-b border-workspace-border">
-                        <span className="font-mono text-workspace-text">File: app.ts</span>
-                        <span className="font-mono text-[11px] text-workspace-muted">
-                          Base Digest: {proposalBaseDigest.slice(0, 12)}...
-                        </span>
-                      </div>
-
-                      <div className="p-3 rounded bg-workspace-surface border border-workspace-border font-mono text-xs text-workspace-text overflow-x-auto whitespace-pre">
-                        {fileContent}
-                      </div>
-
-                      <div className="p-3 rounded bg-workspace-surface/20 border border-workspace-border-strong/30 text-xs text-workspace-focus space-y-1">
-                        <div className="font-semibold text-workspace-focus">Proposed Assistant Edit:</div>
-                        <div className="font-mono text-[11px] text-workspace-success">
-                          + export function welcome() &#123; return &quot;Welcome to XI-IO&quot;; &#125;
-                        </div>
-                      </div>
-
-                      {/* Interactive Demonstration Controls */}
-                      <div className="flex items-center gap-3 flex-wrap pt-2">
-                        <button
-                          type="button"
-                          onClick={handleApproveProposal}
-                          className="min-h-[48px] px-5 py-2.5 rounded-none bg-workspace-focus hover:bg-workspace-focus text-workspace-inverse font-bold text-xs flex items-center gap-1.5 transition-all focus-visible:ring-2 focus-visible:ring-emerald-400"
-                        >
-                          <Check className="w-4 h-4" />
-                          <span>Apply Example (No File Write)</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleSimulateExternalCollision}
-                          className="min-h-[48px] px-4 py-2 rounded-none bg-workspace-surface hover:bg-workspace-surface text-workspace-text text-xs font-medium border border-workspace-border-strong flex items-center gap-1.5"
-                        >
-                          <AlertTriangle className="w-4 h-4 text-workspace-focus" />
-                          <span>Change Example Digest</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleRollbackTask}
-                          className="min-h-[48px] px-4 py-2 rounded-none bg-workspace-surface hover:bg-workspace-surface text-workspace-text text-xs font-medium border border-workspace-border-strong flex items-center gap-1.5"
-                        >
-                          <RotateCcw className="w-4 h-4 text-workspace-text" />
-                          <span>Reset Example</span>
-                        </button>
-                      </div>
-
-                      {/* Task Outcome Banner */}
-                      {taskOutcome.message && (
-                        <div
-                          role="status"
-                          aria-live="polite"
-                          className={`p-3.5 rounded-none border text-xs leading-relaxed ${
-                            taskOutcome.status === 'conflict_refused'
-                              ? 'bg-workspace-surface border-rose-500/60 text-workspace-danger'
-                              : taskOutcome.status === 'approved'
-                                ? 'bg-workspace-surface border-emerald-500/60 text-workspace-success'
-                                : 'bg-workspace-surface border-blue-500/60 text-workspace-text'
-                          }`}
-                        >
-                          <div className="font-bold flex items-center gap-2 mb-1">
-                            {taskOutcome.status === 'conflict_refused' && <ShieldAlert className="w-4 h-4 text-workspace-danger" />}
-                            {taskOutcome.status === 'approved' && <CheckCircle2 className="w-4 h-4 text-workspace-success" />}
-                            {taskOutcome.status === 'rolled_back' && <RotateCcw className="w-4 h-4 text-workspace-text" />}
-                            <span>
-                              {taskOutcome.status === 'conflict_refused' && 'Example conflict refused'}
-                              {taskOutcome.status === 'approved' && 'Example changed — no file write'}
-                              {taskOutcome.status === 'rolled_back' && 'Example reset — no disk rollback'}
-                            </span>
-                          </div>
-                          <div>{taskOutcome.message}</div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Final "You're Ready!" Confirmation */}
-                    {taskOutcome.status === 'approved' && (
-                      <div className="p-4 rounded-none bg-emerald-500/10 border border-emerald-500/30 text-workspace-success text-xs flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <Sparkles className="w-6 h-6 text-workspace-success shrink-0" />
-                          <div>
-                            <div className="font-bold text-sm text-workspace-text">Example complete</div>
-                            <div>Your computer has not been tested or changed by this example.</div>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setPerspective('auditor')}
-                          className="min-h-[44px] px-4 py-2 rounded-none bg-workspace-focus text-workspace-inverse font-bold text-xs"
-                        >
-                          Inspect Evidence
-                        </button>
-                      </div>
-                    )}
+                    <LocalJourneyControls step={5} workspace={selectedFolder} planId={localCheckPlanId} onPlanId={setLocalCheckPlanId} />
 
                     <div className="flex justify-between pt-2">
                       <button

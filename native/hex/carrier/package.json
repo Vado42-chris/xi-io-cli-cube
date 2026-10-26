@@ -1,0 +1,14 @@
+{
+  "name": "xi-io-hex-dev",
+  "private": true,
+  "version": "0.1.0-dev.4",
+  "scripts": {
+    "tauri": "tauri",
+    "build:native": "tauri build",
+    "test:contract": "python3 -I tests/check_contract.py"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.8.4"
+  },
+  "description": "DEV build tooling for the existing XI-IO HEX CLI installer"
+}

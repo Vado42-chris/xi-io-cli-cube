@@ -188,8 +188,8 @@
   "artifact_files": [
     {
       "path": "window-frame.mjs",
-      "sha256": "864684a2a5a140892b9f779e60dfe75fa639d784c2158a09da977e15640b1176",
-      "bytes": 416740
+      "sha256": "eb7a522ba83a353407c7ffa02b634a7cc425d224c11445c1bb87fbb59e45c112",
+      "bytes": 416735
     },
     {
       "path": "window-frame.css",
@@ -207,5 +207,15 @@
   "provider_calls_on_open": "NONE_IN_PRESENTATION_IMPORT_GRAPH",
   "browser_native_controls": "DISABLED",
   "native_runtime": "NOT_RUN",
-  "consumer_binding_review": "Existing cyan-500 product binding; canonical inputs and generated artifact bytes unchanged from reviewed click generation. Rebuilt CSS is byte-identical."
+  "consumer_binding_review": "Existing cyan-500 product binding and reviewed visual design retained. Generated window-frame.mjs has the explicitly recorded local native-drag guard patch; CSS unchanged. See consumer_patches for exact before/after custody.",
+  "consumer_patches": [
+    {
+      "id": "hex-native-maximized-drag-20261026",
+      "artifact": "window-frame.mjs",
+      "before_sha256": "864684a2a5a140892b9f779e60dfe75fa639d784c2158a09da977e15640b1176",
+      "after_sha256": "eb7a522ba83a353407c7ffa02b634a7cc425d224c11445c1bb87fbb59e45c112",
+      "scope": "Remove maximized-only suppression of native drag; existing Tauri/GTK window manager owns restore-on-drag; fullscreen and disabled remain blocked. No UI design change.",
+      "qualification": "LOCAL_CANDIDATE_NOT_UPSTREAM_ADOPTED; native QA pending"
+    }
+  ]
 }

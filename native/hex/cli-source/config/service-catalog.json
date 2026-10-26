@@ -1,0 +1,169 @@
+{
+  "schema": "xiio.cli.service-catalog/v1",
+  "product": "xi-io: CLI",
+  "rules": [
+    "SERVICE_ID != PROCESS_NAME != MACHINE_NODE != AGENT_REF",
+    "ENGINE != MODEL",
+    "MODEL_SELECTION != RUNTIME_INSTALL",
+    "SERVICE_PRESENT != SERVICE_HEALTHY",
+    "SERVICE_HEALTHY != EFFECT_AUTHORITY",
+    "START != READY != USABLE",
+    "INSTALL_PLAN != INSTALL_APPLY"
+  ],
+  "profiles": {
+    "aries-dev": {
+      "node_ref": "node.aries",
+      "description": "Development workstation profile",
+      "services": [
+        "ollama",
+        "ibal",
+        "studio-ui",
+        "api-glass-private",
+        "dev-gateway",
+        "inbox",
+        "crm",
+        "hex",
+        "cloudflared"
+      ]
+    },
+    "loki-live": {
+      "node_ref": "node.loki",
+      "description": "Temporary live/public hosting and adversarial UX host",
+      "services": [
+        "public-web",
+        "cloudflared"
+      ]
+    }
+  },
+  "services": [
+    {
+      "id": "ollama",
+      "class": "ai_engine",
+      "runtime": "ollama",
+      "model_agnostic": true,
+      "probe": "http://127.0.0.1:11434/api/tags",
+      "systemd_candidates": [
+        "ollama.service"
+      ],
+      "install_provider": "ollama"
+    },
+    {
+      "id": "ibal",
+      "class": "ai_orchestrator",
+      "runtime": "xi-io: Ibal",
+      "model_agnostic": true,
+      "probe": "https://127.0.0.1:3000/",
+      "systemd_candidates": [
+        "xiio-ibal.service",
+        "xi-io-ibal.service"
+      ]
+    },
+    {
+      "id": "studio-ui",
+      "class": "web_ui",
+      "probe": "http://127.0.0.1:3099/",
+      "systemd_candidates": [
+        "xiio-studio.service",
+        "xi-io-studio.service"
+      ]
+    },
+    {
+      "id": "api-glass-private",
+      "class": "truth_api",
+      "probe": "http://127.0.0.1:4391/healthz",
+      "systemd_candidates": [
+        "xiio-dev-truth.service"
+      ]
+    },
+    {
+      "id": "dev-gateway",
+      "class": "web_gateway",
+      "probe": "http://127.0.0.1:4390/__xiio/dev-health",
+      "systemd_candidates": [
+        "xiio-dev.service"
+      ]
+    },
+    {
+      "id": "inbox",
+      "class": "mail_ui",
+      "probe": "http://127.0.0.1:8791/api/health",
+      "systemd_candidates": [
+        "xiio-inbox-dogfood-8791.service",
+        "xiio-inbox.service"
+      ]
+    },
+    {
+      "id": "crm",
+      "class": "crm",
+      "probe": "http://127.0.0.1:8794/api/health",
+      "systemd_candidates": [
+        "xiio-crm-8794.service",
+        "xiio-crm.service"
+      ]
+    },
+    {
+      "id": "hex",
+      "class": "operator_control",
+      "probe": "http://127.0.0.1:8798/health",
+      "systemd_candidates": [
+        "xi-io-hex-rc.service",
+        "xiio-hex.service"
+      ]
+    },
+    {
+      "id": "cloudflared",
+      "class": "edge_tunnel",
+      "probe": null,
+      "systemd_candidates": [
+        "cloudflared.service"
+      ]
+    },
+    {
+      "id": "public-web",
+      "class": "web_public",
+      "probe": "http://127.0.0.1/",
+      "systemd_candidates": [
+        "nginx.service",
+        "caddy.service",
+        "apache2.service"
+      ]
+    },
+    {
+      "id": "mail-server",
+      "class": "mail_transport",
+      "probe": null,
+      "systemd_candidates": [
+        "postfix.service",
+        "dovecot.service"
+      ],
+      "install_provider": "system-mail",
+      "state": "PROFILE_REQUIRED_NOT_AUTO_INSTALLED"
+    }
+  ],
+  "ai_engines": [
+    {
+      "id": "ollama",
+      "kind": "local_open_model_runtime",
+      "default_base": "http://127.0.0.1:11434",
+      "model_discovery": "/api/tags"
+    },
+    {
+      "id": "openai-compatible",
+      "kind": "openai_compatible",
+      "default_base": null,
+      "model_discovery": "/v1/models"
+    },
+    {
+      "id": "anthropic-compatible",
+      "kind": "anthropic_compatible",
+      "default_base": null,
+      "model_discovery": null
+    },
+    {
+      "id": "gemini-compatible",
+      "kind": "gemini_compatible",
+      "default_base": null,
+      "model_discovery": null
+    }
+  ]
+}

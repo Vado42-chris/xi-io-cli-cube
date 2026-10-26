@@ -1,0 +1,36 @@
+{
+  "repository": "Vado42-chris/xi-io-Switchboard",
+  "ref": "ffbcd216d4c673de826242662271add63112c49a",
+  "files": [
+    {
+      "path": "scripts/device-native-consumer.mjs",
+      "blob": "279a3ae2b48ac4579b5ae2f74be734e7dfcdf508",
+      "sha256": "418b840eb2a4f18ff3dd743aa14e082c3ef1d07bb507edc01a40352200531351",
+      "size": 4556
+    },
+    {
+      "path": "lib/device-broker.mjs",
+      "blob": "be93079399ce2efa9504c34024e9f4b722afb4c2",
+      "sha256": "142f291535e21c5d238351d09e36ab09398da96e9530efba8bde34b845dac6aa",
+      "size": 11356
+    },
+    {
+      "path": "lib/device-execute-pull-worker.mjs",
+      "blob": "aaea575da960a1d90e9b60100e2c0732f68dd2c7",
+      "sha256": "a6192a2e1695a48ddb727b7742482fa74526da3224d65f34a882f96321234aa8",
+      "size": 14125
+    },
+    {
+      "path": "lib/device-execute.mjs",
+      "blob": "e8d05460d1d7852a5e96418d33f3fc8a73f9f590",
+      "sha256": "3bb24e7702e421c7f1ce9f61f13453df496e93d8c61030a08e20c7dfe282ca23",
+      "size": 40484
+    },
+    {
+      "path": "lib/operational-job.ts",
+      "blob": "c926d6806a5c36230ddd37b71303c2028c0ae1c7",
+      "sha256": "a4a97ba764ebd79b7678ccc3feae76f28b6b141912b1ed0e7764b4725087f3fe",
+      "size": 30665
+    }
+  ]
+}
