@@ -3,8 +3,13 @@ set -euo pipefail
 export LC_ALL=C
 [[ "$(id -u)" != 0 ]] || { echo "Run as your normal user, not root."; exit 1; }
 [[ "$(uname -s)" == Linux && "$(dpkg --print-architecture)" == amd64 ]] || { echo "Linux amd64 required."; exit 1; }
-for tool in curl sha256sum dpkg-deb apt-get python3; do command -v "$tool" >/dev/null || { echo "Missing requirement: $tool"; exit 1; }; done
-if pgrep -x xi-io-hex-dev >/dev/null 2>&1; then echo "Close XI-IO HEX DEV first, then rerun. No process was stopped."; exit 1; fi
+for tool in curl sha256sum dpkg-deb dpkg dpkg-query apt-get pgrep awk mktemp; do command -v "$tool" >/dev/null || { echo "Missing requirement: $tool"; exit 1; }; done
+if pgrep -x xi-io-hex-dev >/dev/null 2>&1; then
+ echo "Close XI-IO HEX DEV first, then rerun. No process was stopped."; exit 1
+else
+ status=$?
+ [[ "$status" == 1 ]] || { echo "Cannot establish whether HEX is running; stopped."; exit 1; }
+fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/xiio-hex-dev6.XXXXXXXX")"
 deb="$work/xi-io-hex-dev_0.1.0-dev.6_amd64.deb"
 echo "Temporary download and apt review: $work"
@@ -18,7 +23,7 @@ if [[ -n "$installed" ]] && dpkg --compare-versions "$installed" gt 0.1.0-dev.6;
 apt-get --simulate --no-remove install "$deb" >"$work/apt-plan.txt"
 cat "$work/apt-plan.txt"
 if grep -q '^Remv ' "$work/apt-plan.txt"; then echo "Refusing package removal."; exit 1; fi
-if awk '/^Inst / && $2 != "xi-io-hex-dev" {found=1} END {exit !found}' "$work/apt-plan.txt"; then
+if awk '/^(Inst|Conf) / && $2 != "xi-io-hex-dev" {found=1} END {exit !found}' "$work/apt-plan.txt"; then
  echo "Other packages would change. Stopped for separate review; nothing installed."; exit 1
 fi
 printf '\nThis installs/updates only XI-IO HEX DEV. It does NOT repair the CLI automatically.\nNo Node download, model move, service startup or CLI generation replacement.\n'
