@@ -1,0 +1,41 @@
+{
+  "schema": "xiio.hex.test-fixture-source/v1",
+  "repository": "Vado42-chris/xi-io-cli",
+  "ref": "b56adb5cbf34bcd9102f46df297aa42395ef41eb",
+  "modified": false,
+  "scope": "Test-only upstream two-generation offline fixture, excluded from native resources",
+  "files": {
+    "config/service-catalog.json": {
+      "sha256": "8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88",
+      "size": 3970
+    },
+    "install.mjs": {
+      "sha256": "118a7df1e952602aaf9b9c93d4e8aae62c527f15150463e8b2cb0645da3ab137",
+      "size": 36015
+    },
+    "scripts/reconcile-service-inventory.mjs": {
+      "sha256": "eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e",
+      "size": 3960
+    },
+    "scripts/service-inventory.mjs": {
+      "sha256": "4711d6603f759607e79cadc1031f8668ef27b393f25b408b9ecd5516ebc18204",
+      "size": 7287
+    },
+    "src/file-edit-cas.mjs": {
+      "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
+      "size": 3788
+    },
+    "src/runtime-integrity.mjs": {
+      "sha256": "de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912",
+      "size": 10728
+    },
+    "src/xiio.mjs": {
+      "sha256": "561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b",
+      "size": 79672
+    },
+    "test/launcher_repair_fixture.py": {
+      "sha256": "752eba08991d61165eb294928736cd2f676ca22791acc1d031e27462800dd692",
+      "size": 1976
+    }
+  }
+}

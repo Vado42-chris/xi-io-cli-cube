@@ -1,0 +1,16 @@
+{
+  "schema": "xiio.hex.launcher-repair-source/v1",
+  "repository": "Vado42-chris/xi-io-cli",
+  "ref": "b56adb5cbf34bcd9102f46df297aa42395ef41eb",
+  "upstream_path": "install.mjs",
+  "resource": "launcher-repair.install.mjs",
+  "sha256": "118a7df1e952602aaf9b9c93d4e8aae62c527f15150463e8b2cb0645da3ab137",
+  "size": 36015,
+  "modifications": false,
+  "scope": "Exact PR15 installer only for --repair-launcher; existing offline install.mjs remains unchanged",
+  "verification_resource": {
+    "path": "src/runtime-integrity.mjs",
+    "sha256": "de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912",
+    "upstream_ref": "b56adb5cbf34bcd9102f46df297aa42395ef41eb"
+  }
+}

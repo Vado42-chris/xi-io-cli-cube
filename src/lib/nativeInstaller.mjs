@@ -8,6 +8,10 @@ export function installerStatus(plan, observed = false) {
   if (plan.do_not_retry || ['APPLYING', 'APPLY_OUTCOME_UNCERTAIN', 'ROLLING_BACK', 'ROLLBACK_OUTCOME_UNCERTAIN', 'EVIDENCE_UNREADABLE_DO_NOT_RETRY'].includes(plan.phase)) {
     return {tone: 'warning', message: 'Outcome uncertain. Check actual state; do not repeat the operation.'};
   }
+  if (plan.phase === 'PREPARED_REPAIR_NOT_APPLIED') return {tone: 'neutral', message: 'Launcher-only repair prepared. Existing CLI generations and runtime will be retained. Review before approval.'};
+  if (plan.phase === 'LAUNCHER_REPAIR_READBACK_VERIFIED') return observed
+    ? {tone: 'success', message: 'Launcher bytes and version execution verified; generation history preserved. Doctor and an approved local read still require acceptance. No remote connection is claimed.'}
+    : {tone: 'neutral', message: 'History records launcher repair. Recheck actual state before treating it as current.'};
   if (plan.phase === 'INSTALLED_READBACK_VERIFIED') return observed
     ? {tone: 'success', message: 'Files installed and read back; services not started. Remote connection is not configured by this installer.'}
     : {tone: 'neutral', message: 'History records an installation. Check actual state before treating it as current.'};

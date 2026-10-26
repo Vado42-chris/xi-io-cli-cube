@@ -89,3 +89,79 @@ purpose `workspace`; the installation-prefix chooser uses `installation`. No
 sample path, browser fallback or permission inference. ABI for installer_request
 is unchanged. Tests: `test_install_preflight.py`, frontend
 `test/native-directory.test.mjs`, `test/installer-availability.test.mjs`.
+
+## Exact PR15 existing-launcher repair (separate from generation installation)
+
+The same adapter and native installer bundle now expose a launcher-only plan.
+`../cli-source/launcher-repair.install.mjs` is **unchanged** upstream
+`Vado42-chris/xi-io-cli@b56adb5cbf34bcd9102f46df297aa42395ef41eb`, SHA256
+`118a7df1e952602aaf9b9c93d4e8aae62c527f15150463e8b2cb0645da3ab137`.
+It is a separately named immutable resource, not a second installer engine or a
+replacement for the existing `--packaged-source` transport adaptation. Custody is
+in `launcher-repair.SOURCE.json`; adapter constants independently enforce both
+installer and canonical verifier hashes. Native resource-directory packaging
+already includes it. No runtime download, generation staging, connection setup,
+PATH edit, service start or third-party application change is part of repair.
+
+JSON API (same finite stdin/stdout protocol):
+
+- `prepare_repair`: `{action, prefix, node, bin_dir}`; all paths explicit and
+  absolute. `bin_dir` is the **actual** launcher directory, which may be outside
+  the generation prefix (for example the user's `.local/bin`). `inspect` provides
+  `bin_dir_suggestion`, but repair never silently substitutes `prefix/bin`.
+- `apply_repair`: `{action, plan_id, approval_digest, approved:true}`. No arbitrary
+  source, command, node override or target override is accepted at apply time.
+- Existing `inspect` and `readback`: `{action, plan_id}`. A repair plan has
+  `kind="launcher_repair"`; install/rollback/local-task actions cannot consume it.
+
+Preparation verifies the selected existing actual Node executable is 22.13+,
+imports unchanged hash-qualified PR15 `src/runtime-integrity.mjs` for both
+current and previous generation/receipt verification, and binds an entire-prefix
+snapshot. It does **not** execute the existing possibly broken launcher. The plan
+also binds original launcher bytes/SHA/inode/owner/mode, launcher directory
+identity, exact source, exact expected canonical output digest, and immutable
+approval digest. The independent output-template check is read-only; it never
+writes launcher bytes. Only upstream `--repair-launcher` mutates the launcher,
+creates its exact backup and owns durable transaction recovery. For an explicitly
+selected launcher inside the prefix, preservation excludes only that launcher and
+its exact canonical backup; all generations, pointers and receipts remain bound.
+
+The adapter rechecks approved inputs before starting its existing
+`OperationJournal`. Drift, unknown history, pointer/repair transactions, untrusted
+filesystem custody, backup conflicts or unresolved prior repair outcomes stop
+before canonical execution. After execution it independently verifies the entire
+prefix preservation snapshot, exact launcher bytes pinned to the approved Node,
+original backup and metadata, then runs the **actual launcher** `version` in an
+isolated disposable configuration. The result is
+`LAUNCHER_REPAIR_READBACK_VERIFIED`, not full CLI acceptance: doctor/local-read,
+connection and end-to-end workflow verification remain explicitly false/unclaimed.
+
+Phases: `PREPARED_REPAIR_NOT_APPLIED`,
+`LAUNCHER_REPAIR_READBACK_VERIFIED`, `LAUNCHER_REPAIR_OUTCOME_UNCERTAIN`.
+Post-start failure, lost response, incomplete or unknown evidence cannot be
+silently retried or bypassed with a fresh plan. Inspection returns
+`do_not_retry=true`, `recovery_required=true`, and exact canonical recovery
+resource/target metadata; it performs no recovery. An operator must explicitly
+review and run canonical recovery where appropriate. Canonical recovery restores
+the original launcher; it neither completes repair nor erases the adapter's
+uncertain journal. A normal successful plan has no launcher rollback action.
+
+### Reproducible executable integration tests
+
+```
+python3 native/hex/adapter/test_launcher_repair.py
+python3 -B -m unittest discover -s native/hex/adapter -p 'test_*.py'
+```
+
+The repo-local `tests/fixtures/cli-launcher-repair-pr15/` is the unchanged upstream
+helper plus exact installer and six real payload files, with custody manifest.
+It lives outside shipped native resources. The helper performs two real offline
+installs with fixture-only transport; neither the repair nor the CLI is mocked.
+`XIIO_REPAIR_FIXTURE_ROOT=/path/to/exact-PR15-checkout` optionally tests an
+independent checkout; hashes must match, and missing fixture material fails rather
+than skipping. Cases cover actual outside-prefix and inside-prefix launchers,
+current/previous receipt and payload preservation, selected Node/launcher/source/
+verifier/pointer drift, custody, explicit approval, quoted paths, post-effect lost
+response, SIGKILL canonical durable recovery, unknown journal/no-retry behavior,
+and refusal to execute a later tampered launcher. All filesystem effects are in
+disposable test fixtures, never the user's installed CLI or application profiles.

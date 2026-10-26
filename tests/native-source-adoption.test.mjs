@@ -51,3 +51,12 @@ test('packaging provenance adds no runtime schema, registry or authority',()=>{
  assert.match(provenance.inherited_donor_portability_debt,/historical Aries\/Loki/);
  assert.match(provenance.inherited_donor_portability_debt,/requires repinning\/requalification/);
 });
+test('launcher-only repair consumes exact qualified PR15 without changing packaged install transport',()=>{
+ const base='native/hex/cli-source/';const m=json(base+'launcher-repair.SOURCE.json');
+ assert.equal(m.ref,'b56adb5cbf34bcd9102f46df297aa42395ef41eb');assert.equal(m.modifications,false);
+ assert.equal(createHash('sha256').update(read(base+m.resource)).digest('hex'),'118a7df1e952602aaf9b9c93d4e8aae62c527f15150463e8b2cb0645da3ab137');
+ assert.equal(createHash('sha256').update(read(base+m.verification_resource.path)).digest('hex'),m.verification_resource.sha256);
+ assert.match(read(base+'install.mjs'),/--packaged-source/);
+ assert.doesNotMatch(read(base+m.resource),/--packaged-source/);
+ const adapter=read('native/hex/adapter/installer_adapter.py');assert.match(adapter,/prepare_repair/);assert.match(adapter,/apply_repair/);assert.match(adapter,/CANONICAL_LAUNCHER_RECOVERY_REQUIRED_NO_RETRY/);
+});
