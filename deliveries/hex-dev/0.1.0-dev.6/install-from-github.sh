@@ -27,8 +27,8 @@ if awk '/^(Inst|Conf) / && $2 != "xi-io-hex-dev" {found=1} END {exit !found}' "$
  echo "Other packages would change. Stopped for separate review; nothing installed."; exit 1
 fi
 printf '\nThis installs/updates only XI-IO HEX DEV. It does NOT repair the CLI automatically.\nNo Node download, model move, service startup or CLI generation replacement.\n'
-read -r -p 'Type INSTALL to proceed with the displayed package change: ' approval
-[[ "$approval" == INSTALL ]] || { echo "Cancelled; nothing installed."; exit 1; }
+read -r -p 'Type install to proceed (any letter case; Enter cancels): ' approval
+[[ "${approval,,}" == install ]] || { echo "Cancelled; nothing installed."; exit 1; }
 guard="$work/apt-guard.py"
 cat >"$guard" <<'XIIO_GUARD'
 #!/usr/bin/python3
