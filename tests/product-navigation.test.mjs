@@ -33,7 +33,7 @@ test('actual tablet rail and product controls share selected views across the Sh
     pretendToBeVisual: true, virtualConsole: console,
   });
   const w = dom.window;
-  // Layout-only adapters: no provider/native injection and no external loading.
+  // Layout-only adapters initially; bounded chooser response fixture below, no external loading.
   w.matchMedia = media => ({media, matches: media.includes('reduced-motion'), addEventListener(){}, removeEventListener(){}, addListener(){}, removeListener(){}});
   w.ResizeObserver = class {observe(){} unobserve(){} disconnect(){}};
   w.document.head.appendChild(Object.assign(w.document.createElement('style'), {textContent: css}));
@@ -125,30 +125,59 @@ test('actual tablet rail and product controls share selected views across the Sh
     const before = theme.getAttribute('data-product-theme');
     await click(shadow.querySelector('button[aria-label^="Switch to"]'));
     assert.notEqual(theme.getAttribute('data-product-theme'), before);
+    await click(shadow.querySelector('button[aria-label="Jump to step 5"]'));
+    const stepButtons = [...shadow.querySelector('[aria-label="First-run steps"]').querySelectorAll('button')];
+    assert.deepEqual(stepButtons.map(el => el.textContent.trim()), ['1', '2', '3', '4', '5'], 'navigation never creates completion checkmarks');
+    assert.equal(stepButtons[4].getAttribute('aria-current'), 'step');
+    for (const el of stepButtons) {
+      assert.doesNotMatch(el.className, /text-workspace-success|bg-emerald/);
+      assert.match(el.title, /not a completed check/);
+    }
+    await click(shadow.querySelector('button[aria-label="Jump to step 1"]'));
     const account = Array.from(shadow.querySelectorAll('[role="button"]')).find(el => el.textContent.includes('Connect an account'));
     await click(account); assert.equal(account.getAttribute('aria-pressed'), 'true');
     assert.match(shadow.textContent, /Account sign-in is not connected in this build/);
     await click(button('Continue to Workspace Folder'));
     assert.equal(shadow.querySelector('#folder-input').value, '');
     assert.match(shadow.textContent, /does not grant file permissions/);
-    await click(button('Use Sample'));
-    assert.equal(shadow.querySelector('#folder-input').value, '/example/project');
-    assert.match(shadow.textContent, /Access not checked/);
+    assert.equal(button('Use Sample'), undefined, 'no fabricated workspace shortcut');
+    await click(button('Choose Folder'));
+    assert.equal(shadow.querySelector('#folder-input').value, '');
+    assert.match(shadow.textContent, /Open the native HEX application to choose a local directory/);
+    // Exercise the actual App handler through a narrowly bounded IPC response fixture.
+    // This verifies chooser wiring/cancellation, not a native dialog or filesystem access.
+    const chooserRequests = [];
+    const chooserReplies = [{cancelled:true}, {cancelled:false,path:'/fixture/selected-workspace'}, {cancelled:true}];
+    w.__TAURI__ = {core:{invoke: async (command, args) => {
+      assert.equal(command, 'native_select_directory');
+      assert.equal(args.purpose, 'workspace');
+      assert.deepEqual(Object.keys(args), ['purpose']);
+      chooserRequests.push(command);
+      return chooserReplies.shift();
+    }}};
+    await click(button('Choose Folder'));
+    assert.equal(shadow.querySelector('#folder-input').value, '', 'cancel preserves empty workspace');
+    assert.match(shadow.textContent, /Directory selection cancelled/);
+    await click(button('Choose Folder'));
+    assert.equal(shadow.querySelector('#folder-input').value, '/fixture/selected-workspace');
+    assert.match(shadow.textContent, /Access still requires its existing permission checks/);
+    await click(button('Choose Folder'));
+    assert.equal(shadow.querySelector('#folder-input').value, '/fixture/selected-workspace', 'cancel preserves prior selection');
+    assert.match(shadow.textContent, /Directory selection cancelled/);
+    assert.equal(chooserRequests.length, 3);
+    assert.equal(chooserReplies.length, 0);
+    delete w.__TAURI__;
+    selectedRail('Setup'); selectedProduct('Setup');
     await click(button('Next: Set Up Local AI'));
-    assert.match(shadow.textContent, /Not checked on this computer/);
-    await click(button('Empty (0 Models)'));
-    assert.equal(button('Model download not connected').disabled, true);
-    await click(button('ready'));
-    assert.match(shadow.textContent, /Example only — no model connection verified/);
+    assert.ok(shadow.querySelector('[aria-label="Local AI observation"]'));
+    assert.match(shadow.textContent, /Open native HEX to check this computer/);
+    assert.equal(button('Empty (0 Models)'), undefined, 'fake model readiness toggles removed');
+    assert.equal(button('ready'), undefined);
     await click(button('Next: Try a Safe Task'));
-    assert.match(shadow.textContent, /Interactive example only/);
-    await click(button('Apply Example'));
-    assert.match(shadow.textContent, /No file was written and no installation was verified/);
-    await click(button('Change Example Digest'));
-    await click(button('Apply Example'));
-    assert.match(shadow.textContent, /Example conflict refusal/);
-    await click(button('Reset Example'));
-    assert.match(shadow.textContent, /No installed files or saved versions were changed/);
+    assert.ok(shadow.querySelector('[aria-label="Disposable local file proof"]'));
+    assert.match(shadow.textContent, /Open native HEX to check this computer/);
+    assert.equal(button('Apply Example'), undefined, 'fake file success controls removed');
+    assert.equal(button('Reset Example'), undefined);
     const sites = ['xi-io.ca', 'xi-io.com', 'xi-io.org', 'xi-io.net', 'xi-io.io', 'x42s.com'];
     const links = Array.from(shadow.querySelectorAll('footer a'));
     assert.equal(links.length, sites.length);

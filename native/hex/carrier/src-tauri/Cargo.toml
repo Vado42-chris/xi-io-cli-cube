@@ -1,0 +1,34 @@
+[package]
+name = "xi-io-hex-dev"
+version = "0.1.0-dev.4"
+description = "DEV candidate for the XI-IO HEX local CLI installer; not a LIVE release"
+authors = ["xi-io"]
+edition = "2021"
+autobins = false
+default-run = "xi-io-hex-dev"
+
+[[bin]]
+name = "xi-io-hex-dev"
+path = "src/main.rs"
+
+[lib]
+name = "xi_io_hex_shell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "=2.11.2", features = ["unstable"] }
+tauri-runtime = "=2.11.2"
+tauri-runtime-wry = "=2.11.2"
+tauri-utils = "=2.9.2"
+tauri-macros = "=2.6.2"
+tao = "=0.35.3"
+wry = "=0.55.1"
+url = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "=0.18.2"

@@ -13524,7 +13524,7 @@ function lx({ title: e, icon: t, theme: n, children: r, onClose: i, onMinimize: 
 		}
 	}, Fe = (e) => {
 		if (e.button === 0 && !e.target?.closest?.("button, input, select, textarea, a, [role=\"button\"]") && !(N && e.type === "pointerdown" && e.pointerType === "mouse") && (N || e.type !== "mousedown")) {
-			if (s?.(e), N) return F || I ? void 0 : (e.preventDefault(), P ? void 0 : p.perform("drag"));
+			if (s?.(e), N) return I ? void 0 : (e.preventDefault(), P ? void 0 : p.perform("drag"));
 			F || ae.start(e);
 		}
 	}, Ie = m(!1), Le = m(null);

@@ -1,0 +1,1 @@
+{"identifier":"hex-local","description":"Only the bundled HEX window; no remote origins or plugin shell/fs APIs.","local":true,"windows":["hex"],"permissions":[]}

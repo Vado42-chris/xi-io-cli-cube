@@ -1,0 +1,7 @@
+# Existing onboarding bindings (local review candidate)
+
+`local_ai_status.mjs` extracts the existing pinned CLI `modelsCommand` listing behavior from `src/xiio.mjs` at d53a1d0219f5b1707c6c1bbedfb262082179ceab. It is an explicitly adapted helper, NOT unchanged CLI payload: fixed loopback GET, redirects refused, five-second deadline, one-MiB response limit and bounded name/size projection. Listing never loads/installs a model, starts a service, or proves inference/provider identity.
+
+`safe_task.mjs` is a finite UI adapter invoking the installed, unmodified CLI `commitWorkspaceEditCAS` module only after exact generation integrity verification. The separately reviewed helper digest and installed CAS digest bind its source. It creates a unique exclusive fixture beneath the selected workspace, reopens fixed contents, applies CAS, verifies stale-edit refusal, then deletes only its unchanged owned fixture. Cleanup is part of explicit approval. Failures preserve surviving bytes and journal UNKNOWN; no recursive cleanup or blind retry. This demonstrates local cooperative CAS, not a hostile same-user filesystem boundary, command-sandbox execution, Ward admission or remote BINS service behavior.
+
+Immutable proof review records are approval inputs. Existing kernel OperationJournal remains the only outcome ledger. All runtime/UI checks use finite native actions; browser preview does not simulate success. Discovered Node executables are not used here: an installed plan must already qualify its pinned Node and CLI launcher/payload.

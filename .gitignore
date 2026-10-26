@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Native build products, never editable-source adoption inputs
+native/hex/carrier/frontend/
+native/hex/carrier/src-tauri/target/
+__pycache__/
+*.pyc
+native/hex/carrier/src-tauri/gen/
