@@ -1,0 +1,31 @@
+{
+  "schema": "xiio.hex.launcher-repair-delivery/v1",
+  "source_commit": "3472209ee50e1265a0ea4130d94abdcff28f949c",
+  "cli_repair_commit": "b56adb5cbf34bcd9102f46df297aa42395ef41eb",
+  "package_sha256": "7f2aa8af513adde056a687c98dd8e53fa27e78b27d75c7ead2ad582c8f5a85f3",
+  "package": "xi-io-hex-dev",
+  "version": "0.1.0-dev.6",
+  "architecture": "amd64",
+  "resources_verified": 39,
+  "adapter_tests": {
+    "passed": 36,
+    "skipped": 0
+  },
+  "independent_tests": {
+    "regressions": 14,
+    "targeted": 3
+  },
+  "native_protocol_tests": 11,
+  "native_gui": {
+    "dev5_actual_control_repair": "PASS_SYNTHETIC_TWO_GENERATION_FIXTURE",
+    "dev6_launch": "OBSERVED_CLOUD",
+    "aries": "NOT_EXECUTED"
+  },
+  "limitations": [
+    "Aries install, desktop entry launch, doctor and approved local-read acceptance remain outstanding",
+    "No broker deployment, enrollment or remote connection",
+    "DEV5 held for adapter timeout discrepancy; DEV6 removes consequential adapter kill deadline",
+    "Tauri bundler reports missing __TAURI_BUNDLE_TYPE marker; automatic updater not qualified"
+  ],
+  "promotion": "OWNER_MACHINE_ACCEPTANCE_PENDING"
+}
