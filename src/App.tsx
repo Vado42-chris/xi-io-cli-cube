@@ -592,7 +592,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
   const comfortClass = comfort === 'compact' ? 'text-xs' : comfort === 'comfortable' ? 'text-base' : 'text-sm';
 
   return (
-    <div data-tablet-surface data-hex-workspace data-product-theme={theme} style={{'--workspace-plate-image': `url("${brandPlate}")`} as React.CSSProperties} className={`${embedded ? 'min-h-full' : 'min-h-screen'} transition-colors duration-200 selection:bg-workspace-focus/30 selection:text-workspace-focus ${
+    <div data-tablet-surface data-hex-workspace data-comfort={comfort} data-product-theme={theme} style={{'--workspace-plate-image': `url("${brandPlate}")`} as React.CSSProperties} className={`${embedded ? 'min-h-full' : 'min-h-screen'} transition-colors duration-200 selection:bg-workspace-focus/30 selection:text-workspace-focus ${
       isLight ? 'bg-workspace-canvas text-workspace-text' : 'bg-workspace-canvas text-workspace-text'
     }`}>
       <TabletBackdrop />
@@ -601,7 +601,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
         <div className={`${embedded ? '' : 'border border-workspace-border'} overflow-hidden transition-all duration-200`}>
           
           {/* Product toolbar */}
-          <div className={`px-4 py-3 border-b flex items-center justify-between flex-wrap gap-3 select-none ${
+          <div className={`hex-product-toolbar px-4 py-3 border-b flex items-center justify-between flex-wrap gap-3 select-none ${
             isLight ? 'bg-workspace-surface border-workspace-border text-workspace-text' : 'bg-workspace-canvas/90 border-workspace-border text-workspace-text'
           }`}>
             {/* Product tools; native tablet controls belong to the shared frame. */}
@@ -619,7 +619,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         : isLight ? 'text-workspace-muted hover:text-workspace-text' : 'text-workspace-muted hover:text-workspace-text'
                     }`}
                   >
-                    {lvl[0].toUpperCase()}
+                    {lvl}
                   </button>
                 ))}
               </div>

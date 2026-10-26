@@ -74,7 +74,7 @@ export default function NativeInstallerPanel() {
   const canRepair = plan?.phase === 'PREPARED_REPAIR_NOT_APPLIED' && !unknown;
   const canRollback = canRollbackPlan(plan, unknown);
   const button = 'min-h-[44px] rounded-none border border-workspace-border-strong px-4 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:border-workspace-border-strong';
-  return <section aria-label="Native HEX installer" className="space-y-4 p-5 rounded-none border border-workspace-border-strong/40 bg-workspace-canvas">
+  return <section aria-label="Native HEX installer" className="hex-installer-panel space-y-4 p-5 rounded-none border border-workspace-border-strong/40 bg-workspace-canvas">
     <div><h3 className="font-bold text-workspace-text">Install on this computer</h3>
       <p className="text-sm text-workspace-muted">Local Linux candidate · Available packaged components only · No sign-in required</p></div>
     {!native ? <p role="status" className="text-sm text-workspace-focus">Native HEX is required. This browser preview cannot inspect, install or roll back files. The guides below are not proof of an installation.</p> : <>

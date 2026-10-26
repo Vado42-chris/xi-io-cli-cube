@@ -15,12 +15,12 @@
 }
 [data-hex-workspace] {
   --workspace-canvas: #050505;
-  --workspace-surface: rgba(12,12,13,.82);
+  --workspace-surface: rgba(10,28,38,.96);
   --workspace-text: #f4f4f2;
-  --workspace-muted: #a7a7a3;
-  --workspace-border: rgba(255,255,255,.12);
-  --workspace-border-strong: rgba(255,255,255,.23);
-  --workspace-focus: #fff;
+  --workspace-muted: #c1d6df;
+  --workspace-border: hsl(var(--chroma-hue,188) 80% 62% / .28);
+  --workspace-border-strong: hsl(var(--chroma-hue,188) 85% 65% / .65);
+  --workspace-focus: hsl(var(--chroma-hue,188) 95% 70%);
   --workspace-inverse: #050505;
   --workspace-success: hsl(128 4% 49%);
   --workspace-danger: hsl(2 58% 58%);
@@ -37,7 +37,7 @@
   --workspace-muted: hsl(25 16% 45.1%);
   --workspace-border: hsl(25 16% 89.8%);
   --workspace-border-strong: hsl(25 16% 45.1%);
-  --workspace-focus: hsl(25 16% 9%);
+  --workspace-focus: hsl(var(--chroma-hue,188) 85% 25%);
   --workspace-inverse: hsl(25 16% 98%);
   --workspace-success: hsl(128 8% 34%);
   --workspace-danger: hsl(2 62% 42%);
@@ -48,7 +48,7 @@
   outline-offset: 3px;
 }
 [data-hex-workspace] :where(input,select,textarea) { accent-color: var(--workspace-focus); }
-[data-hex-workspace] :where(.bg-workspace-surface) { backdrop-filter: blur(14px); }
+[data-hex-workspace] :where(.bg-workspace-surface) { backdrop-filter: none; }
 [data-hex-workspace] .hex-workspace-heading { border: 0; background: transparent; }
 [data-hex-workspace] .hex-workspace-heading h1 { letter-spacing: -.035em; line-height: 1.15; }
 @media (prefers-reduced-motion: reduce) {
@@ -63,16 +63,60 @@
 .ca-brand-plate { position: absolute; inset: -8%;
   background-image: var(--workspace-plate-image); background-repeat: no-repeat;
   background-position: 50% 46%; background-size: max(1500px,120vw) auto;
-  filter: grayscale(100%) brightness(.33) contrast(1.08); opacity: .72;
+  filter: brightness(.72) saturate(1.12) contrast(1.08); opacity: .72;
   transform: translate3d(var(--ca-plate-x,0px),calc(var(--ca-plate-y,0px) + var(--ca-plate-scroll,0px)),0) scale(1.06);
-  transition: transform 80ms linear; will-change: transform; }
+  transition: none; }
 .ca-atmosphere { position: absolute; inset: 0; opacity: .38;
   background-image: radial-gradient(circle at 20% 20%,color-mix(in srgb,var(--workspace-focus) 18%,transparent) 0 1px,transparent 2px),radial-gradient(circle at 78% 35%,rgba(255,255,255,.12) 0 1px,transparent 2px);
-  background-size: 190px 190px,260px 260px; animation: ca-drift 22s ease-in-out infinite alternate; }
-.ca-vignette { position: absolute; inset: 0; background: rgba(5,5,5,.42);
-  box-shadow: inset 0 0 180px 60px rgba(0,0,0,.72); }
+  background-size: 190px 190px,260px 260px; animation: none; }
+.ca-vignette { position: absolute; inset: 0; background: rgba(5,5,5,.12);
+  box-shadow: inset 0 0 150px 35px rgba(0,0,0,.48); }
 @keyframes ca-drift { from {transform:translate3d(-10px,4px,0);opacity:.3} to {transform:translate3d(14px,-10px,0);opacity:.48} }
 [data-hex-workspace][data-product-theme="light"] .ca-brand-plate { opacity: .08; }
 [data-hex-workspace][data-product-theme="light"] .ca-vignette { background: hsl(25 16% 100% / .85); box-shadow: none; }
 @media (max-width:700px) { .ca-brand-plate {background-size:auto 118vh;background-position:48% 48%;} }
 @media (prefers-reduced-motion:reduce) { .ca-brand-plate {transform:none!important;transition:none!important} .ca-atmosphere {animation:none!important} }
+
+/* Chroma identity comes from the existing shared frame; atmosphere remains
+ * behind readable surfaces, never as a dark layer over text. */
+[data-hex-workspace] .ca-atmosphere {
+  opacity: .7;
+  background-image:
+    radial-gradient(ellipse at 12% 16%,hsl(var(--chroma-hue,188) 95% 54% / .32),transparent 55%),
+    radial-gradient(ellipse at 88% 70%,hsl(var(--chroma-hue,188) 90% 40% / .22),transparent 58%),
+    radial-gradient(circle at 20% 20%,hsl(var(--chroma-hue,188) 95% 80% / .35) 0 1px,transparent 2px);
+  background-size: 100% 100%,100% 100%,190px 190px;
+}
+[data-hex-workspace] .hex-product-toolbar,
+[data-hex-workspace] .hex-workspace-layout section,
+[data-hex-workspace] .hex-installer-panel {
+  border: 1px solid var(--workspace-border-strong);
+  background-color: var(--workspace-surface);
+  box-shadow: inset 0 1px 0 hsl(var(--chroma-hue,188) 95% 75% / .2),0 12px 36px rgb(0 0 0 / .28);
+}
+[data-hex-workspace] .hex-product-toolbar { border-bottom: 2px solid var(--workspace-focus); }
+[data-hex-workspace] .hex-installer-panel { background-image: linear-gradient(120deg,hsl(var(--chroma-hue,188) 80% 50% / .08),transparent 55%); }
+[data-hex-workspace] .hex-installer-panel > div:first-child {
+  padding: 12px 16px; margin: -4px -4px 20px;
+  border-left: 4px solid var(--workspace-focus);
+  background: hsl(var(--chroma-hue,188) 80% 55% / .12);
+}
+[data-hex-workspace] .hex-installer-panel h3 { font-size: 1.25rem; color: var(--workspace-text); }
+[data-hex-workspace] .hex-installer-panel :where(p,label,summary,button) { font-size: .9375rem; line-height: 1.6; }
+[data-hex-workspace] .hex-installer-panel fieldset {
+  padding: 16px; border: 1px solid var(--workspace-border); background: var(--workspace-canvas);
+}
+[data-hex-workspace] .hex-installer-panel input:not([type="checkbox"]) {
+  color: var(--workspace-text); background: var(--workspace-canvas); font-size: .875rem;
+  min-height: 44px; border-color: var(--workspace-border-strong);
+}
+[data-hex-workspace] .hex-installer-panel input[type="checkbox"] { width: 18px; height: 18px; vertical-align: middle; margin-right: 7px; }
+[data-hex-workspace] .hex-installer-panel button:not(:disabled) { border-color: var(--workspace-border-strong); background: hsl(var(--chroma-hue,188) 75% 45% / .12); }
+[data-hex-workspace] .hex-installer-panel button:not(:disabled):hover { background: hsl(var(--chroma-hue,188) 85% 50% / .23); }
+[data-hex-workspace] [role="tab"][aria-selected="true"] { box-shadow: 0 0 18px hsl(var(--chroma-hue,188) 95% 55% / .2); }
+[data-hex-workspace] .hex-installer-panel [aria-label="Detected installation requirements"] {
+  padding: 16px; border-left: 3px solid var(--workspace-border-strong); background: var(--workspace-canvas);
+}
+[data-hex-workspace][data-comfort="comfortable"] .hex-installer-panel :where(p,label,summary,button,input) { font-size: 1rem; }
+[data-hex-workspace][data-comfort="compact"] .hex-installer-panel :where(p,label,summary,button) { font-size: .875rem; }
+[data-hex-workspace][data-product-theme="light"] .ca-atmosphere { opacity: .2; }

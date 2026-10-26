@@ -1,7 +1,7 @@
 {
   "name": "xi-io-hex-dev",
   "private": true,
-  "version": "0.1.0-dev.6",
+  "version": "0.1.0-dev.7",
   "scripts": {
     "tauri": "tauri",
     "build:native": "tauri build",
