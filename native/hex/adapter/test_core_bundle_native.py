@@ -145,6 +145,25 @@ class CoreBundleNative(unittest.TestCase):
                 self.assertTrue(observed["retry_allowed"])
                 self.assertEqual(observed["attempts"][-1]["final_state"], "failed")
 
+    def test_cross_process_custody_blocks_second_apply_but_not_inspection(self):
+        with tempfile.TemporaryDirectory(prefix="xiio-native-core-") as d:
+            root = Path(d)
+            digest = self.valid_profile(root)
+            env = self.runtime_env(root)
+            lock = root / "core-release.lock.json"
+            with patch.dict(os.environ, env, clear=False), patch.object(installer_adapter, "HERE", root):
+                with installer_adapter.child_bundle.bundle_apply_custody(
+                    lock, approved_lock_sha256=digest, env=env
+                ):
+                    observed = installer_adapter.handle({"action": "bundle_inspect"})
+                    self.assertEqual(observed["phase"], "APPLY_IN_PROGRESS")
+                    self.assertTrue(observed["do_not_retry"])
+                    self.assertFalse(observed["retry_allowed"])
+                    with self.assertRaisesRegex(Exception, "BUNDLE_APPLY_ALREADY_IN_PROGRESS"):
+                        installer_adapter.handle({
+                            "action": "bundle_apply", "lock_sha256": digest, "approved": True
+                        })
+
     def test_fixture_lock_never_becomes_native_prod_release(self):
         with tempfile.TemporaryDirectory(prefix="xiio-native-core-") as d:
             root = Path(d)
