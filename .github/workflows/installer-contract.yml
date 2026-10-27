@@ -66,8 +66,9 @@ jobs:
           echo "SOURCE_BUILD_PASS_NOT_HOST_INSTALL"
 
   native-source-checks:
+    needs: [source-contract, child-bundle-kernel]
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Check out exact editable source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -86,71 +87,12 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm run lint
           npm run build
-      - name: Test actual finite adapter and native carrier from editable sources
-        run: npm run native:check
+      - name: Install pinned native carrier CLI
+        run: npm ci --prefix native/hex/carrier --no-audit --no-fund
+      - name: Test finite native adapter and build same-source Debian candidate
+        run: npm run native:build
       - name: Keep source qualification distinct from installed device acceptance
         run: echo "SOURCE_NATIVE_TESTS_NOT_ARIES_INSTALL_OR_CONNECTION"
-
-  installed-linux-package:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    steps:
-      - name: Check out exact version-pinned DEV9 Debian package
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Use qualified Node 24.22.1 for the installed native client parser
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '24.22.1'
-      - name: Fail closed outside an ephemeral GitHub Linux runner
-        run: |
-          set -euo pipefail
-          bash -n deliveries/hex-dev/0.1.0-dev.9/qualification/test_native_install.sh
-          set +e
-          GITHUB_ACTIONS=false bash deliveries/hex-dev/0.1.0-dev.9/qualification/test_native_install.sh > guard.log 2>&1
-          status=$?
-          set -e
-          test "$status" -eq 78
-          grep -Fxq CI_EPHEMERAL_RUNNER_REQUIRED guard.log
-      - name: Install, independently reopen and remove actual DEV9 package on disposable Linux
-        run: bash deliveries/hex-dev/0.1.0-dev.9/qualification/test_native_install.sh
-
-  child-bundle-kernel:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    steps:
-      - name: Check out immutable code and existing installer kernel
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Verify child manifest downloader, real XDG transactions and hostile rollback
-        run: |
-          set -euo pipefail
-          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_bundle.py -v
-      - name: Keep composed payload installation distinct from running product/remote authority
-        run: |
-          echo "CHILD_BUNDLE_SOURCE_AND_DISPOSABLE_FILESYSTEM_TEST_ONLY"
-          echo "RUNNING_SERVICES=NOT_TESTED"
-          echo "FIRST_PARTY_SESSION_AND_WARD=UNBOUND"
-          echo "CUSTOMER_TWO_WAY_CONNECTION=NOT_PROVEN"
-
-  native-core-package-candidate:
-    needs: [source-contract, child-bundle-kernel, native-source-checks]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 40
-    steps:
-      - name: Checkout exact source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Use pinned Node runtime
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '24.22.1'
-      - name: Prepare Linux Tauri package dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3
-          rustup toolchain install 1.99.1 --profile minimal
-          rustup default 1.99.1
-          npm ci --ignore-scripts --no-audit --no-fund
-          npm ci --prefix native/hex/carrier --no-audit --no-fund
       - name: Build exact-source native Debian candidate
         run: npm run native:build
       - name: Verify and label immutable candidate bytes
@@ -193,3 +135,43 @@ jobs:
           path: native-candidate/
           if-no-files-found: error
           retention-days: 7
+
+  installed-linux-package:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact version-pinned DEV9 Debian package
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Use qualified Node 24.22.1 for the installed native client parser
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Fail closed outside an ephemeral GitHub Linux runner
+        run: |
+          set -euo pipefail
+          bash -n deliveries/hex-dev/0.1.0-dev.9/qualification/test_native_install.sh
+          set +e
+          GITHUB_ACTIONS=false bash deliveries/hex-dev/0.1.0-dev.9/qualification/test_native_install.sh > guard.log 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 78
+          grep -Fxq CI_EPHEMERAL_RUNNER_REQUIRED guard.log
+      - name: Install, independently reopen and remove actual DEV9 package on disposable Linux
+        run: bash deliveries/hex-dev/0.1.0-dev.9/qualification/test_native_install.sh
+
+  child-bundle-kernel:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out immutable code and existing installer kernel
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Verify child manifest downloader, real XDG transactions and hostile rollback
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_bundle.py -v
+      - name: Keep composed payload installation distinct from running product/remote authority
+        run: |
+          echo "CHILD_BUNDLE_SOURCE_AND_DISPOSABLE_FILESYSTEM_TEST_ONLY"
+          echo "RUNNING_SERVICES=NOT_TESTED"
+          echo "FIRST_PARTY_SESSION_AND_WARD=UNBOUND"
+          echo "CUSTOMER_TWO_WAY_CONNECTION=NOT_PROVEN"
