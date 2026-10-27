@@ -100,5 +100,5 @@ test('uncertain core bundle blocks apply but keeps read-only reconciliation reac
  assert.match(panel,/busyRef\.current \|\| \(coreUnknown && request\.action === 'bundle_apply'\)/);
  assert.match(panel,/action:'bundle_inspect'/);
  assert.doesNotMatch(panel,/disabled=\{busy \|\| coreUnknown\}[\s\S]{0,180}bundle_inspect/);
- assert.match(panel,/setCoreUnknown\(result\?\.do_not_retry === true/);
+ assert.match(panel,/setCoreUnknown\(\(result\?\.do_not_retry === true && result\?\.phase !== 'INSTALLED_BYTES_VERIFIED'\)/);
 });
