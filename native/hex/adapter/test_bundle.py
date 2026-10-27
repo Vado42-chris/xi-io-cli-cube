@@ -181,7 +181,7 @@ class BundleTests(unittest.TestCase):
         f.child("cli")
         lock, _ = f.lock()
         manifest = f.root / "cli.manifest.json"
-        manifest.write_text(manifest.read_text().replace("cli delivered", "not reviewed"))
+        manifest.write_text(manifest.read_text().replace("XIIO cli", "XIIO tampered"))
         with self.assertRaisesRegex(BundleError, "BUNDLE_MANIFEST_DIGEST_MISMATCH"):
             load_bundle_profile(lock)
 
