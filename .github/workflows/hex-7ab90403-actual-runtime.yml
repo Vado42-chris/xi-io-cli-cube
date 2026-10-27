@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb xdotool scrot dbus-x11
+          sudo apt-get install -y --no-install-recommends xvfb xdotool scrot dbus-x11 python3-pil
           deb="$(find "$RUNNER_TEMP/hex-candidate" -maxdepth 1 -type f -name '*.deb' -print -quit)"
           test -n "$deb"
           sudo apt-get -y --no-remove install "$deb"
@@ -140,11 +140,15 @@ jobs:
               test -n "$wid" || { echo NATIVE_WINDOW_MISSING; head -50 "$QA/window-stderr.log"; exit 1; }
               test "$(xdotool getwindowname "$wid")" = "XI-IO HEX"
               xdotool getwindowgeometry --shell "$wid" > "$QA/geometry.env"
+              # A mapped native window can remain blank; wait for real WebKit paint.
+              sleep 8
+              kill -0 "$app" || { echo NATIVE_WINDOW_CRASHED_BEFORE_RENDER; exit 1; }
               scrot -z "$QA/native-window.png"
               test -s "$QA/native-window.png"
+              python3 -c 'from PIL import Image; import os; p=os.environ["QA"]+"/native-window.png"; colors=Image.open(p).convert("RGB").getcolors(maxcolors=512); n=512 if colors is None else len(colors); print("WINDOW_COLOR_VARIANTS="+str(n)); assert n>8, "NATIVE_WINDOW_CONTENT_NOT_RENDERED"'
               sleep 2
               kill -0 "$app"
-              echo NATIVE_WINDOW_VISIBLE_PASS > "$QA/result.txt"
+              echo NATIVE_WINDOW_CONTENT_RENDERED_PASS > "$QA/result.txt"
             '
           done
       - name: Remove exact installed package
