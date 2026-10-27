@@ -145,7 +145,7 @@ jobs:
               kill -0 "$app" || { echo NATIVE_WINDOW_CRASHED_BEFORE_RENDER; exit 1; }
               scrot -z "$QA/native-window.png"
               test -s "$QA/native-window.png"
-              python3 -c 'from PIL import Image; import os; p=os.environ["QA"]+"/native-window.png"; colors=Image.open(p).convert("RGB").getcolors(maxcolors=512); n=512 if colors is None else len(colors); print("WINDOW_COLOR_VARIANTS="+str(n)); assert n>8, "NATIVE_WINDOW_CONTENT_NOT_RENDERED"'
+              python3 -c "from PIL import Image; import os; p=os.environ[\"QA\"]+\"/native-window.png\"; colors=Image.open(p).convert(\"RGB\").getcolors(maxcolors=512); n=512 if colors is None else len(colors); print(\"WINDOW_COLOR_VARIANTS=\"+str(n)); assert n>8, \"NATIVE_WINDOW_CONTENT_NOT_RENDERED\""
               sleep 2
               kill -0 "$app"
               echo NATIVE_WINDOW_CONTENT_RENDERED_PASS > "$QA/result.txt"
