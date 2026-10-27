@@ -9,6 +9,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / 'kernel'))
 sys.path.insert(0, str(HERE))
 import connection_profile
+import child_bundle
 import install_preflight
 import local_step_actions
 from xiio_installer.observability import OperationJournal, inspect_operation
@@ -338,6 +339,41 @@ def handle_repair(req,base,p):
 
 def handle(req):
     demand(isinstance(req,dict),'REQUEST_OBJECT_REQUIRED')
+    # Bundle lock ships as a read-only source projection beside this adapter.
+    # Neither caller paths nor caller-supplied manifest bytes can redirect the
+    # native installer to another release. Product release artifacts are owned
+    # by the separate canonical product publishers.
+    if req.get('action') in ('bundle_inspect','bundle_apply'):
+        if set(req) - ({'action'} if req['action']=='bundle_inspect' else
+                      {'action','lock_sha256','approved'}):
+            raise Refused('REQUEST_FIELDS_INVALID')
+        lock=HERE/'core-release.lock.json'
+        if not lock.is_file() or lock.is_symlink():
+            if req['action']=='bundle_inspect':
+                return {'phase':'BLOCKED_RELEASE_PROFILE_UNPUBLISHED',
+                        'missing_roles':sorted(child_bundle.BASELINE_ROLES),
+                        'downloadable':False,'installable':False,
+                        'authority_granted':False,'device_connected':False,
+                        'child_services_started':False}
+            raise Refused('BUNDLE_RELEASE_PROFILE_UNPUBLISHED')
+        profile=child_bundle.load_bundle_profile(lock)
+        demand(not profile['fixture'],'BUNDLE_FIXTURE_NOT_INSTALLABLE')
+        if req['action']=='bundle_inspect':
+            return {'phase':'REVIEW_REQUIRED',
+                    'profile_id':profile['profile_id'],
+                    'components':list(profile['ordered_roles']),
+                    'lock_sha256':profile['lock_sha256'],
+                    'downloadable':True,'installable':True,
+                    'authority_granted':False,'device_connected':False,
+                    'child_services_started':False}
+        demand(req.get('approved') is True and
+               req.get('lock_sha256')==profile['lock_sha256'],
+               'BUNDLE_EXACT_REVIEW_AND_APPROVAL_REQUIRED')
+        # Effects run through existing XDG transaction/rollback kernel, not a
+        # second package manager or arbitrary shell. Remote authority remains
+        # separately gated by Ward and Switchboard.
+        return child_bundle.install_bundle(lock,
+                    approved_lock_sha256=profile['lock_sha256'])
     allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
     act=req.get('action');demand(act in allowed and set(req)<=allowed[act],'REQUEST_FIELDS_INVALID')
     base=root();lock=base/'native-adapter.lock'
