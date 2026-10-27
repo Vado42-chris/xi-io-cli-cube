@@ -125,9 +125,6 @@ test('installation journey: missing prerequisites produce actionable errors', ()
     if (!env.nodeVersion || parseInt(env.nodeVersion.split('.')[0], 10) < 22) {
       errors.push('PREREQUISITE_FAILED: Node.js 22 or newer required');
     }
-    if (!env.hasGhAuth) {
-      errors.push('PREREQUISITE_FAILED: GitHub CLI authentication required (gh auth login)');
-    }
     if (env.platform === 'linux' && !env.hasBubblewrap) {
       errors.push('PREREQUISITE_NOTICE: bubblewrap recommended for containerized commands (sudo apt install bubblewrap)');
     }
@@ -137,10 +134,11 @@ test('installation journey: missing prerequisites produce actionable errors', ()
   const failingEnv = { nodeVersion: '18.19.0', hasGhAuth: false, platform: 'linux', hasBubblewrap: false };
   const errors = checkPrerequisites(failingEnv);
 
-  assert.equal(errors.length, 3);
+  assert.equal(errors.length, 2);
   assert.ok(errors[0].includes('Node.js 22'));
-  assert.ok(errors[1].includes('gh auth login'));
-  assert.ok(errors[2].includes('bubblewrap'));
+  assert.ok(errors[1].includes('bubblewrap'));
+  assert.ok(errors.every(error => !error.includes('GitHub') && !error.includes('sign-in')));
+  assert.deepEqual(checkPrerequisites({nodeVersion: '24.22.1', hasGhAuth: false, platform: 'linux', hasBubblewrap: true}), []);
 });
 
 test('installation journey: first launch and project reopening preserves content parity', () => {
@@ -573,3 +571,74 @@ test('installation journey: concierge unit economics model calculation is strict
 
 
 
+
+
+test('real packaged CLI clean-install and local use require no XI-IO identity, Ward, GitHub auth or remote service', async () => {
+  const {spawnSync} = await import('node:child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-offline-first-install-'));
+  const home = path.join(root, 'home');
+  const prefix = path.join(home, '.local', 'share', 'xi-io', 'cli-v1');
+  const adapter = new URL('../native/hex/adapter/installer_adapter.py', import.meta.url);
+  const clean = {
+    PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8',
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    XDG_STATE_HOME: path.join(home, '.local', 'state'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    PYTHONDONTWRITEBYTECODE: '1',
+  };
+  fs.mkdirSync(home, {recursive: true});
+  const python = fs.existsSync('/usr/bin/python3') ? '/usr/bin/python3' : 'python3';
+  const request = payload => {
+    const run = spawnSync(python, [adapter.pathname], {
+      input: JSON.stringify(payload), encoding: 'utf8', env: clean, timeout: 90000,
+    });
+    assert.equal(run.status, 0, run.stderr || run.error?.message || run.stdout);
+    const result = JSON.parse(run.stdout);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result.result;
+  };
+  try {
+    for (const key of ['XIIO_DEVICE_REF', 'XIIO_DEVICE_BROKER_URL', 'XIIO_DEVICE_PORTS_MODULE',
+      'XIIO_USER', 'XIIO_ACCOUNT', 'WARD_GRANT', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_HOST']) {
+      assert.equal(Object.hasOwn(clean, key), false, key);
+    }
+    const initial = request({action: 'inspect'});
+    assert.equal(initial.existing_cli.state, 'NOT_OBSERVED_AT_KNOWN_LOCATION');
+    assert.equal(initial.connection_prerequisites.state, 'CONFIGURATION_REQUIRED');
+    assert.equal(initial.connection_prerequisites.credential_values_read, false);
+    const planned = request({action: 'prepare', prefix, node: process.execPath, components: ['cli']});
+    assert.equal(planned.phase, 'PREPARED_NOT_INSTALLED');
+    assert.equal(planned.connection.configuration_state, 'CONFIGURATION_REQUIRED');
+    assert.equal(planned.connection.connected, false);
+    assert.equal(planned.components.length, 1);
+    assert.equal(planned.components[0], 'cli');
+    const applied = request({action: 'apply', plan_id: planned.plan_id,
+      approval_digest: planned.approval_digest, approved: true});
+    assert.equal(applied.phase, 'INSTALLED_READBACK_VERIFIED');
+    assert.equal(applied.connected, false);
+    const reopened = request({action: 'readback', plan_id: planned.plan_id});
+    assert.equal(reopened.phase, 'INSTALLED_READBACK_VERIFIED');
+    assert.equal(reopened.connection_state, 'CONFIGURATION_REQUIRED');
+    assert.equal(reopened.connected, false);
+    const cli = path.join(prefix, 'bin', 'xi-io-cli');
+    assert.ok(fs.statSync(cli).isFile());
+    for (const [command, schema] of [['version', 'xiio.cli.version/v1'], ['help', 'xiio.cli.help/v1']]) {
+      const launched = spawnSync(cli, [command], {
+        encoding: 'utf8', env: clean, cwd: home, timeout: 15000,
+      });
+      assert.equal(launched.status, 0, launched.stderr || launched.error?.message || launched.stdout);
+      assert.equal(JSON.parse(launched.stdout).schema, schema);
+    }
+    const connect = spawnSync(path.join(prefix, 'bin', 'xi-io-connect'), [], {
+      encoding: 'utf8', env: clean, cwd: home, timeout: 15000,
+    });
+    assert.equal(connect.status, 3, connect.stderr || connect.stdout);
+    const state = JSON.parse(connect.stdout);
+    assert.equal(state.state, 'CONFIGURATION_REQUIRED');
+    assert.equal(state.connected, false);
+    assert.equal(fs.existsSync(path.join(home, '.config', 'xi-io', 'device.json')), false);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
