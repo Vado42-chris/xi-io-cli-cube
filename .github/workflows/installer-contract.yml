@@ -89,10 +89,6 @@ jobs:
           npm run build
       - name: Install pinned native carrier CLI
         run: npm ci --prefix native/hex/carrier --no-audit --no-fund
-      - name: Test finite native adapter and build same-source Debian candidate
-        run: npm run native:build
-      - name: Keep source qualification distinct from installed device acceptance
-        run: echo "SOURCE_NATIVE_TESTS_NOT_ARIES_INSTALL_OR_CONNECTION"
       - name: Build exact-source native Debian candidate
         run: npm run native:build
       - name: Verify and label immutable candidate bytes
