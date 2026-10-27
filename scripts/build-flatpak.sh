@@ -22,7 +22,11 @@ for tool in npm flatpak-builder flatpak sha256sum; do
     fi
 done
 
-echo "=== [2/4] Ensuring native carrier binary is staged ==="
+echo "=== [2/5] Ensuring native carrier binary is staged ==="
+if [ -L "$PACKAGING_DIR/xi-io-hex-dev" ]; then
+    echo "FLATPAK_STAGED_ELF_SYMLINK_REFUSED" >&2
+    exit 1
+fi
 if [ ! -f "$PACKAGING_DIR/xi-io-hex-dev" ]; then
     if [ -f "$ROOT_DIR/deliveries/hex-dev/0.1.0-dev.9/xi-io-hex-dev_0.1.0-dev.9_amd64.deb" ]; then
         echo "Staging qualified native xi-io-hex-dev binary from debian delivery..."
