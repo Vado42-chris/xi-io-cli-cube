@@ -146,6 +146,12 @@ jobs:
               scrot -z "$QA/native-window.png"
               test -s "$QA/native-window.png"
               python3 -c "from PIL import Image; import os; p=os.environ[\"QA\"]+\"/native-window.png\"; colors=Image.open(p).convert(\"RGB\").getcolors(maxcolors=512); n=512 if colors is None else len(colors); print(\"WINDOW_COLOR_VARIANTS=\"+str(n)); assert n>8, \"NATIVE_WINDOW_CONTENT_NOT_RENDERED\""
+              # Real X11 click on the visible native review affordance. This
+              # navigates the installed Tauri WebView, not a Vite/browser preview.
+              xdotool mousemove --window "$wid" 1210 579 click 1
+              sleep 3
+              scrot -z "$QA/native-review-panel.png"
+              test -s "$QA/native-review-panel.png"
               sleep 2
               kill -0 "$app"
               echo NATIVE_WINDOW_CONTENT_RENDERED_PASS > "$QA/result.txt"
