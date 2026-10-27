@@ -356,15 +356,17 @@ def _bundle_attempts(base,profile):
         out.append((int(suffix),observed))
     return sorted(out,key=lambda row:row[0])
 
-def _bundle_projection(base,lock,profile):
+def _bundle_projection(base,lock,profile,custody=None):
     try:
-        installed=child_bundle.inspect_bundle_install(lock,approved_lock_sha256=profile['lock_sha256'])
+        installed=child_bundle.inspect_bundle_install(
+            lock,approved_lock_sha256=profile['lock_sha256'],custody=custody)
     except Exception:
         installed={'state':'OUTCOME_UNCERTAIN','first_red':'BUNDLE_READBACK_FAILED','receipt_count':0}
     attempts=_bundle_attempts(base,profile)
     summaries=[{'attempt':n,'operation_id':o['operation_id'],'final_state':o['final_state'],'incomplete':o['incomplete'],'journal_sha256':o['journal_sha256']} for n,o in attempts]
     state=installed['state']
     if state=='INSTALLED_BYTES_VERIFIED': phase='INSTALLED_BYTES_VERIFIED'
+    elif state=='APPLY_IN_PROGRESS': phase='APPLY_IN_PROGRESS'
     elif state=='OUTCOME_UNCERTAIN': phase='APPLY_OUTCOME_UNCERTAIN'
     elif attempts: phase='RECONCILED_NOT_INSTALLED'
     else: phase='REVIEW_REQUIRED'
@@ -402,43 +404,53 @@ def handle(req):
         profile=child_bundle.load_bundle_profile(lock)
         demand(not profile['fixture'],'BUNDLE_FIXTURE_NOT_INSTALLABLE')
         base=root()
-        projection=_bundle_projection(base,lock,profile)
-        if req['action']=='bundle_inspect': return projection
+        if req['action']=='bundle_inspect':
+            return _bundle_projection(base,lock,profile)
         demand(req.get('approved') is True and
                req.get('lock_sha256')==profile['lock_sha256'],
                'BUNDLE_EXACT_REVIEW_AND_APPROVAL_REQUIRED')
-        demand(projection['retry_allowed'] is True,
-               'BUNDLE_OUTCOME_UNCERTAIN_OR_ALREADY_INSTALLED_DO_NOT_RETRY')
-        operation_id=_next_bundle_operation(base,profile)
-        journal=OperationJournal('native-core-bundle','bundle_apply',operation_id=operation_id,
-                                 correlation_id='bundle-'+profile['profile_id']+'-'+profile['lock_sha256'][:16],root=base)
-        journal.start('Install exact reviewed core release bundle',details={'profile_id':profile['profile_id'],'lock_sha256':profile['lock_sha256']})
         try:
-            # Effects run through existing XDG transaction/rollback kernel, not a
-            # second package manager or arbitrary shell. Remote authority remains
-            # separately gated by Ward and Switchboard.
-            result=child_bundle.install_bundle(lock,approved_lock_sha256=profile['lock_sha256'])
-            readback=_bundle_projection(base,lock,profile)
-            demand(readback['phase']=='INSTALLED_BYTES_VERIFIED','BUNDLE_POST_APPLY_READBACK_FAILED')
-            journal.finish('passed','Exact child receipts and installed bytes verified',expected_action='bundle_apply',
-                           changed_resources=[{'kind':'bundle','profile_id':profile['profile_id'],'lock_sha256':profile['lock_sha256']}],
-                           rollback_eligible=True,details={'receipt_count':readback['receipt_count'],'lock_sha256':profile['lock_sha256']})
-            return {**result,'operation_id':operation_id,'journaled':True}
-        except Exception as error:
-            readback=_bundle_projection(base,lock,profile)
-            if readback['phase']=='RECONCILED_NOT_INSTALLED':
-                try: journal.finish('failed','Bundle effect failed and exact destination readback is clean',expected_action='bundle_apply',
-                                    failure_category='BUNDLE_APPLY_FAILED_ROLLED_BACK',rollback_eligible=False,
-                                    rollback_result='verified_not_installed',recommended_next_action='Review failure before a fresh approved attempt',
-                                    details={'lock_sha256':profile['lock_sha256']})
-                except Exception: pass
-                raise Refused('BUNDLE_APPLY_FAILED_ROLLED_BACK')
-            try: journal.finish('unknown','Bundle outcome is uncertain; receipts and destination bytes require reconciliation',expected_action='bundle_apply',
-                                failure_category='BUNDLE_OUTCOME_UNCERTAIN',rollback_eligible=None,
-                                recommended_next_action='Run bundle_inspect and do not retry until exact receipts/bytes reconcile',
-                                details={'lock_sha256':profile['lock_sha256']})
-            except Exception: pass
-            raise Refused('BUNDLE_OUTCOME_UNCERTAIN_DO_NOT_RETRY') from error
+            with child_bundle.bundle_apply_custody(
+                lock, approved_lock_sha256=profile['lock_sha256']
+            ) as custody:
+                projection=_bundle_projection(base,lock,profile,custody=custody)
+                demand(projection['retry_allowed'] is True,
+                       'BUNDLE_OUTCOME_UNCERTAIN_OR_ALREADY_INSTALLED_DO_NOT_RETRY')
+                operation_id=_next_bundle_operation(base,profile)
+                journal=OperationJournal('native-core-bundle','bundle_apply',operation_id=operation_id,
+                                         correlation_id='bundle-'+profile['profile_id']+'-'+profile['lock_sha256'][:16],root=base)
+                journal.start('Install exact reviewed core release bundle',details={'profile_id':profile['profile_id'],'lock_sha256':profile['lock_sha256']})
+                try:
+                    # Cross-process custody is already held before retry
+                    # classification and remains held through acquisition,
+                    # installation, exact readback and journal finalization.
+                    result=child_bundle.install_bundle(
+                        lock,approved_lock_sha256=profile['lock_sha256'],custody=custody)
+                    readback=_bundle_projection(base,lock,profile,custody=custody)
+                    demand(readback['phase']=='INSTALLED_BYTES_VERIFIED','BUNDLE_POST_APPLY_READBACK_FAILED')
+                    journal.finish('passed','Exact child receipts and installed bytes verified',expected_action='bundle_apply',
+                                   changed_resources=[{'kind':'bundle','profile_id':profile['profile_id'],'lock_sha256':profile['lock_sha256']}],
+                                   rollback_eligible=True,details={'receipt_count':readback['receipt_count'],'lock_sha256':profile['lock_sha256']})
+                    return {**result,'operation_id':operation_id,'journaled':True}
+                except Exception as error:
+                    readback=_bundle_projection(base,lock,profile,custody=custody)
+                    if readback['phase']=='RECONCILED_NOT_INSTALLED':
+                        try: journal.finish('failed','Bundle effect failed and exact destination readback is clean',expected_action='bundle_apply',
+                                            failure_category='BUNDLE_APPLY_FAILED_ROLLED_BACK',rollback_eligible=False,
+                                            rollback_result='verified_not_installed',recommended_next_action='Review failure before a fresh approved attempt',
+                                            details={'lock_sha256':profile['lock_sha256']})
+                        except Exception: pass
+                        raise Refused('BUNDLE_APPLY_FAILED_ROLLED_BACK')
+                    try: journal.finish('unknown','Bundle outcome is uncertain; receipts and destination bytes require reconciliation',expected_action='bundle_apply',
+                                        failure_category='BUNDLE_OUTCOME_UNCERTAIN',rollback_eligible=None,
+                                        recommended_next_action='Run bundle_inspect and do not retry until exact receipts/bytes reconcile',
+                                        details={'lock_sha256':profile['lock_sha256']})
+                    except Exception: pass
+                    raise Refused('BUNDLE_OUTCOME_UNCERTAIN_DO_NOT_RETRY') from error
+        except child_bundle.BundleError as error:
+            if str(error) == 'BUNDLE_APPLY_ALREADY_IN_PROGRESS':
+                raise Refused('BUNDLE_APPLY_ALREADY_IN_PROGRESS') from error
+            raise
     allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
     act=req.get('action');demand(act in allowed and set(req)<=allowed[act],'REQUEST_FIELDS_INVALID')
     base=root();lock=base/'native-adapter.lock'
