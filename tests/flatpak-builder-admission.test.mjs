@@ -118,7 +118,7 @@ test('pre-1.4 Flatpak builder is rejected before AppStream or package staging',(
     chmodSync(builder,0o755);
     const result=spawnSync('/bin/bash',[target],{cwd:dir,env:{PATH:bin,HOME:dir},encoding:'utf8',timeout:10000});
     assert.equal(result.status,69,result.stderr);
-    assert.match(result.stderr,/builder >=1\\.4 required/);
+    assert.ok(result.stderr.includes('builder >=1.4 required'),result.stderr);
     assert.equal(existsSync(join(dir,'dist')),false);
     assert.equal(existsSync(join(dir,'build')),false);
   }finally{rmSync(dir,{recursive:true,force:true});}
