@@ -51,10 +51,10 @@ test('release script must require nonempty Flatpak output',()=>{
   assert.equal(result.status,0,result.stderr);
 });
 
-test('GNOME46 candidate filesystem grants avoid unsupported XDG state location',()=>{
+test('supported GNOME50 candidate filesystem grants avoid unsupported XDG state location',()=>{
   const manifest=JSON.parse(readFileSync(new URL('../packaging/flatpak/com.xiio.hex.json',import.meta.url),'utf8'));
   assert.equal(manifest.runtime,'org.gnome.Platform');
-  assert.equal(manifest['runtime-version'],'46');
+  assert.equal(manifest['runtime-version'],'50');
   assert.ok(manifest['finish-args'].every(p=>!p.includes('xdg-state/')));
   assert.ok(manifest['finish-args'].includes('--filesystem=xdg-data/xi-io:create'));
 });
@@ -80,4 +80,23 @@ test('Flatpak builder and build-bundle select identical stable OSTree ref',()=>{
   const builder=readFileSync(script,'utf8');
   assert.ok(builder.includes('--default-branch=stable'));
   assert.ok(builder.includes('flatpak build-bundle "$REPO_DIR" "$BUNDLE_OUT" com.xiio.hex stable'));
+});
+
+test('product package refuses historical staged binary and requires fresh Rust build provenance',()=>{
+  const builder=readFileSync(script,'utf8');
+  const manifest=JSON.parse(readFileSync(new URL('../packaging/flatpak/com.xiio.hex.json',import.meta.url),'utf8'));
+  assert.ok(builder.includes('cargo build --locked --release'));
+  assert.ok(builder.includes('npm run native:stage'));
+  assert.ok(builder.includes('CARGO_TARGET_DIR="$BUILD_DIR/fresh-cargo"'));
+  assert.ok(builder.includes('FRESH_CARRIER="$PACKAGING_DIR/.xiio-hex-fresh-carrier"'));
+  assert.ok(builder.includes('source_commit'));
+  assert.ok(builder.includes('frontend_tree_sha256'));
+  assert.ok(builder.includes('cargo_lock_sha256'));
+  assert.ok(builder.includes('historical_dev9_elf_used'));
+  assert.ok(!builder.includes('dpkg-deb -x'));
+  assert.ok(!builder.includes('deliveries/hex-dev/0.1.0-dev.9/xi-io-hex-dev'));
+  assert.equal(manifest.modules[0].sources.some(x=>x.path==='xi-io-hex-dev'),false);
+  assert.ok(manifest.modules[0].sources.some(x=>x.path==='.xiio-hex-fresh-carrier'));
+  assert.ok(manifest.modules[0]['build-commands'].some(x=>x.includes('.xiio-hex-fresh-carrier /app/bin/xi-io-hex-dev')));
+  assert.ok(manifest.modules[0].sources.some(x=>x.path==='.xiio-hex-source-provenance.json'));
 });
