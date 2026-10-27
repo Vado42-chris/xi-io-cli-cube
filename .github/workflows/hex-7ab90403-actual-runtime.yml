@@ -152,6 +152,13 @@ jobs:
               sleep 3
               scrot -z "$QA/native-review-panel.png"
               test -s "$QA/native-review-panel.png"
+              # Read-only actual installer_request("bundle_inspect") through
+              # the installed Tauri WebView button and Python adapter.
+              xdotool mousemove --window "$wid" 223 471 click 1
+              sleep 4
+              scrot -z "$QA/native-core-inspection.png"
+              test -s "$QA/native-core-inspection.png"
+              test "$(sha256sum "$QA/native-review-panel.png" | cut -d" " -f1)" != "$(sha256sum "$QA/native-core-inspection.png" | cut -d" " -f1)"
               sleep 2
               kill -0 "$app"
               echo NATIVE_WINDOW_CONTENT_RENDERED_PASS > "$QA/result.txt"
