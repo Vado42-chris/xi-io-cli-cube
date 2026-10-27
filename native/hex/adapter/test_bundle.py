@@ -232,6 +232,16 @@ class BundleTests(unittest.TestCase):
                            fetch=f.fetch, fail_after_product=1)
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/ward/ward.bin").exists())
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        self.assertEqual(list(state_root.glob("*.receipt.json")), [])
+        archived = list((state_root / "rolled-back").glob("*.rollback-*.json"))
+        self.assertEqual(len(archived), 1)
+        self.assertIn('"schema_version": "xiio-installer-receipt-v1"', archived[0].read_text())
+        # The verified rollback is genuinely retryable: no stale active receipt
+        # can convert the prior creation into a silent noop.
+        retry = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(retry["state"], "INSTALLED_BYTES_VERIFIED")
+        self.assertEqual(retry["receipt_count"], 2)
 
     def test_existing_user_file_is_not_overwritten(self):
         f = self.fixture()
