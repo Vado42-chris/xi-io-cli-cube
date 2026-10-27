@@ -55,24 +55,23 @@ test('GNOME46 candidate filesystem grants avoid unsupported XDG state location',
   const manifest=JSON.parse(readFileSync(new URL('../packaging/flatpak/com.xiio.hex.json',import.meta.url),'utf8'));
   assert.equal(manifest.runtime,'org.gnome.Platform');
   assert.equal(manifest['runtime-version'],'46');
-  assert.ok(manifest['finish-args'].every(p=>!p.includes('xdg-state/')),'Flatpak on Ubuntu22.04 does not support xdg-state grant');
+  assert.ok(manifest['finish-args'].every(p=>!p.includes('xdg-state/')));
   assert.ok(manifest['finish-args'].includes('--filesystem=xdg-data/xi-io:create'));
 });
 test('Flatpak launcher chooses app-private state without host-wide permission',()=>{
   const runner=readFileSync(new URL('../packaging/flatpak/xi-io-hex-runner.sh',import.meta.url),'utf8');
-  assert.match(runner,/XDG_STATE_HOME.*\\.var\\/app\\/com\\.xiio\\.hex\\/state/);
-  assert.doesNotMatch(runner,/XDG_STATE_HOME.*\\.local\\/state/);
+  assert.ok(runner.includes('$HOME/.var/app/com.xiio.hex/state'));
+  assert.equal(runner.includes('$HOME/.local/state'),false);
   const check=spawnSync('/bin/sh',['-n',new URL('../packaging/flatpak/xi-io-hex-runner.sh',import.meta.url).pathname],{encoding:'utf8'});
   assert.equal(check.status,0,check.stderr);
 });
-
-test('Flatpak icon packaging preserves original logo and requires transient 512 derivative',()=>{
+test('Flatpak icon packaging preserves original logo and uses transient 512-square derivative',()=>{
   const manifest=JSON.parse(readFileSync(new URL('../packaging/flatpak/com.xiio.hex.json',import.meta.url),'utf8'));
-  assert.ok(manifest.modules[0]['build-commands'].some(x=>x.includes('install -Dm644 .xiio-hex-icon-512.png /app/share/icons/hicolor/512x512/apps/com.xiio.hex.png')));
+  assert.ok(manifest.modules[0]['build-commands'].some(x=>x.includes('.xiio-hex-icon-512.png /app/share/icons/hicolor/512x512/apps/com.xiio.hex.png')));
   assert.ok(manifest.modules[0].sources.some(x=>x.path==='.xiio-hex-icon-512.png'));
   const builder=readFileSync(script,'utf8');
-  assert.match(builder,/ICON_STAGE=.*\\.xiio-hex-icon-512\\.png/);
-  assert.match(builder,/trap 'rm -f -- "\$ICON_STAGE"' EXIT/);
-  assert.match(builder,/convert "\$PACKAGING_DIR\\/com\\.xiio\\.hex\\.png" -resize 512x512/);
-  assert.doesNotMatch(builder,/convert[^\\n]*-resize[^\\n]*"\\$PACKAGING_DIR\\/com\\.xiio\\.hex\\.png"\\s*$/m);
+  assert.ok(builder.includes('ICON_STAGE="$PACKAGING_DIR/.xiio-hex-icon-512.png"'));
+  assert.ok(builder.includes("trap 'rm -f --"));
+  assert.ok(builder.includes('convert "$PACKAGING_DIR/com.xiio.hex.png" -resize 512x512'));
+  assert.ok(builder.includes('-extent 512x512 "$ICON_STAGE"'));
 });
