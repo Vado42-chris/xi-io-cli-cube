@@ -108,3 +108,20 @@ jobs:
           grep -Fxq CI_EPHEMERAL_RUNNER_REQUIRED guard.log
       - name: Install, independently reopen and remove actual DEV9 package on disposable Linux
         run: bash deliveries/hex-dev/0.1.0-dev.9/qualification/test_native_install.sh
+
+  child-bundle-kernel:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out immutable code and existing installer kernel
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Verify child manifest downloader, real XDG transactions and hostile rollback
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_bundle.py -v
+      - name: Keep composed payload installation distinct from running product/remote authority
+        run: |
+          echo "CHILD_BUNDLE_SOURCE_AND_DISPOSABLE_FILESYSTEM_TEST_ONLY"
+          echo "RUNNING_SERVICES=NOT_TESTED"
+          echo "FIRST_PARTY_SESSION_AND_WARD=UNBOUND"
+          echo "CUSTOMER_TWO_WAY_CONNECTION=NOT_PROVEN"
