@@ -224,5 +224,87 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(original.read_bytes(), b"PRESERVE USER BYTES\n")
 
 
+
+    def test_symlinked_xdg_state_root_refuses_without_external_directory_effect(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        external = f.root / "external"
+        external.mkdir()
+        (f.root / "state").symlink_to(external, target_is_directory=True)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(list(external.iterdir()), [])
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
+    def test_symlinked_intermediate_bundle_ancestor_refuses_before_outside_write(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        external = f.root / "external"
+        external.mkdir()
+        (f.root / "state").mkdir()
+        (f.root / "state/xi-io").symlink_to(external, target_is_directory=True)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(list(external.iterdir()), [])
+
+    def test_destination_xdg_symlink_rejected_without_installing(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        outside = f.root / "external"
+        outside.mkdir()
+        (f.root / "data").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_XDG_DESTINATION_SYMLINK_FORBIDDEN"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_attacker_swaps_state_ancestor_during_staging_no_outside_effect(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        outside = f.root / "external"
+        outside.mkdir()
+        state = f.root / "state"
+        moved = f.root / "moved-original-state"
+        def swap_and_fetch(url, destination, limit):
+            if not moved.exists():
+                state.rename(moved)
+                state.symlink_to(outside, target_is_directory=True)
+            f.fetch(url, destination, limit)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_CHANGED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                           fetch=swap_and_fetch)
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
+    def test_symlinked_apply_lock_refused_without_touching_target(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        state = f.root / "state/xi-io/installer/bundles/core-test"
+        state.mkdir(parents=True)
+        victim = f.root / "unrelated-user-file"
+        victim.write_bytes(b"DO NOT TOUCH")
+        (state / "apply.lock").symlink_to(victim)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_LOCK_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                           fetch=f.fetch)
+        self.assertEqual(victim.read_bytes(), b"DO NOT TOUCH")
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
+    def test_unsafe_world_writable_bundle_state_root_is_rejected(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        state = f.root / "state/xi-io/installer/bundles/core-test"
+        state.mkdir(parents=True)
+        state.chmod(0o777)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_PERMISSIONS"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                           fetch=f.fetch)
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
 if __name__ == "__main__":
     unittest.main()
