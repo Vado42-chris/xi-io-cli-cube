@@ -224,7 +224,7 @@ def load_bundle_profile(lock: Path, *,
     }
 
 
-def _secure_ensure_state_root(state_root: Path) -> Path:
+def _secure_ensure_state_root(state_root: Path, *, retain_fd: bool = False):
     """Traverse and create state_root stepwise using race-resistant O_NOFOLLOW / dir_fd.
 
     Refuses immediately if any existing ancestor or target component is a symlink or non-directory.
@@ -284,51 +284,73 @@ def _secure_ensure_state_root(state_root: Path) -> Path:
                 pass
         raise
     else:
+        if retain_fd:
+            return current_fd
         os.close(current_fd)
 
     return state_root
 
-def _secure_observe_state_root(state_root: Path) -> Path:
-    """Traverse an existing state path with O_NOFOLLOW without creating it."""
-    _require(isinstance(state_root, Path), "BUNDLE_STATE_ROOT_UNTRUSTED")
-    _require(state_root.is_absolute(), "BUNDLE_STATE_ROOT_UNTRUSTED")
-    parts = state_root.parts
-    _require(len(parts) > 1 and parts[0] == "/", "BUNDLE_STATE_ROOT_UNTRUSTED")
-    open_flags = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
-    nofollow_flags = open_flags | os.O_NOFOLLOW
+def _secure_observe_state_root(state_root: Path, *, retain_fd: bool = False,
+                               require_existing: bool = False):
+    """Observe current path under no-follow dirfds; never create it."""
+    _require(isinstance(state_root, Path) and state_root.is_absolute(),
+             "BUNDLE_STATE_ROOT_UNTRUSTED")
+    flags = (getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY
+             | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
     try:
-        current_fd = os.open("/", open_flags)
+        fd = os.open("/", flags)
     except OSError as exc:
         raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
     try:
-        for part in parts[1:]:
-            _require(bool(part) and part not in (".", "..") and "\x00" not in part and "/" not in part,
+        for part in state_root.parts[1:]:
+            _require(part not in ("", ".", "..", "/") and "\x00" not in part,
                      "BUNDLE_STATE_ROOT_UNTRUSTED")
             try:
-                st = os.lstat(part, dir_fd=current_fd)
-            except FileNotFoundError:
+                child = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError as exc:
+                if require_existing:
+                    raise BundleError("BUNDLE_STATE_ROOT_CHANGED") from exc
                 return state_root
             except OSError as exc:
                 raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
-            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED")
             try:
-                next_fd = os.open(part, nofollow_flags, dir_fd=current_fd)
-            except OSError as exc:
-                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
-            fst = os.fstat(next_fd)
-            if stat.S_ISLNK(fst.st_mode) or not stat.S_ISDIR(fst.st_mode):
-                os.close(next_fd)
-                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED")
-            os.close(current_fd)
-            current_fd = next_fd
+                fresh = os.fstat(child)
+                source = os.stat(part, dir_fd=fd, follow_symlinks=False)
+                _require(stat.S_ISDIR(fresh.st_mode)
+                         and (fresh.st_dev, fresh.st_ino)
+                         == (source.st_dev, source.st_ino),
+                         "BUNDLE_STATE_ROOT_UNTRUSTED")
+            except BaseException:
+                os.close(child)
+                raise
+            os.close(fd)
+            fd = child
+        if retain_fd:
+            answer = fd
+            fd = -1
+            return answer
+        return state_root
     finally:
-        try:
-            os.close(current_fd)
-        except OSError:
-            pass
-    return state_root
+        if fd >= 0:
+            os.close(fd)
 
+
+def _assert_state_root_current(state_root: Path, root_fd: int) -> None:
+    """Reopen original XDG path and compare its exact device/inode."""
+    try:
+        observed_fd = _secure_observe_state_root(
+            state_root, retain_fd=True, require_existing=True)
+    except (OSError, BundleError) as exc:
+        raise BundleError("BUNDLE_STATE_ROOT_CHANGED") from exc
+    try:
+        wanted = os.fstat(root_fd)
+        observed = os.fstat(observed_fd)
+        _require(stat.S_ISDIR(wanted.st_mode)
+                 and (wanted.st_dev, wanted.st_ino)
+                 == (observed.st_dev, observed.st_ino),
+                 "BUNDLE_STATE_ROOT_CHANGED")
+    finally:
+        os.close(observed_fd)
 
 MAX_RECEIPT_BYTES = 2 * 1024 * 1024
 
@@ -389,55 +411,75 @@ def _receipt_and_bytes_match(receipt: Path, manifest: ProductManifest,
                  "BUNDLE_INSTALLED_BYTES_DRIFT")
 
 
-def _archive_rolled_back_receipt(state_root: Path, receipt: Path) -> str:
-    """Move a verified rollback receipt out of the active-install namespace."""
-    _require(not receipt.is_symlink() and receipt.is_file(),
+def _archive_rolled_back_receipt(state_root: Path, receipt: Path,
+                                 root_fd: int) -> str:
+    """Preserve exact rollback receipts under pinned directory custody."""
+    _require(receipt.parent == state_root
+             and not receipt.is_symlink() and receipt.is_file(),
              "BUNDLE_ROLLBACK_RECEIPT_UNTRUSTED")
-    archive = state_root / "rolled-back"
-    _secure_ensure_state_root(archive)
     source_bytes = _safe_existing_file(receipt, MAX_RECEIPT_BYTES)
-    for attempt in range(1, 65):
-        target = archive / f"{receipt.stem}.rollback-{attempt:02d}.json"
-        if target.exists() or target.is_symlink():
-            continue
-        try:
-            os.link(receipt, target, follow_symlinks=False)
-        except FileExistsError:
-            continue
-        _require(not target.is_symlink() and target.is_file(),
-                 "BUNDLE_ROLLBACK_ARCHIVE_READBACK_FAILED")
-        _require(_safe_existing_file(target, MAX_RECEIPT_BYTES) == source_bytes,
-                 "BUNDLE_ROLLBACK_ARCHIVE_READBACK_FAILED")
-        receipt.unlink()
-        _require(not receipt.exists() and not receipt.is_symlink(),
-                 "BUNDLE_ROLLBACK_ACTIVE_RECEIPT_RETIRE_FAILED")
-        fd = os.open(archive, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        return target.name
-    raise BundleError("BUNDLE_ROLLBACK_ARCHIVE_EXHAUSTED")
-
+    try:
+        os.mkdir("rolled-back", mode=0o700, dir_fd=root_fd)
+    except FileExistsError:
+        pass
+    try:
+        archive_fd = os.open("rolled-back",
+                             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                             | getattr(os, "O_CLOEXEC", 0), dir_fd=root_fd)
+    except OSError as exc:
+        raise BundleError("BUNDLE_ROLLBACK_ARCHIVE_PATH_UNTRUSTED") from exc
+    try:
+        st = os.fstat(archive_fd)
+        _require(stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid()
+                 and not st.st_mode & 0o022,
+                 "BUNDLE_ROLLBACK_ARCHIVE_PATH_UNTRUSTED")
+        for attempt in range(1, 65):
+            name = f"{receipt.stem}.rollback-{attempt:02d}.json"
+            try:
+                os.link(receipt.name, name, src_dir_fd=root_fd,
+                        dst_dir_fd=archive_fd, follow_symlinks=False)
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise BundleError("BUNDLE_ROLLBACK_ARCHIVE_FAILED") from exc
+            target = state_root / "rolled-back" / name
+            _require(not target.is_symlink()
+                     and _safe_existing_file(target, MAX_RECEIPT_BYTES)
+                     == source_bytes,
+                     "BUNDLE_ROLLBACK_ARCHIVE_READBACK_FAILED")
+            os.unlink(receipt.name, dir_fd=root_fd)
+            _require(not receipt.exists() and not receipt.is_symlink(),
+                     "BUNDLE_ROLLBACK_ACTIVE_RECEIPT_RETIRE_FAILED")
+            os.fsync(archive_fd)
+            return name
+        raise BundleError("BUNDLE_ROLLBACK_ARCHIVE_EXHAUSTED")
+    finally:
+        os.close(archive_fd)
 
 class _BundleApplyCustody:
-    __slots__ = ("profile_id", "lock_sha256", "state_root", "fd")
+    __slots__ = ("profile_id", "lock_sha256", "state_root", "fd",
+                 "root_fd", "anchored_root")
 
-    def __init__(self, profile_id: str, lock_sha256: str, state_root: Path, fd: int):
+    def __init__(self, profile_id, lock_sha256, state_root, fd, root_fd):
         self.profile_id = profile_id
         self.lock_sha256 = lock_sha256
         self.state_root = state_root
         self.fd = fd
+        self.root_fd = root_fd
+        self.anchored_root = Path("/proc/self/fd") / str(root_fd)
 
 
 class _BundleInspectionCustody:
-    __slots__ = ("profile_id", "lock_sha256", "state_root", "fd")
+    __slots__ = ("profile_id", "lock_sha256", "state_root", "fd",
+                 "root_fd", "anchored_root")
 
-    def __init__(self, profile_id: str, lock_sha256: str, state_root: Path, fd: int):
+    def __init__(self, profile_id, lock_sha256, state_root, fd, root_fd):
         self.profile_id = profile_id
         self.lock_sha256 = lock_sha256
         self.state_root = state_root
         self.fd = fd
+        self.root_fd = root_fd
+        self.anchored_root = Path("/proc/self/fd") / str(root_fd)
 
 
 def _bundle_state_root(profile, env: dict[str, str] | None, *, create: bool):
@@ -450,37 +492,53 @@ def _bundle_state_root(profile, env: dict[str, str] | None, *, create: bool):
     return roots, state_root
 
 
-def _open_bundle_apply_lock(state_root: Path) -> int:
-    _require(not state_root.is_symlink() and state_root.is_dir(),
-             "BUNDLE_STATE_ROOT_UNTRUSTED")
-    lockfile = state_root / "apply.lock"
-    _require(not lockfile.is_symlink(), "BUNDLE_APPLY_LOCK_SYMLINK_FORBIDDEN")
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(lockfile, flags, 0o600)
+def _open_bundle_lock(root_fd: int, *, shared: bool) -> int:
+    """Open and lock a regular file relative to the pinned state directory."""
     try:
-        _require(stat.S_ISREG(os.fstat(fd).st_mode), "BUNDLE_APPLY_LOCK_INVALID")
+        fd = os.open("apply.lock",
+                     os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
+                     | getattr(os, "O_CLOEXEC", 0),
+                     0o600, dir_fd=root_fd)
+    except OSError as exc:
+        raise BundleError("BUNDLE_APPLY_LOCK_SYMLINK_FORBIDDEN") from exc
+    try:
+        st = os.fstat(fd)
+        _require(stat.S_ISREG(st.st_mode) and st.st_nlink == 1
+                 and st.st_uid == os.getuid() and not st.st_mode & 0o022,
+                 "BUNDLE_APPLY_LOCK_INVALID")
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+                        | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise BundleError("BUNDLE_APPLY_ALREADY_IN_PROGRESS") from exc
+            raise BundleError("BUNDLE_APPLY_IN_PROGRESS"
+                              if shared else "BUNDLE_APPLY_ALREADY_IN_PROGRESS") from exc
         return fd
-    except Exception:
+    except BaseException:
         os.close(fd)
         raise
 
+
+def _open_bundle_apply_lock(root_fd: int) -> int:
+    return _open_bundle_lock(root_fd, shared=False)
 
 def _custody_identity_matches(custody, profile, state_root: Path) -> bool:
     if (custody.profile_id != profile["profile_id"]
             or custody.lock_sha256 != profile["lock_sha256"]
             or custody.state_root != state_root
-            or not isinstance(custody.fd, int)
-            or custody.fd < 0):
+            or not isinstance(custody.fd, int) or custody.fd < 0
+            or not isinstance(custody.root_fd, int) or custody.root_fd < 0
+            or custody.anchored_root != Path("/proc/self/fd") / str(custody.root_fd)):
         return False
     try:
-        return stat.S_ISREG(os.fstat(custody.fd).st_mode)
-    except OSError:
+        _assert_state_root_current(state_root, custody.root_fd)
+        locked = os.fstat(custody.fd)
+        observed = os.stat("apply.lock", dir_fd=custody.root_fd,
+                           follow_symlinks=False)
+        return (stat.S_ISREG(locked.st_mode)
+                and (locked.st_dev, locked.st_ino)
+                == (observed.st_dev, observed.st_ino))
+    except (OSError, BundleError):
         return False
-
 
 def _apply_custody_matches(custody, profile, state_root: Path) -> bool:
     return isinstance(custody, _BundleApplyCustody) and _custody_identity_matches(
@@ -498,65 +556,57 @@ def _inspection_custody_matches(custody, profile, state_root: Path) -> bool:
 def bundle_apply_custody(lock: Path, *, approved_lock_sha256: str,
                          env: dict[str, str] | None = None,
                          allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS):
-    """Hold cross-process custody before retry classification through final readback."""
+    """Exclusive OS lock acquired before retry classification or download."""
     _require(isinstance(approved_lock_sha256, str)
              and SHA256.fullmatch(approved_lock_sha256), "BUNDLE_APPROVAL_INVALID")
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
     _roots, state_root = _bundle_state_root(profile, env, create=True)
-    fd = _open_bundle_apply_lock(state_root)
-    custody = _BundleApplyCustody(profile["profile_id"], approved_lock_sha256, state_root, fd)
+    _require(Path("/proc/self/fd").is_dir(), "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
+    root_fd = _secure_ensure_state_root(state_root, retain_fd=True)
     try:
-        yield custody
-    finally:
+        _assert_state_root_current(state_root, root_fd)
+        fd = _open_bundle_apply_lock(root_fd)
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            yield _BundleApplyCustody(
+                profile["profile_id"], approved_lock_sha256,
+                state_root, fd, root_fd)
         finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
+    finally:
+        os.close(root_fd)
 
 
-def _open_bundle_inspection_lock(state_root: Path) -> int:
-    _require(not state_root.is_symlink() and state_root.is_dir(),
-             "BUNDLE_STATE_ROOT_UNTRUSTED")
-    lockfile = state_root / "apply.lock"
-    _require(not lockfile.is_symlink(), "BUNDLE_APPLY_LOCK_SYMLINK_FORBIDDEN")
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(lockfile, flags, 0o600)
-    try:
-        _require(stat.S_ISREG(os.fstat(fd).st_mode), "BUNDLE_APPLY_LOCK_INVALID")
-        try:
-            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise BundleError("BUNDLE_APPLY_IN_PROGRESS") from exc
-        return fd
-    except Exception:
-        os.close(fd)
-        raise
-
+def _open_bundle_inspection_lock(root_fd: int) -> int:
+    return _open_bundle_lock(root_fd, shared=True)
 
 @contextmanager
 def bundle_inspection_custody(lock: Path, *, approved_lock_sha256: str,
                               env: dict[str, str] | None = None,
                               allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS):
-    """Hold a shared snapshot lock across receipts, destinations and journal reads."""
+    """Shared snapshot custody over exact pinned state and receipts."""
     _require(isinstance(approved_lock_sha256, str)
              and SHA256.fullmatch(approved_lock_sha256), "BUNDLE_APPROVAL_INVALID")
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
-    # Creating private custody metadata is allowed; no product destination,
-    # receipt, journal or provider state is modified by inspection.
     _roots, state_root = _bundle_state_root(profile, env, create=True)
-    fd = _open_bundle_inspection_lock(state_root)
-    custody = _BundleInspectionCustody(profile["profile_id"], approved_lock_sha256, state_root, fd)
+    _require(Path("/proc/self/fd").is_dir(), "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
+    root_fd = _secure_ensure_state_root(state_root, retain_fd=True)
     try:
-        yield custody
-    finally:
+        _assert_state_root_current(state_root, root_fd)
+        fd = _open_bundle_inspection_lock(root_fd)
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            yield _BundleInspectionCustody(
+                profile["profile_id"], approved_lock_sha256,
+                state_root, fd, root_fd)
         finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
+    finally:
+        os.close(root_fd)
 
 
 def inspect_bundle_install(lock: Path, *, approved_lock_sha256: str,
@@ -599,9 +649,10 @@ def inspect_bundle_install(lock: Path, *, approved_lock_sha256: str,
                     "device_connected": False,
                 }
             raise
-    roots, state_root = _bundle_state_root(profile, env, create=False)
-    _require(_inspection_custody_matches(custody, profile, state_root),
+    roots, original_state_root = _bundle_state_root(profile, env, create=False)
+    _require(_inspection_custody_matches(custody, profile, original_state_root),
              "BUNDLE_INSPECTION_CUSTODY_INVALID")
+    state_root = custody.anchored_root
     role_states = {}
     receipt_count = 0
     try:
@@ -635,6 +686,7 @@ def inspect_bundle_install(lock: Path, *, approved_lock_sha256: str,
         else:
             state = "OUTCOME_UNCERTAIN"
             first_red = "BUNDLE_MIXED_OR_UNRECEIPTED_STATE"
+        _assert_state_root_current(original_state_root, custody.root_fd)
     except (BundleError, OSError, ValueError, TypeError, KeyError) as exc:
         state = "OUTCOME_UNCERTAIN"
         first_red = str(exc)[:256] or "BUNDLE_READBACK_FAILED"
@@ -683,9 +735,10 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 fail_after_product=fail_after_product,
                 custody=owned,
             )
-    roots, state_root = _bundle_state_root(profile, env, create=True)
-    _require(_apply_custody_matches(custody, profile, state_root),
+    roots, original_state_root = _bundle_state_root(profile, env, create=False)
+    _require(_apply_custody_matches(custody, profile, original_state_root),
              "BUNDLE_APPLY_CUSTODY_INVALID")
+    state_root = custody.anchored_root
     fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
     _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
     with tempfile.TemporaryDirectory(prefix="xiio-stage-", dir=state_root) as tmp:
@@ -709,6 +762,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             staged[role] = root
         _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
                  == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
+        _assert_state_root_current(original_state_root, custody.root_fd)
 
         for role in profile["ordered_roles"]:
             manifest = profile["products"][role][0]
@@ -716,6 +770,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
         applied = []
         try:
             for role in profile["ordered_roles"]:
+                _assert_state_root_current(original_state_root, custody.root_fd)
                 manifest = profile["products"][role][0]
                 receipt = _bundle_receipt_path(state_root, role, manifest, approved_lock_sha256)
                 _require(not receipt.exists() and not receipt.is_symlink(),
@@ -724,13 +779,15 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 applied.append(receipt)
                 if fail_after_product is not None and len(applied) == fail_after_product:
                     raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
+            _assert_state_root_current(original_state_root, custody.root_fd)
         except Exception as cause:
             failures = []
             archived = []
             for receipt in reversed(applied):
                 try:
                     rollback(receipt, env)
-                    archived.append(_archive_rolled_back_receipt(state_root, receipt))
+                    archived.append(_archive_rolled_back_receipt(
+                        state_root, receipt, custody.root_fd))
                 except Exception:
                     failures.append(receipt.name)
             if failures:
