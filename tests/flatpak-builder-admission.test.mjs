@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, mkdirSync, copyFileSync, symlinkSync, readFileSync, existsSync, rmSync, chmodSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, copyFileSync, symlinkSync, readFileSync, existsSync, rmSync, chmodSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -99,4 +99,25 @@ test('product package refuses historical staged binary and requires fresh Rust b
   assert.ok(manifest.modules[0].sources.some(x=>x.path==='.xiio-hex-fresh-carrier'));
   assert.ok(manifest.modules[0]['build-commands'].some(x=>x.includes('.xiio-hex-fresh-carrier /app/bin/xi-io-hex-dev')));
   assert.ok(manifest.modules[0].sources.some(x=>x.path==='.xiio-hex-source-provenance.json'));
+});
+
+test('pre-1.4 Flatpak builder is rejected before AppStream or package staging',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'xiio-flatpak-obsolete-builder-'));
+  try{
+    const scripts=join(dir,'scripts'),bin=join(dir,'bin');
+    mkdirSync(scripts);mkdirSync(bin);
+    const target=join(scripts,'build-flatpak.sh');
+    copyFileSync(script,target);
+    symlinkSync('/usr/bin/dirname',join(bin,'dirname'));
+    symlinkSync('/usr/bin/awk',join(bin,'awk'));
+    symlinkSync('/usr/bin/true',join(bin,'flatpak'));
+    const builder=join(bin,'flatpak-builder');
+    writeFileSync(builder,'#!/bin/sh\\nprintf "flatpak-builder 1.2.2\\n"\\n');
+    chmodSync(builder,0o755);
+    const result=spawnSync('/bin/bash',[target],{cwd:dir,env:{PATH:bin,HOME:dir},encoding:'utf8',timeout:10000});
+    assert.equal(result.status,69,result.stderr);
+    assert.match(result.stderr,/builder >=1\\.4 required/);
+    assert.equal(existsSync(join(dir,'dist')),false);
+    assert.equal(existsSync(join(dir,'build')),false);
+  }finally{rmSync(dir,{recursive:true,force:true});}
 });
