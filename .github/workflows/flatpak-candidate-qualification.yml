@@ -69,7 +69,7 @@ jobs:
           flatpak run --user --command=sh com.xiio.hex -c 'test -x /app/bin/xi-io-hex-dev && test -f "/app/lib/xi-io-hex/adapter/installer_adapter.py"'
           # Library closure is independent of presence of an executable bit.
           # A missing WebKit/GTK/JSCore dependency is a typed first red, not a built app.
-          flatpak run --user --command=sh com.xiio.hex -c 'ldd /app/bin/xi-io-hex-dev > /tmp/xiio-hex-ldd.txt; cat /tmp/xiio-hex-ldd.txt; if grep -q "not found" /tmp/xiio-hex-ldd.txt; then echo "FLATPAK_ELF_DEPENDENCY_UNRESOLVED"; exit 72; fi'
+          flatpak run --user --command=sh com.xiio.hex -c 'set -e; ldd /app/bin/xi-io-hex-dev > /tmp/xiio-hex-ldd.txt || exit 72; cat /tmp/xiio-hex-ldd.txt; if grep -q "not found" /tmp/xiio-hex-ldd.txt; then echo "FLATPAK_ELF_DEPENDENCY_UNRESOLVED"; exit 72; fi'
           echo "INSTALLED_FLATPAK_ELF_AND_ADAPTER_READBACK_PASS_NOT_PHYSICAL_POP_OS"
       - name: Validate fresh source proof in installed carrier and bounded Python adapter
         run: |
