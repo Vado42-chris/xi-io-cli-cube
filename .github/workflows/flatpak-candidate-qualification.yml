@@ -81,7 +81,9 @@ jobs:
           test -n "$INSTALLED_BUILD_ID"
           test "$INSTALLED_BUILD_ID" = "$EXPECTED_BUILD_ID"
           echo "EXACT_SOURCE_TO_INSTALLED_STRIPPED_ELF_BUILD_ID_PASS:$INSTALLED_BUILD_ID"
-          echo '{"action":"inspect"}' | flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B /app/lib/xi-io-hex/adapter/installer_adapter.py > sandbox-inspect.json
+          # Run the Python IPC adapter with the same bounded XDG state
+          # initialization as the actual native launcher, not a parallel home.
+          echo '{"action":"inspect"}' | flatpak run --user --command=sh com.xiio.hex -c 'XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}"; export XDG_STATE_HOME; exec /usr/bin/python3 -I -B /app/lib/xi-io-hex/adapter/installer_adapter.py' > sandbox-inspect.json
           python3 -c 'import json; r=json.load(open("sandbox-inspect.json")); assert isinstance(r.get("ok"),bool); assert "result" in r or "error" in r; print("NATIVE_PYTHON_IPC_ADAPTER_EXECUTED", "RESULT" if r["ok"] else "TYPED_REFUSAL")'
           flatpak run --user --command=sh com.xiio.hex -c 'test -n "$HOME" && test -d "$HOME"'
       - name: Launch actual installed HEX native window under disposable Xvfb
@@ -113,7 +115,7 @@ jobs:
             echo HEX_INSTALLED_WINDOW_VISIBLE_ON_DISPOSABLE_LINUX
           '
           echo "NATIVE_GUI_WINDOW_PASS_DOES_NOT_PROVE_TAURI_IPC"
-          flatpak run --user --command=sh com.xiio.hex -c 'test -d "$HOME/.var/app/com.xiio.hex/state" || test -d "$HOME/.local/state"'
+          flatpak run --user --command=sh com.xiio.hex -c 'test -d "${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}/xi-io/installer"'
           echo "APP_RESTART_REQUIRES_SAME_EXACT_SOURCE_NO_HOST_NATIVE_CLI_ASSUMPTION"
 
       - name: Publish inspectable exact candidate artifact, never claim an approved release
