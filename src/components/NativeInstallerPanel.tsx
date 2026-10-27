@@ -78,6 +78,7 @@ export default function NativeInstallerPanel() {
     try {
       const result = await client(request);
       setCoreBundle(result);
+      if (effect && result?.state === 'INSTALLED_BYTES_VERIFIED') setCoreUnknown(false);
     } catch (error) {
       setCoreError(String(error instanceof Error ? error.message : error));
     } finally {busyRef.current = false; setBusy(false);}
