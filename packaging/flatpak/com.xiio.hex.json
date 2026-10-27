@@ -1,7 +1,7 @@
 {
   "app-id": "com.xiio.hex",
   "runtime": "org.gnome.Platform",
-  "runtime-version": "46",
+  "runtime-version": "50",
   "sdk": "org.gnome.Sdk",
   "command": "xi-io-hex",
   "finish-args": [
@@ -24,7 +24,7 @@
       "buildsystem": "simple",
       "build-commands": [
         "install -Dm755 xi-io-hex-runner.sh /app/bin/xi-io-hex",
-        "install -Dm755 xi-io-hex-dev /app/bin/xi-io-hex-dev",
+        "install -Dm755 .xiio-hex-fresh-carrier /app/bin/xi-io-hex-dev",
         "install -Dm644 com.xiio.hex.desktop /app/share/applications/com.xiio.hex.desktop",
         "install -Dm644 com.xiio.hex.metainfo.xml /app/share/metainfo/com.xiio.hex.metainfo.xml",
         "install -Dm644 .xiio-hex-icon-512.png /app/share/icons/hicolor/512x512/apps/com.xiio.hex.png",
@@ -35,7 +35,8 @@
         "cp -r adapter /app/lib/xi-io-hex-dev/",
         "cp -r cli-source /app/lib/xi-io-hex-dev/",
         "cp -r adapter \"/app/lib/XI-IO HEX DEV/\"",
-        "cp -r cli-source \"/app/lib/XI-IO HEX DEV/\""
+        "cp -r cli-source \"/app/lib/XI-IO HEX DEV/\"",
+        "install -Dm644 .xiio-hex-source-provenance.json /app/share/xi-io-hex/source-provenance.json"
       ],
       "sources": [
         {
@@ -44,7 +45,7 @@
         },
         {
           "type": "file",
-          "path": "xi-io-hex-dev"
+          "path": ".xiio-hex-fresh-carrier"
         },
         {
           "type": "file",
@@ -76,6 +77,10 @@
           "type": "dir",
           "path": "../../native/hex/cli-source",
           "dest": "cli-source"
+        },
+        {
+          "type": "file",
+          "path": ".xiio-hex-source-provenance.json"
         }
       ]
     }
