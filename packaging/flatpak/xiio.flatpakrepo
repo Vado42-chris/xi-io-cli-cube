@@ -1,0 +1,7 @@
+[Flatpak Repo]
+Title=XI-IO Software Repository
+Url=https://vado42-chris.github.io/xi-io-cli-cube/repo
+Homepage=https://xi-io.ca
+Comment=XI-IO Software Distribution
+Description=Official Flatpak repository for XI-IO software suite on Pop!_OS and Linux
+DeployCollectionID=ca.xi_io.hex

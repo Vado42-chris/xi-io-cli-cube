@@ -25,9 +25,25 @@ fn execute_deadline(request: InstallerRequest, adapter: PathBuf, home: PathBuf, 
     let (tx,rx)=mpsc::channel();
     thread::spawn(move || {
         let _guard=match gate.try_lock() {Ok(g)=>g,Err(_)=>{let _=tx.send(uncertain("NATIVE_REQUEST_BUSY_DO_NOT_RETRY"));return}};
-        let mut child=match Command::new("/usr/bin/python3").arg("-I").arg("-B").arg(&adapter)
-            .env_clear().env("HOME",home).env("LANG","C.UTF-8").current_dir(adapter.parent().unwrap())
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        let mut cmd = Command::new("/usr/bin/python3").arg("-I").arg("-B").arg(&adapter);
+        cmd.env_clear()
+            .env("HOME", &home)
+            .env("LANG", "C.UTF-8")
+            .current_dir(adapter.parent().unwrap())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        // Bounded, validated environment handoff: preserve explicit sandbox XDG base directories
+        for var in &["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"] {
+            if let Ok(val) = std::env::var(var) {
+                if val.starts_with('/') && !val.contains('\0') {
+                    cmd.env(var, val);
+                }
+            }
+        }
+
+        let mut child = match cmd.spawn() {
             Ok(c)=>c,Err(_)=>{let _=tx.send(failure("FIXED_PYTHON_ADAPTER_NOT_STARTED"));return}
         };
         let stdout=bounded_reader(child.stdout.take().unwrap());
@@ -115,5 +131,23 @@ mod tests {
         loop {if gate.try_lock().is_ok(){break} assert!(Instant::now()<deadline,"child must exit normally without forced kill");thread::sleep(Duration::from_millis(20));}
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[test] fn xdg_environment_handoff_is_forwarded_when_valid() {
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root=std::env::temp_dir().join(format!("hex-transport-xdg-{}-{stamp}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let target_state=root.join("sandbox-state");
+        std::fs::create_dir_all(&target_state).unwrap();
+        let script=root.join("adapter.py");
+        std::fs::write(&script,"import os,sys\ns=os.environ.get('XDG_STATE_HOME','')\nprint('{\"ok\":true,\"result\":{\"xdg_state\":\"'+s+'\"}}')\n").unwrap();
+        let gate=Arc::new(Mutex::new(()));
+        let req=InstallerRequest::Readback{plan_id:"0123456789abcdef0123456789abcdef".into()};
+        std::env::set_var("XDG_STATE_HOME", &target_state);
+        let response=execute_deadline(req,script,root.clone(),gate,Duration::from_secs(5));
+        std::env::remove_var("XDG_STATE_HOME");
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["result"]["xdg_state"], target_state.to_str().unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
 }
+

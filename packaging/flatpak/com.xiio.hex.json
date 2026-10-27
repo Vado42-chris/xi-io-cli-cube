@@ -1,0 +1,80 @@
+{
+  "app-id": "com.xiio.hex",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "46",
+  "sdk": "org.gnome.Sdk",
+  "command": "xi-io-hex",
+  "finish-args": [
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--device=dri",
+    "--share=network",
+    "--filesystem=xdg-data/xi-io:create",
+    "--filesystem=xdg-config/xi-io:create",
+    "--filesystem=xdg-state/xi-io:create",
+    "--filesystem=xdg-cache/xi-io:create",
+    "--filesystem=~/.local/bin:create",
+    "--talk-name=org.freedesktop.portal.Desktop",
+    "--talk-name=org.freedesktop.portal.FileChooser",
+    "--talk-name=org.freedesktop.Notifications"
+  ],
+  "modules": [
+    {
+      "name": "xi-io-hex",
+      "buildsystem": "simple",
+      "build-commands": [
+        "install -Dm755 xi-io-hex-runner.sh /app/bin/xi-io-hex",
+        "install -Dm755 xi-io-hex-dev /app/bin/xi-io-hex-dev",
+        "install -Dm644 com.xiio.hex.desktop /app/share/applications/com.xiio.hex.desktop",
+        "install -Dm644 com.xiio.hex.metainfo.xml /app/share/metainfo/com.xiio.hex.metainfo.xml",
+        "install -Dm644 com.xiio.hex.png /app/share/icons/hicolor/512x512/apps/com.xiio.hex.png",
+        "mkdir -p /app/lib/xi-io-hex /app/lib/xi-io-hex-dev \"/app/lib/XI-IO HEX DEV\"",
+        "cp -r frontend /app/lib/xi-io-hex/",
+        "cp -r adapter /app/lib/xi-io-hex/",
+        "cp -r cli-source /app/lib/xi-io-hex/",
+        "cp -r adapter /app/lib/xi-io-hex-dev/",
+        "cp -r cli-source /app/lib/xi-io-hex-dev/",
+        "cp -r adapter \"/app/lib/XI-IO HEX DEV/\"",
+        "cp -r cli-source \"/app/lib/XI-IO HEX DEV/\""
+      ],
+      "sources": [
+        {
+          "type": "file",
+          "path": "xi-io-hex-runner.sh"
+        },
+        {
+          "type": "file",
+          "path": "xi-io-hex-dev"
+        },
+        {
+          "type": "file",
+          "path": "com.xiio.hex.desktop"
+        },
+        {
+          "type": "file",
+          "path": "com.xiio.hex.metainfo.xml"
+        },
+        {
+          "type": "file",
+          "path": "com.xiio.hex.png"
+        },
+        {
+          "type": "dir",
+          "path": "../../dist",
+          "dest": "frontend"
+        },
+        {
+          "type": "dir",
+          "path": "../../native/hex/adapter",
+          "dest": "adapter"
+        },
+        {
+          "type": "dir",
+          "path": "../../native/hex/cli-source",
+          "dest": "cli-source"
+        }
+      ]
+    }
+  ]
+}
