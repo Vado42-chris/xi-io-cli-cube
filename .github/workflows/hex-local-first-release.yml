@@ -14,14 +14,20 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout this approved release integration source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: release/local-first-7ab90403-20261027
+      - name: Checkout immutable product source separately
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: 7ab90403678bcaaef73b2bf465915aa25b8acffd
+          path: checked-product
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24.22.1'
       - name: Reopen exact CI bytes and produce unique Linux package
-        run: bash scripts/hex-local-first-release.sh
+        run: (cd checked-product && bash ../scripts/hex-local-first-release.sh)
       - name: Install the unique package on disposable Linux
         run: |
           set -euo pipefail
