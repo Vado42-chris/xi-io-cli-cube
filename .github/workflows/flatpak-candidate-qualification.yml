@@ -38,7 +38,7 @@ jobs:
           # Ubuntu 22.04 builder 1.2.x attempts removed appstream-compose
           # inside GNOME50. Builder >=1.4 uses appstreamcli and preserves
           # metadata validation; never bypass appstream-compose.
-          python3 -c 'import subprocess; v=subprocess.check_output(["flatpak-builder","--version"],text=True).strip().split()[-1].split("."); assert tuple(map(int,v[:2])) >= (1,4), "FLATPAK_BUILDER_1_4_REQUIRED"'
+          python3 -c 'import subprocess,re; raw=subprocess.check_output(["flatpak-builder","--version"],text=True); m=re.search(r"(\\d+)\\.(\\d+)(?:\\.\\d+)?",raw); assert m and (int(m[1]),int(m[2])) >= (1,4), "FLATPAK_BUILDER_1_4_REQUIRED"'
       - name: Pin current Rust compiler for exact Cargo.lock native build
         run: |
           set -euo pipefail
