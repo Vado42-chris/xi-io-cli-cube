@@ -492,6 +492,25 @@ def _bundle_state_root(profile, env: dict[str, str] | None, *, create: bool):
     return roots, state_root
 
 
+def _reject_existing_destination_symlinks(profile, roots) -> None:
+    """Never stage/apply under a symlinked XDG destination scope."""
+    scopes = {entry.destination_scope
+              for role in profile["ordered_roles"]
+              for entry in profile["products"][role][0].entries}
+    for scope in sorted(scopes):
+        root = Path(roots[scope])
+        _require(root.is_absolute(), "BUNDLE_XDG_DESTINATION_NOT_ABSOLUTE")
+        _require(not any(p.is_symlink() for p in (root, *root.parents)),
+                 "BUNDLE_XDG_DESTINATION_SYMLINK_FORBIDDEN")
+
+
+def _require_private_state_root(root_fd: int) -> None:
+    st = os.fstat(root_fd)
+    _require(stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid()
+             and not st.st_mode & 0o022,
+             "BUNDLE_STATE_ROOT_PERMISSIONS")
+
+
 def _open_bundle_lock(root_fd: int, *, shared: bool) -> int:
     """Open and lock a regular file relative to the pinned state directory."""
     try:
@@ -562,11 +581,14 @@ def bundle_apply_custody(lock: Path, *, approved_lock_sha256: str,
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    _roots = xdg_roots(env)
+    _reject_existing_destination_symlinks(profile, _roots)
     _roots, state_root = _bundle_state_root(profile, env, create=True)
     _require(Path("/proc/self/fd").is_dir(), "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
     root_fd = _secure_ensure_state_root(state_root, retain_fd=True)
     try:
         _assert_state_root_current(state_root, root_fd)
+        _require_private_state_root(root_fd)
         fd = _open_bundle_apply_lock(root_fd)
         try:
             yield _BundleApplyCustody(
@@ -592,11 +614,14 @@ def bundle_inspection_custody(lock: Path, *, approved_lock_sha256: str,
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    _roots = xdg_roots(env)
+    _reject_existing_destination_symlinks(profile, _roots)
     _roots, state_root = _bundle_state_root(profile, env, create=True)
     _require(Path("/proc/self/fd").is_dir(), "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
     root_fd = _secure_ensure_state_root(state_root, retain_fd=True)
     try:
         _assert_state_root_current(state_root, root_fd)
+        _require_private_state_root(root_fd)
         fd = _open_bundle_inspection_lock(root_fd)
         try:
             yield _BundleInspectionCustody(
@@ -736,6 +761,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 custody=owned,
             )
     roots, original_state_root = _bundle_state_root(profile, env, create=False)
+    _reject_existing_destination_symlinks(profile, roots)
     _require(_apply_custody_matches(custody, profile, original_state_root),
              "BUNDLE_APPLY_CUSTODY_INVALID")
     state_root = custody.anchored_root
@@ -771,6 +797,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
         try:
             for role in profile["ordered_roles"]:
                 _assert_state_root_current(original_state_root, custody.root_fd)
+                _reject_existing_destination_symlinks(profile, roots)
                 manifest = profile["products"][role][0]
                 receipt = _bundle_receipt_path(state_root, role, manifest, approved_lock_sha256)
                 _require(not receipt.exists() and not receipt.is_symlink(),

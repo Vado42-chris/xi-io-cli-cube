@@ -425,7 +425,7 @@ class BundleTests(unittest.TestCase):
         victim = f.root / "unrelated-user-file"
         victim.write_bytes(b"DO NOT TOUCH")
         (state / "apply.lock").symlink_to(victim)
-        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_LOCK_UNTRUSTED"):
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_LOCK_UNTRUSTED|BUNDLE_APPLY_LOCK_SYMLINK_FORBIDDEN"):
             install_bundle(lock, approved_lock_sha256=digest, env=f.env,
                            fetch=f.fetch)
         self.assertEqual(victim.read_bytes(), b"DO NOT TOUCH")
