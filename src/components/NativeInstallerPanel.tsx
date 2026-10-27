@@ -78,7 +78,9 @@ export default function NativeInstallerPanel() {
     try {
       const result = await client(request);
       setCoreBundle(result);
-      setCoreUnknown(result?.do_not_retry === true ? true : effect && result?.state !== 'INSTALLED_BYTES_VERIFIED');
+      // Installed is known but not retryable; duplicate prevention is not uncertainty.
+      setCoreUnknown((result?.do_not_retry === true && result?.phase !== 'INSTALLED_BYTES_VERIFIED')
+        || (effect && result?.state !== 'INSTALLED_BYTES_VERIFIED'));
     } catch (error) {
       setCoreError(String(error instanceof Error ? error.message : error));
     } finally {busyRef.current = false; setBusy(false);}
