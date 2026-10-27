@@ -352,5 +352,91 @@ class BundleTests(unittest.TestCase):
             self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / f"xi-io/{role}/{role}.bin").exists())
 
 
+    def test_cross_process_apply_custody_precedes_payload_acquisition(self):
+        # Separate Linux processes share a real inode/lock. The second may
+        # neither fetch payload nor plan/install while first stages.
+        import multiprocessing
+        f = self.fixture()
+        f.child("cli").child("ward", depends_on=("cli",))
+        lock, digest = f.lock()
+        ctx = multiprocessing.get_context("fork")
+        started, release = ctx.Event(), ctx.Event()
+        report = ctx.Queue()
+
+        def first_process():
+            def paused_fetch(url, output, limit):
+                started.set()
+                if not release.wait(8):
+                    raise RuntimeError("FIRST_ACQUISITION_TIMEOUT")
+                f.fetch(url, output, limit)
+            try:
+                result = install_bundle(lock, approved_lock_sha256=digest,
+                                        env=f.env, fetch=paused_fetch)
+                report.put(result["state"])
+            except BaseException as error:
+                report.put(type(error).__name__ + ":" + str(error))
+
+        first = ctx.Process(target=first_process)
+        first.start()
+        try:
+            self.assertTrue(started.wait(5), "first child never reached download")
+            second_fetches = []
+
+            def forbidden_fetch(url, output, limit):
+                second_fetches.append(url)
+                raise AssertionError("SECOND_FETCH_BEFORE_CUSTODY")
+
+            with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_LOCK_BUSY"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                               fetch=forbidden_fetch)
+            self.assertEqual(second_fetches, [])
+            self.assertFalse((Path(f.env["XDG_DATA_HOME"]) /
+                              "xi-io/cli/cli.bin").exists())
+        finally:
+            release.set()
+            first.join(8)
+            if first.is_alive():
+                first.terminate()
+                first.join(3)
+        self.assertEqual(first.exitcode, 0)
+        self.assertEqual(report.get(timeout=2), "INSTALLED_BYTES_VERIFIED")
+        self.assertTrue((Path(f.env["XDG_DATA_HOME"]) /
+                         "xi-io/cli/cli.bin").is_file())
+
+    def test_parent_swapped_to_attacker_precreated_stage_does_not_write_outside(self):
+        # Shared A/B known answer: a symlink check is not protection once the
+        # checked fd is closed and ordinary pathnames are used for acquisition.
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        state = f.root / "state"
+        moved = f.root / "moved-original-state"
+        outside = f.root / "attacker-controlled"
+        outside.mkdir()
+        hostile_destination = []
+        wrote_outside = []
+
+        def swapped_fetch(url, output, limit):
+            if not moved.exists():
+                portions = list(output.parts)
+                index = next((i for i, part in enumerate(portions)
+                              if part.startswith("xiio-stage-")), None)
+                self.assertIsNotNone(index)
+                shadow = (outside / "xi-io" / "installer" / "bundles" /
+                          "core-test" / Path(*portions[index:]))
+                shadow.parent.mkdir(parents=True)
+                hostile_destination.append(shadow)
+                state.rename(moved)
+                state.symlink_to(outside, target_is_directory=True)
+            f.fetch(url, output, limit)
+            wrote_outside.append(hostile_destination[0].is_file())
+
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_CHANGED"):
+            install_bundle(lock, approved_lock_sha256=digest,
+                           env=f.env, fetch=swapped_fetch)
+        self.assertEqual(wrote_outside, [False])
+        self.assertFalse(hostile_destination[0].exists())
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
 if __name__ == "__main__":
     unittest.main()

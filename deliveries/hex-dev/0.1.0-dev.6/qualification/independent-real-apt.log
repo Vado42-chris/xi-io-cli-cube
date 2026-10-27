@@ -1,0 +1,16 @@
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following NEW packages will be installed:
+  xi-io-hex-dev
+0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.
+Need to get 0 B/6664 kB of archives.
+After this operation, 17.5 MB of additional disk space will be used.
+Get:1 /tmp/hex-dev6.deb xi-io-hex-dev amd64 0.1.0-dev.6 [6664 kB]
+ debconf: delaying package configuration, since apt-utils is not installed
+b'xi-io-hex-dev - - none < 0.1.0-dev.6 amd64 none /tmp/hex-dev6.deb\nxi-io-hex-dev - - none < 0.1.0-dev.6 amd64 none **CONFIGURE**\n'
+XIIO_ACTUAL_APT_ACTIONS_VERIFIED: 2
+W: chown to root:adm of file /apt-guard-test/log/term.log failed - OpenLog (22: Invalid argument)
+E: Sub-process /apt-guard-test/fake-dpkg returned an error code (99)
+
+REAL_APT_HOOK: 3/3 PASS. Positive reached intentionally non-writing dpkg sentinel; negative cases aborted before it. No installed files changed.
