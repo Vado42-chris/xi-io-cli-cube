@@ -430,6 +430,16 @@ class _BundleApplyCustody:
         self.fd = fd
 
 
+class _BundleInspectionCustody:
+    __slots__ = ("profile_id", "lock_sha256", "state_root", "fd")
+
+    def __init__(self, profile_id: str, lock_sha256: str, state_root: Path, fd: int):
+        self.profile_id = profile_id
+        self.lock_sha256 = lock_sha256
+        self.state_root = state_root
+        self.fd = fd
+
+
 def _bundle_state_root(profile, env: dict[str, str] | None, *, create: bool):
     roots = xdg_roots(env)
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
@@ -459,9 +469,7 @@ def _open_bundle_apply_lock(state_root: Path) -> int:
         raise
 
 
-def _custody_matches(custody, profile, state_root: Path) -> bool:
-    if not isinstance(custody, _BundleApplyCustody):
-        return False
+def _custody_identity_matches(custody, profile, state_root: Path) -> bool:
     if (custody.profile_id != profile["profile_id"]
             or custody.lock_sha256 != profile["lock_sha256"]
             or custody.state_root != state_root
@@ -472,6 +480,18 @@ def _custody_matches(custody, profile, state_root: Path) -> bool:
         return stat.S_ISREG(os.fstat(custody.fd).st_mode)
     except OSError:
         return False
+
+
+def _apply_custody_matches(custody, profile, state_root: Path) -> bool:
+    return isinstance(custody, _BundleApplyCustody) and _custody_identity_matches(
+        custody, profile, state_root
+    )
+
+
+def _inspection_custody_matches(custody, profile, state_root: Path) -> bool:
+    return isinstance(custody, (_BundleApplyCustody, _BundleInspectionCustody)) and _custody_identity_matches(
+        custody, profile, state_root
+    )
 
 
 @contextmanager
@@ -496,47 +516,92 @@ def bundle_apply_custody(lock: Path, *, approved_lock_sha256: str,
             os.close(fd)
 
 
-def _bundle_apply_busy(state_root: Path) -> bool:
-    if not state_root.exists():
-        return False
+def _open_bundle_inspection_lock(state_root: Path) -> int:
     _require(not state_root.is_symlink() and state_root.is_dir(),
              "BUNDLE_STATE_ROOT_UNTRUSTED")
     lockfile = state_root / "apply.lock"
-    if not lockfile.exists():
-        return False
-    _require(not lockfile.is_symlink() and lockfile.is_file(),
-             "BUNDLE_APPLY_LOCK_UNTRUSTED")
-    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(lockfile, flags)
+    _require(not lockfile.is_symlink(), "BUNDLE_APPLY_LOCK_SYMLINK_FORBIDDEN")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(lockfile, flags, 0o600)
     try:
         _require(stat.S_ISREG(os.fstat(fd).st_mode), "BUNDLE_APPLY_LOCK_INVALID")
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return True
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        return False
-    finally:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise BundleError("BUNDLE_APPLY_IN_PROGRESS") from exc
+        return fd
+    except Exception:
         os.close(fd)
+        raise
+
+
+@contextmanager
+def bundle_inspection_custody(lock: Path, *, approved_lock_sha256: str,
+                              env: dict[str, str] | None = None,
+                              allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS):
+    """Hold a shared snapshot lock across receipts, destinations and journal reads."""
+    _require(isinstance(approved_lock_sha256, str)
+             and SHA256.fullmatch(approved_lock_sha256), "BUNDLE_APPROVAL_INVALID")
+    profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
+    _require(profile["lock_sha256"] == approved_lock_sha256,
+             "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    # Creating private custody metadata is allowed; no product destination,
+    # receipt, journal or provider state is modified by inspection.
+    _roots, state_root = _bundle_state_root(profile, env, create=True)
+    fd = _open_bundle_inspection_lock(state_root)
+    custody = _BundleInspectionCustody(profile["profile_id"], approved_lock_sha256, state_root, fd)
+    try:
+        yield custody
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def inspect_bundle_install(lock: Path, *, approved_lock_sha256: str,
                            env: dict[str, str] | None = None,
                            allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS,
                            custody=None):
-    """Reconcile exact receipts and destination bytes without changing anything."""
+    """Reconcile exact receipts and destination bytes under stable custody."""
     _require(isinstance(approved_lock_sha256, str)
              and SHA256.fullmatch(approved_lock_sha256), "BUNDLE_APPROVAL_INVALID")
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    if custody is None:
+        try:
+            with bundle_inspection_custody(
+                lock,
+                approved_lock_sha256=approved_lock_sha256,
+                env=env,
+                allowed_hosts=allowed_hosts,
+            ) as observed:
+                return inspect_bundle_install(
+                    lock,
+                    approved_lock_sha256=approved_lock_sha256,
+                    env=env,
+                    allowed_hosts=allowed_hosts,
+                    custody=observed,
+                )
+        except BundleError as exc:
+            if str(exc) == "BUNDLE_APPLY_IN_PROGRESS":
+                return {
+                    "schema_version": "xiio-installer-bundle-inspection-v1",
+                    "state": "APPLY_IN_PROGRESS",
+                    "profile_id": profile["profile_id"],
+                    "lock_sha256": approved_lock_sha256,
+                    "roles": {},
+                    "receipt_count": 0,
+                    "first_red": "BUNDLE_APPLY_IN_PROGRESS",
+                    "effects_authorized": False,
+                    "runtime_qualified": False,
+                    "device_connected": False,
+                }
+            raise
     roots, state_root = _bundle_state_root(profile, env, create=False)
-    if custody is not None:
-        _require(_custody_matches(custody, profile, state_root),
-                 "BUNDLE_APPLY_CUSTODY_INVALID")
-        writer_active = False
-    else:
-        writer_active = _bundle_apply_busy(state_root)
+    _require(_inspection_custody_matches(custody, profile, state_root),
+             "BUNDLE_INSPECTION_CUSTODY_INVALID")
     role_states = {}
     receipt_count = 0
     try:
@@ -561,10 +626,7 @@ def inspect_bundle_install(lock: Path, *, approved_lock_sha256: str,
                     break
             role_states[role] = "UNRECEIPTED_DESTINATION_PRESENT" if present else "ABSENT"
         states = set(role_states.values())
-        if writer_active:
-            state = "APPLY_IN_PROGRESS"
-            first_red = "BUNDLE_APPLY_IN_PROGRESS"
-        elif states == {"ABSENT"}:
+        if states == {"ABSENT"}:
             state = "NOT_INSTALLED"
             first_red = None
         elif states == {"INSTALLED_RECEIPT_VERIFIED"}:
@@ -622,7 +684,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 custody=owned,
             )
     roots, state_root = _bundle_state_root(profile, env, create=True)
-    _require(_custody_matches(custody, profile, state_root),
+    _require(_apply_custody_matches(custody, profile, state_root),
              "BUNDLE_APPLY_CUSTODY_INVALID")
     fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
     _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
