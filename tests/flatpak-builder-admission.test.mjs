@@ -110,9 +110,11 @@ test('pre-1.4 Flatpak builder is rejected before AppStream or package staging',(
     copyFileSync(script,target);
     symlinkSync('/usr/bin/dirname',join(bin,'dirname'));
     symlinkSync('/usr/bin/awk',join(bin,'awk'));
+    symlinkSync('/usr/bin/grep',join(bin,'grep'));
+    symlinkSync('/usr/bin/head',join(bin,'head'));
     symlinkSync('/usr/bin/true',join(bin,'flatpak'));
     const builder=join(bin,'flatpak-builder');
-    writeFileSync(builder,'#!/bin/sh\\nprintf "flatpak-builder-1.2.2\\n"\\n');
+    writeFileSync(builder,'#!/bin/sh\nprintf "flatpak-builder-1.2.2\n"\n');
     chmodSync(builder,0o755);
     const result=spawnSync('/bin/bash',[target],{cwd:dir,env:{PATH:bin,HOME:dir},encoding:'utf8',timeout:10000});
     assert.equal(result.status,69,result.stderr);
