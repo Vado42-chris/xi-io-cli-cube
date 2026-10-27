@@ -1,0 +1,67 @@
+import test from 'node:test';
+import {fileURLToPath} from 'node:url';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createRequire} from 'node:module';
+import {SourceTextModule} from 'node:vm';
+const base=fileURLToPath(new URL('../',import.meta.url));
+const require=createRequire(base+'package.json');
+const {JSDOM,VirtualConsole}=require('jsdom');
+const html=readFileSync(base+'dist/index.html','utf8');
+const source=readFileSync(base+'dist/'+html.match(/<script[^>]+src="([^"]+)"/)[1].replace(/^\//,''),'utf8');
+const pause=()=>new Promise(resolve=>setTimeout(resolve,40));
+test('compiled installer disclosures retain evidence, native scrolling and approval boundaries',async()=>{
+ const dom=new JSDOM('<div id="root"></div>',{url:'https://hex.fixture.invalid',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole().sendTo(console)});
+ const w=dom.window,requests=[];let finish;
+ w.matchMedia=media=>({media,matches:false,addEventListener(){},removeEventListener(){},addListener(){},removeListener(){}});
+ w.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};
+ const scan={system_metadata:{os:'Linux',architecture:'x86_64'},existing_cli:{state:'RECEIPT_METADATA_OBSERVED',generation:'existing',prefix:'/existing/cli'},connection_prerequisites:{required_bindings:Array.from({length:12},(_,i)=>({name:'BINDING_'+i,state:'NOT_OBSERVED_IN_INSTALLER_PROCESS'}))},plans:Array.from({length:30},(_,i)=>({plan_id:'saved-'+i,phase:'PREPARED_REPAIR_NOT_APPLIED',prefix:'/existing/cli',created_at:'2026-10-26'})),prefix_suggestion:'/existing/cli',node_suggestion:'/existing/node',bin_dir_suggestion:'/existing/bin'};
+ const invoke=async(command,args)=>{
+  if(command==='native_product_window')return {maximized:false,fullscreen:false};
+  assert.equal(command,'installer_request');const req=args.request;requests.push(req);
+  if(req.action==='inspect'&&!req.plan_id)return {ok:true,result:scan};
+  if(req.action==='inspect')return {ok:true,result:{plan_id:req.plan_id,phase:'PREPARED_REPAIR_NOT_APPLIED',kind:'launcher_repair',approval_digest:'digest',prefix:'/existing/cli',node:{version:'v24.11.1',path:'/existing/node',sha256:'sha'}}};
+  if(req.action==='prepare_repair')return {ok:true,result:{plan_id:'reviewed',phase:'PREPARED_REPAIR_NOT_APPLIED',kind:'launcher_repair',approval_digest:'digest',prefix:'/existing/cli',node:{version:'v24.11.1',path:'/existing/node',sha256:'sha'},changes:Array.from({length:100},(_,i)=>'change '+i)}};
+  if(req.action==='apply_repair')return await new Promise(resolve=>{finish=resolve;});
+  throw Error('Unexpected '+req.action);
+ };
+ w.__TAURI__={core:{invoke}};w.__TAURI_INTERNALS__={invoke};
+ try {
+  const mod=new SourceTextModule(source,{context:dom.getInternalVMContext()});await mod.link(()=>{throw Error('external');});await mod.evaluate();await pause();
+  [...w.document.querySelectorAll('[data-window-rail-tabs] button')].find(b=>b.getAttribute('aria-label')==='Install').click();await pause();
+  const shadow=w.document.querySelector('[data-hex-product-content]').shadowRoot;
+  const panel=shadow.querySelector('[aria-label="Native HEX installer"]');assert.ok(panel);
+  const findButton=text=>[...panel.querySelectorAll('button')].find(b=>b.textContent.includes(text));
+  const findLabel=text=>[...panel.querySelectorAll('label')].find(b=>b.textContent.includes(text));
+  const details=[...panel.querySelectorAll('.hex-installer-disclosure')];assert.equal(details.length,3);
+  assert.ok(details.every(d=>!d.open));
+  const visibleRequirements=panel.querySelector('[aria-label="Detected installation requirements"]');
+  assert.equal(visibleRequirements.children.length,3);assert.match(visibleRequirements.textContent,/Computer.*Node runtime.*Existing CLI/s);
+  const extra=panel.querySelector('[aria-label="Additional installation and connection checks"]');
+  assert.match(extra.textContent,/BINDING_11/);assert.equal(extra.tabIndex,0);assert.equal(extra.getAttribute('role'),'region');
+  extra.closest('details').querySelector('summary').click();assert.equal(extra.closest('details').open,true);
+  extra.focus();assert.equal(shadow.activeElement,extra);
+  const wheel=new w.WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:120});extra.dispatchEvent(wheel);assert.equal(wheel.defaultPrevented,false);
+  const history=panel.querySelector('[aria-label="Saved installation and repair history"]');assert.equal(history.querySelectorAll('button').length,30);
+  history.closest('details').querySelector('summary').click();assert.equal(history.closest('details').open,true);
+  history.querySelector('button').click();await pause();assert.equal(requests.at(-1).plan_id,'saved-0');
+  findLabel('Repair only the existing CLI launcher').querySelector('input').click();await pause();
+  findButton('Check selected Node').click();await pause();assert.deepEqual(JSON.parse(JSON.stringify(requests.at(-1))),{action:'prepare_repair',prefix:'/existing/cli',node:'/existing/node',bin_dir:'/existing/bin'});
+  const plan=panel.querySelector('[aria-label="Exact reviewed plan and receipts"]');assert.ok(plan);assert.equal(plan.tabIndex,0);assert.match(plan.textContent,/change 99/);assert.equal(plan.closest('details').open,false);
+  assert.equal(findButton('Repair this existing launcher').disabled,true);
+  const approval=findLabel('I approve only the displayed launcher repair');assert.equal(approval.closest('details'),null);
+  const state=[...panel.querySelectorAll('[role="status"]')].find(e=>e.textContent.includes('Launcher-only repair prepared'));assert.ok(state);assert.equal(state.closest('details'),null);
+  approval.querySelector('input').click();await pause();findButton('Repair this existing launcher').click();await pause();
+  assert.equal(requests.filter(r=>r.action==='apply_repair').length,1);assert.ok([...panel.querySelectorAll('[role="status"]')].some(e=>e.textContent.includes('Working on the real')));
+  finish({ok:true,result:{plan_id:'reviewed',phase:'LAUNCHER_REPAIR_OUTCOME_UNCERTAIN',do_not_retry:true}});await pause();
+  assert.match(panel.textContent,/Outcome uncertain/);assert.ok(findButton('Check actual state'));assert.equal(findButton('Repair this existing launcher'),undefined);
+  for(const e of panel.querySelectorAll('[role="alert"]'))assert.equal(e.closest('details'),null);
+ }finally{dom.window.close();}
+});
+test('bounded scroll CSS uses visible native scrollbars and no wheel interception',()=>{
+ const css=readFileSync(base+'src/styles/product-workspace.css','utf8'),tsx=readFileSync(base+'src/components/NativeInstallerPanel.tsx','utf8');
+ assert.match(css,/scrollbar-width: auto/);assert.match(css,/width: 16px; height: 16px/);
+ assert.match(css,/max-height: min\(24rem, 55vh\)/);assert.match(css,/overscroll-behavior-y: auto/);assert.match(css,/scrollbar-gutter: stable/);
+ assert.match(css,/forced-colors: active/);assert.match(css,/summary\):focus-visible/);
+ assert.doesNotMatch(tsx,/onWheel|addEventListener\(['"]wheel|preventDefault\(/);
+});

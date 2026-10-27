@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 // BEGIN runtime-integrity standalone mirror (byte-parity tested; keeps the installer one file)
 // Same-host installation guards. Neither identity admission nor a remote lease.
 
-const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']);
+const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']);
 const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 // Preserve selected runtime lookup, home and explicit transport/auth configuration;
 // never inherit interpreter preloads, dynamic loader hooks or Git config injection.
@@ -68,9 +68,10 @@ function verifyGeneration(prefix,generation){
     if(!expected||receipt.repo!=='Vado42-chris/xi-io-cli'||receipt.ref!==receipt.source_sha)throw Error('LEGACY_RELEASE_UNSUPPORTED');
     if(listed.length!==Object.keys(expected).length||listed.some(file=>!Object.hasOwn(expected,file)||receipt.files[file]!==expected[file]))throw Error('LEGACY_RELEASE_PAYLOAD_MISMATCH');
   }else{
-    const required=PAYLOAD_FILES.filter(file=>file!=='src/runtime-integrity.mjs');
+    const required=PAYLOAD_FILES.filter(file=>!['src/runtime-integrity.mjs','src/local-ops.mjs'].includes(file));
     if(required.some(file=>!listed.includes(file))||listed.some(file=>!PAYLOAD_FILES.includes(file)))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './runtime-integrity.mjs'")&&!listed.includes('src/runtime-integrity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './local-ops.mjs'")&&!listed.includes('src/local-ops.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
   }
   for(const relative of listed){
     const file=path.join(root,...relative.split('/'));
@@ -215,18 +216,29 @@ const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '') 
 const dir = fs.mkdtempSync(path.join(versions, sha.slice(0, 12) + '-' + stamp + '-'));
 const generation = path.basename(dir);
 const hashes = {};
+// Only newly created files in this fresh generation acquire these permissions.
+// An ambient group-writable umask must not make the installed catalog fail the
+// existing Ward/Switchboard custody check. Never chmod a historical generation.
+function writeNewGenerationFile(filename, bytes) {
+  const fd = fs.openSync(filename, 'wx', 0o600);
+  try {
+    fs.fchmodSync(fd, 0o600);
+    fs.writeFileSync(fd, bytes);
+    fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
+}
 for (const f of FILES) {
   const bytes = packagedBytes ? packagedBytes[f] : gh(['api', '-H', 'Accept: application/vnd.github.raw', `repos/${REPO}/contents/${f}?ref=${sha}`]);
   if (!bytes.length) fail('FETCH_EMPTY', { file: f });
   const out = path.join(dir, ...f.split('/'));
-  fs.mkdirSync(path.dirname(out), { recursive: true });
-  fs.writeFileSync(out, bytes, { flag: 'wx' });
+  fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
+  writeNewGenerationFile(out, bytes);
   hashes[f] = sha256(bytes);
 }
-fs.writeFileSync(path.join(dir, 'install-receipt.json'), JSON.stringify({
+writeNewGenerationFile(path.join(dir, 'install-receipt.json'), JSON.stringify({
   schema: 'xiio.cli.install-receipt/v2', installed_at: new Date().toISOString(), repo: REPO, ref: REF, source_sha: sha,
   generation, prefix: PREFIX, platform: process.platform, node: process.versions.node, files: hashes, models_installed: 0,
-}, null, 2) + '\n', { flag: 'wx' });
+}, null, 2) + '\n');
 
 // 3. Verify the staged generation before it becomes current. The smoke test
 //    uses a throwaway config dir so it cannot change the person's settings.

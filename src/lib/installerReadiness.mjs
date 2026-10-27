@@ -6,6 +6,12 @@ export function installerReadiness(observation, plan) {
   const config = plan?.connection_prerequisites || scan.connection_prerequisites;
   const node = plan?.node;
   const connection = plan?.connection;
+  if (plan?.kind === 'launcher_repair') return [
+    {label: 'Node runtime', text: node ? `${node.version} · ${node.path} — verified existing executable` : 'Not verified'},
+    {label: 'Repair source', text: plan.repair_source?.ref || 'Exact source not reported'},
+    {label: 'Preservation', text: 'Existing current/previous pointers, receipts and payloads must remain unchanged. No new runtime or generation.'},
+    {label: 'Connection', text: 'Not required for launcher-only repair. No remote connection is established or claimed.'},
+  ];
   const rows = [
     {label: 'Computer', text: system ? `${system.os} · ${system.architecture} (observed locally)` : 'Not inspected'},
     {label: 'Node runtime', text: node ? `${node.version} · ${node.path} — checked for this plan` : `${scan.node_candidates?.length || 0} candidate(s) observed; select and prepare to verify Node 22.13+`},

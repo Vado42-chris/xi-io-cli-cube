@@ -1,22 +1,26 @@
 {
   "schema": "xiio.cli.packaged-source/v1",
-  "source_sha": "d53a1d0219f5b1707c6c1bbedfb262082179ceab",
+  "source_sha": "958a5fe9d4a409e4ab2b690b6a2cc357539908cf",
   "files": {
     "src/xiio.mjs": {
-      "sha256": "561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b",
-      "size": 79672
+      "sha256": "fa77fafefdf3e73e20e71b824752f15c14bd7ca3af0fb5f1396f62c162f70aed",
+      "size": 115187
     },
     "src/file-edit-cas.mjs": {
       "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
       "size": 3788
     },
+    "src/local-ops.mjs": {
+      "sha256": "a3da965da21979620358dc54f6a72dc3be537b114f3e5b8f1acbb4c47b6155a5",
+      "size": 6604
+    },
     "src/runtime-integrity.mjs": {
-      "sha256": "de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912",
-      "size": 10728
+      "sha256": "dd78441a47710df2c193369bd1aa829bfd08a827868e6ffa66d84281fffc1482",
+      "size": 10963
     },
     "config/service-catalog.json": {
-      "sha256": "8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88",
-      "size": 3970
+      "sha256": "473a6e0d6fc2c7da21ed510906e9a85c4a9c22617b4db1f1f107e0482b75f30a",
+      "size": 4064
     },
     "scripts/service-inventory.mjs": {
       "sha256": "4711d6603f759607e79cadc1031f8668ef27b393f25b408b9ecd5516ebc18204",

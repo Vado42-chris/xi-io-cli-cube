@@ -1,0 +1,79 @@
+{
+  "schema": "xiio.hex.source-owned-light/v1",
+  "repository": "Vado42-chris/xi-io-node",
+  "commit": "053b4da87b644846adf4b15fe04d7986c0b0f51d",
+  "reason": "Same pinned Node generation as the existing shared frame; no alternate desktop/cogwheel donor.",
+  "vendored_files": [
+    {
+      "path": "panelShadow.js",
+      "upstream_path": "src/lib/panelShadow.js",
+      "git_blob": "34ab56990f586d22cfd32e4b49779a0d86d26574",
+      "sha256": "354ad63eaad721f9c4fbaa61523f0c8f217e7b99e963dd28cef919e07bdfa52e",
+      "bytes": 9928,
+      "qualification": "EXACT_UPSTREAM_BYTES"
+    },
+    {
+      "path": "motion.js",
+      "upstream_path": "src/lib/motion.js",
+      "git_blob": "00ef1932000c4f9478a9e7331096ec48dd0c6709",
+      "sha256": "ce47550b441514ade06a960f056cd8eb774d7ca216059aeba5a00754787cee5e",
+      "bytes": 3782,
+      "qualification": "EXACT_UPSTREAM_BYTES"
+    }
+  ],
+  "adapter_source": {
+    "path": "src/components/ui/SystemCursor.jsx",
+    "git_blob": "b748110d6798671bbc8fa81e94ee35f681babf2c",
+    "local_adapter": "cursorLight.mjs"
+  },
+  "defaults": {
+    "intensity": 1.6,
+    "reach": 1,
+    "softness": 1,
+    "blend": "screen"
+  },
+  "retained": [
+    "exact fireProfile falloff from panelShadow",
+    "shadow alpha .2, blur50, spread-10",
+    "SystemCursor gradient closest-side and sampled stop formatting",
+    "viewport/field diagonal diameter times reach",
+    "original local PNG bytes and existing frame hue"
+  ],
+  "adapter_variations": [
+    "Runs below all reading surfaces in the isolated existing product background field, never over text.",
+    "Shares the existing bounded parallax interpolation instead of mounting SystemCursor framer-motion spring damping25/stiffness700; no separate perpetual frame loop or flicker.",
+    "Normalizes the field-local pointer back from existing plate coordinates; starts centered; dimensions measured only on mount/resize/scroll, not per pointer event.",
+    "Maps cursor-glow to the shared frame chroma-hue at panelShadow accentCss saturation74/lightness60.",
+    "No Auth/SiteContext/atmosphere store imported. Defaults are source-owned but Studio settings are NOT synchronized.",
+    "Reduced-motion keeps a centered static light; hidden/inactive state cancels pending motion.",
+    "Light-reading muted text retains canonical .xi-light lightness33%, made neutral (0% saturation) per latest owner palette.",
+    "Owner-requested HEX-only intensity .5 replaces source default1.6; exact softness1/reach1/falloff retained. No new intensity UI because no shared atmosphere settings control is bound."
+  ],
+  "settings_qualification": "SOURCE_PROFILE_HEX_DIM_CYAN_OVERRIDE_NO_STUDIO_SETTINGS_SYNC",
+  "runtime_qualification": "LOCAL_ADAPTER_TESTS_NOT_ARIES_RUNTIME_ACCEPTANCE",
+  "hex_override": {
+    "intensity": 0.5,
+    "peak_alpha": 0.1,
+    "source_default_peak_alpha": 0.32,
+    "owner_instruction": "Sentinel_9c533c1c87948191bd8e2a2366558fe2",
+    "scope": "HEX cyan only; no Studio settings or global palette changes",
+    "acceptance": "OWNER_ACCEPTANCE_PENDING"
+  },
+  "palette_override": {
+    "owner_instruction": "Sentinel_2b7b78df5ad48191b6f6b60f90dee194",
+    "cyan_only": [
+      "HTML hyperlinks",
+      "mouse-following light",
+      "unchanged shared native window"
+    ],
+    "neutral": [
+      "reading surfaces",
+      "buttons and selected controls",
+      "text and status labels",
+      "section borders/fills",
+      "scrollbars",
+      "original PNG via grayscale CSS filter"
+    ],
+    "qualification": "LATEST_OWNER_PALETTE_APPLIED_LOCAL_NOT_ARIES_ACCEPTED"
+  }
+}

@@ -54,7 +54,7 @@ test('product styling uses the current family baseline, not a hardcoded slate/am
  const files=['../src/App.tsx','../src/components/NativeInstallerPanel.tsx','../src/components/RollbackHistory.tsx'];
  for(const p of files){const body=read(p); assert.doesNotMatch(body,/(?:bg|text|border)-(?:slate|amber)-/); assert.doesNotMatch(body,/text-(?:emerald|red|rose)-[123]00/); assert.doesNotMatch(body,/bg-(?:emerald|rose|red|blue|purple)-9[05]0/);}
  const css=read('../src/styles/product-workspace.css');
- for(const token of ['#050505','rgba(12,12,13,.82)','#f4f4f2','#a7a7a3','rgba(255,255,255,.12)','prefers-reduced-motion'])assert.ok(css.includes(token));
+ for(const token of ['#050505','rgba(12,12,13,.96)','#f4f4f2','#c1c1c1','--chroma-hue,188','prefers-reduced-motion'])assert.ok(css.includes(token));
  assert.doesNotMatch(css,/#b64a43|ca-hero|ca-nav/);
  assert.match(css,/data-product-theme="light"/);
 });
@@ -66,16 +66,31 @@ test('original carved plate is bundled locally with exact source custody',()=>{
  assert.equal(createHash('sha256').update(bytes).digest('hex'),'0cdfc4c4674c60856fdcf316b8d0ea82d54ae7b72ab6d7aa0a70aee0da9d1733');
  assert.equal(createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`),bytes])).digest('hex'),'0dab949092b553360bf5884674686569d38b43de');
  assert.match(read('../src/App.tsx'),/import brandPlate from '\.\/assets\/brand\/7d133412d_blue-bg\.png'/);
- assert.match(read('../src/styles/product-workspace.css'),/grayscale\(100%\) brightness\(\.33\) contrast\(1\.08\)/);
+ assert.match(read('../src/styles/product-workspace.css'),/grayscale\(100%\) brightness\(\.72\) contrast\(1\.08\)/);
 });
 
 test('product backdrop retains existing parallax layers with reduced-motion and cleanup',()=>{
  const app=read('../src/components/TabletBackdrop.tsx'),css=read('../src/styles/product-workspace.css');
  assert.match(read('../src/App.tsx'),/<TabletBackdrop \/>/);
- for(const coefficient of ['* -34','* -22','* .055','* -.018'])assert.ok(app.includes(coefficient));
- for(const cleanup of ["cancelAnimationFrame(raf)","removeEventListener('pointermove'","removeEventListener('scroll'","removeEventListener('change'","removeEventListener('pagehide'","removeEventListener('pageshow'"])assert.ok(app.includes(cleanup));
- assert.match(app,/if \(media.matches\) return/);
+ for(const coefficient of ['*-34','*-22','*-.018'])assert.ok(app.includes(coefficient));
+ assert.match(read('../src/lib/backdropMotion.mjs'),/\*\.055/);
+ for(const cleanup of ["motion.dispose()","removeEventListener('pointermove'","removeEventListener('scroll'","removeEventListener('change'","removeEventListener('pagehide'","removeEventListener('pageshow'"])assert.ok(app.includes(cleanup));
+ assert.match(app,/motion.enable\(pageActive&&!document.hidden&&!media.matches\)/);
  assert.doesNotMatch(app,/document\.documentElement\.style\.setProperty/);
  for(const layer of ['ca-brand-field','ca-brand-plate','ca-atmosphere','ca-vignette'])assert.ok(css.includes(layer));
- assert.match(css,/inset 0 0 180px 60px rgba\(0,0,0,\.72\)/);
+ assert.match(css,/inset 0 0 150px 35px rgba\(0,0,0,\.48\)/);
+});
+
+test('reading content is not dimmed by the decorative native glass ring',()=>{
+ const css=read('../src/styles/hex-native-surface.css');
+ assert.match(css,/:has\(\[data-native-product="hex"\]\)/);
+ assert.match(css,/> \[data-glass-side="GLASS"\]\[aria-hidden="true"\]/);
+ assert.match(css,/background-color: transparent !important/);
+ assert.match(read('../src/main.tsx'),/hex-native-surface.css/);
+});
+test('comfort names and typography bindings are real, idle background has no infinite animation',()=>{
+ const app=read('../src/App.tsx'),css=read('../src/styles/product-workspace.css');
+ assert.match(app,/data-comfort=\{comfort\}/);assert.ok(app.includes('{lvl}'));assert.ok(!app.includes('{lvl[0].toUpperCase()}'));
+ assert.match(css,/data-comfort="comfortable"/);assert.match(css,/data-comfort="compact"/);
+ assert.doesNotMatch(css,/animation:[^;]*infinite/);assert.doesNotMatch(css,/transition: transform 80ms/);assert.doesNotMatch(css,/backdrop-filter: blur/);
 });

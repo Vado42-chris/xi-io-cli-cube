@@ -1,0 +1,55 @@
+{
+  "repository": "Vado42-chris/xi-io-node",
+  "commit": "053b4da87b644846adf4b15fe04d7986c0b0f51d",
+  "schema": "xiio.responsive-grid/v1",
+  "sources": [
+    {
+      "path": "src/lib/responsiveGrid.mjs",
+      "git_blob": "1dc3e95e1368fcbb1d5fdb37d67dc5e441b17398",
+      "sha256": "805a999c7f764e0c1d667f565b0163b33056af576cb8071abfc3d54e063d580e"
+    },
+    {
+      "path": "src/lib/columnScreen.mjs",
+      "git_blob": "905244d6bed6f08c17cd02b3197531ceb1a9ad4a",
+      "sha256": "42b8897cff66401fd13cf4e822c44e9f60f87e89804d5313a8dd136d115b0e0a"
+    },
+    {
+      "path": "src/components/ui/FluidGrid.jsx",
+      "git_blob": "ab186e0917e99aa93cc69dfa30f79bef1a77d54c",
+      "sha256": "e06cee4d81ca861d6207177f676f31925667a5d6bd3957f89301799d23520316"
+    }
+  ],
+  "adopted_declaration": {
+    "lattice_px": 12,
+    "breakpoints": [
+      {
+        "device": "MOBILE",
+        "min_width": 0,
+        "columns": 4,
+        "gutter": 12,
+        "margin": 12
+      },
+      {
+        "device": "TABLET",
+        "min_width": 768,
+        "columns": 8,
+        "gutter": 12,
+        "margin": 12
+      },
+      {
+        "device": "DESKTOP",
+        "min_width": 1024,
+        "columns": 12,
+        "gutter": 12,
+        "margin": 12
+      }
+    ]
+  },
+  "adapter": "Product-local CSS consumes the exact source lattice and breakpoints using the actual product field container. No max-width page cap. Original DOM/control order and protocols retained. Existing two-column fields/cards span half the lattice above mobile; three choices occupy 4-column cells and the tablet remainder spans the row; metric cards remain four-up above mobile. These are product placements, not upstream component bytes.",
+  "not_adopted": [
+    "Full Studio orientation-intent-state partition and pane interactions are not established for this product by these source files. No new three-pane reorganization is introduced.",
+    "FluidGrid imports react-resizable-panels and other Studio runtime dependencies not present here; it is not vendored or claimed to be rendered.",
+    "No assertion that recovered source contract reproduces all owner Oct25 interaction instructions."
+  ],
+  "render_readback": "OWED_BROWSER_WIDE_AND_NARROW"
+}

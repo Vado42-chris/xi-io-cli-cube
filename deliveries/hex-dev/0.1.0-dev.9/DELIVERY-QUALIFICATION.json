@@ -1,0 +1,57 @@
+{
+  "state": "LOCAL_AND_INDEPENDENT_QUALIFICATION_PASS_RELEASE_HELD_FOR_EXACT_COMMIT_CI",
+  "package_version": "0.1.0-dev.9",
+  "artifact_commit": "42b32e4b389fbf75562ae5235e7266d3aec5a07d",
+  "package_sha256": "87d367490c02c9627216156441d832ea6f39840979dae51cc08a23b2684fdf11",
+  "package_bytes": 6672978,
+  "public_artifact_fetch_readback": {
+    "performed": true,
+    "sha256_match": true,
+    "credential_supplied": false
+  },
+  "cli_source_ref": "31d6a6f3ca595f3295d65bb2eb6bb85ec8e50a68",
+  "cli_source_sha256": "284fc73f855550ddb51c3c1042fa2efaddab923cbde084b409479b165698746e",
+  "offline_producer_sha256": "b817d87049e68d5db5dc55aa19a02ec28e8ff43156259807f77709e0b8cb96fd",
+  "bootstrap_sha256": "a2e242015a113852790d23135d7ee7dcd8a96d2825f576a774bc3c4aae40e408",
+  "bootstrap_bytes": 37498,
+  "helper_sha256": "147496a8b302533f30ede9a344b1826cdfb42c916310177ae9139f6bd7f71951",
+  "portable_contract_sha256": "ca265bf94136ee22d0bb05a4b23f115cdd7d104e2de2b5891c8d228eb0194db0",
+  "source": "Existing guarded package bootstrap and existing concierge successor; no new installer or runtime",
+  "private_arguments": [
+    "--original-plan",
+    "--prior-success"
+  ],
+  "public_owner_identity_values": false,
+  "qualification": {
+    "actual_disposable_chain_cases": 25,
+    "portable_bootstrap_contracts": 5,
+    "mock_shell_cases": 21,
+    "independent_actual_helper_chain_and_metadata_drift": "PASS",
+    "independent_prior_pointer_drift": "FIXED_AND_PASS",
+    "independent_malformed_argument_refusals": 9,
+    "independent_extra_guard_refusals": 7,
+    "existing_apt_guard_algorithm": "EXACT_EXCEPT_VERSION_HASH_SIZE_PINS"
+  },
+  "counts_note": "Checks overlap. Fake APT shell flows are transport tests, not actual package installation. Actual CLI update/read uses the real extracted package producer and actual installed launcher in disposable homes. Full user-facing session was not injected or performed; its final no-argument boundary was instrumented.",
+  "preservation": [
+    "all four historical CLI generations and receipts",
+    "original UNKNOWN plan/journal and launcher backup",
+    "prior successful approval/receipt/journal chain",
+    "all existing installer evidence file hashes/modes/owners/inodes/nlink/mtime",
+    "existing Node and launcher identity",
+    "current-to-previous canonical pointer semantics"
+  ],
+  "new_generation_custody": {
+    "files_and_receipt": "0600",
+    "directories": "0700",
+    "actual_catalog_mode_checked": true,
+    "historical_catalog_chmod": false
+  },
+  "approval": "Separate install approval for the guarded package transaction and fresh update approval bound to current8dff history; old approval never reused",
+  "retry_and_recovery": "Approved update uncertainty is retained as UNKNOWN and blocks retry. No orchestrator rollback. Existing CLI rollback remains available after a verified update; actual rollback was qualified separately in disposable package tests.",
+  "launch": "Only exact accepted receipt/current/previous/source and Node/launcher readback permits no-argument CLI launch in the existing bounded cwd. Normal PATH retained, interpreter preloads removed, no injected actions. Home/root refuses launch without undoing the accepted update.",
+  "device_identity_created_or_registered": false,
+  "remote_connection": "NOT_VERIFIED",
+  "owner_host_installation": "NOT_PERFORMED",
+  "outer_terminal_command": "Requires actual published script commit and full SHA-256; withheld until root verifies exact CI success."
+}

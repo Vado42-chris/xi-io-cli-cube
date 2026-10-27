@@ -116,6 +116,9 @@
       "probe": null,
       "systemd_candidates": [
         "cloudflared.service"
+      ],
+      "discovery_systemd_candidates": [
+        "xiio-cloudflared-webserver.service"
       ]
     },
     {

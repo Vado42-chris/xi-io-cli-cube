@@ -12,6 +12,8 @@ import RollbackHistory from './components/RollbackHistory';
 import NativeInstallerPanel from './components/NativeInstallerPanel';
 import LocalJourneyControls from './components/LocalJourneyControls';
 import {selectNativeDirectory} from './lib/nativeDirectory.mjs';
+import {createInstallerClient, nativeInstallerAvailable} from './lib/nativeInstaller.mjs';
+import {availabilityFrom, installerComponents} from './lib/installerAvailability.mjs';
 import { validateCasReceipt } from './cas-receipt.mjs';
 import { compareVersionReport } from './version-readback.mjs';
 import { 
@@ -124,7 +126,7 @@ function CommandBlock({ id, command, copiedId, onCopy }: CommandBlockProps) {
           aria-label={`Copy command: ${command}`}
           className={`min-h-[44px] flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-workspace-focus focus-visible:ring-offset-1 focus-visible:ring-offset-workspace-canvas ${
             isCopied
-              ? 'bg-emerald-500/20 text-workspace-success border border-emerald-500/40'
+              ? 'bg-workspace-focus/10 text-workspace-success border border-workspace-border-strong'
               : 'bg-workspace-surface hover:bg-workspace-surface text-workspace-text border border-workspace-border-strong active:scale-95'
           }`}
         >
@@ -148,6 +150,53 @@ function CommandBlock({ id, command, copiedId, onCopy }: CommandBlockProps) {
       </div>
     </div>
   );
+}
+
+/** First-page package observation uses the same read-only installer protocol.
+ * This is build availability, never installation, runtime or connection proof. */
+function SetupPackageDisclosure({onReview}: {onReview: () => void}) {
+  const native = nativeInstallerAvailable();
+  const [availability, setAvailability] = useState(() => availabilityFrom(null));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const lock = useRef(false), mounted = useRef(true);
+  async function refresh() {
+    if (!native || lock.current) return;
+    lock.current = true; setBusy(true); setError('');
+    try {
+      const client = createInstallerClient((command: string, args: object) => (globalThis as any).__TAURI__.core.invoke(command, args));
+      const result = await client({action: 'inspect'});
+      if (mounted.current) setAvailability(availabilityFrom(result));
+    } catch (e) {
+      if (mounted.current) {setAvailability(availabilityFrom(null)); setError(String(e instanceof Error ? e.message : e));}
+    } finally {
+      lock.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
+  useEffect(() => {mounted.current = true; void refresh(); return () => {mounted.current = false;};}, [native]);
+  const names: Record<string, string> = {cli: 'XI-IO CLI — local command tools', bins: 'BINS — files and versions', switchboard: 'Switchboard — connect another computer'};
+  return <div aria-label="Software available in this build" className="p-4 rounded-none bg-workspace-canvas border border-workspace-border space-y-4">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div>
+        <h4 className="font-semibold text-sm text-workspace-text">HEX Local Installation</h4>
+        <p className="text-sm text-workspace-muted">Check what this package contains, choose a folder and Node, then review the exact changes. Nothing is installed until you approve the plan. Afterward, check the actual result.</p>
+      </div>
+      <button type="button" onClick={onReview} className="min-h-[48px] px-6 py-2.5 rounded-none bg-workspace-focus hover:bg-workspace-focus text-workspace-inverse font-bold text-xs flex items-center gap-2 justify-center transition-all focus-visible:ring-2 focus-visible:ring-workspace-focus">
+        <Download className="w-4 h-4" /><span>Review local installation</span>
+      </button>
+    </div>
+    <ul className="space-y-2 text-sm" aria-label="Packaged software availability">
+      {installerComponents.map(name => <li key={name} data-setup-package={name}>
+        <strong>{names[name]}:</strong> {availability[name].available ? 'Available in this build' : availability[name].reason === 'PAYLOAD_AVAILABILITY_NOT_OBSERVED' ? 'Availability not reported' : 'Not available in this build'}
+      </li>)}
+    </ul>
+    <p className="text-xs text-workspace-muted">This is package availability, not proof of an installation. The reviewed plan checks the selected runtime and required connection payload. This Linux candidate does not include ibal or Studio; an account is optional.</p>
+    {!native && <p role="status" className="text-sm text-workspace-muted">Open native HEX to check the packaged software. This browser preview cannot inspect or install it.</p>}
+    {busy && <p role="status" className="text-sm">Checking this package…</p>}
+    {error && <p role="alert" className="text-sm text-workspace-danger">Could not check this package: {error}</p>}
+    {native && <button type="button" disabled={busy} onClick={() => void refresh()} className="min-h-[44px] px-3 py-2 border border-workspace-border-strong text-xs disabled:opacity-40">Refresh available software</button>}
+  </div>;
 }
 
 // Canonical Rosetta Stone Lexicon: maps internal/engineering architecture to plain-language customer vocabulary
@@ -592,16 +641,16 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
   const comfortClass = comfort === 'compact' ? 'text-xs' : comfort === 'comfortable' ? 'text-base' : 'text-sm';
 
   return (
-    <div data-tablet-surface data-hex-workspace data-product-theme={theme} style={{'--workspace-plate-image': `url("${brandPlate}")`} as React.CSSProperties} className={`${embedded ? 'min-h-full' : 'min-h-screen'} transition-colors duration-200 selection:bg-workspace-focus/30 selection:text-workspace-focus ${
+    <div data-tablet-surface data-hex-workspace data-comfort={comfort} data-product-theme={theme} style={{'--workspace-plate-image': `url("${brandPlate}")`} as React.CSSProperties} className={`${embedded ? 'min-h-full' : 'min-h-screen'} transition-colors duration-200 selection:bg-workspace-focus/30 selection:text-workspace-focus ${
       isLight ? 'bg-workspace-canvas text-workspace-text' : 'bg-workspace-canvas text-workspace-text'
     }`}>
       <TabletBackdrop />
       {/* HEX product workspace inside the shared tablet. */}
-      <div className="hex-workspace-layout max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-5">
-        <div className={`${embedded ? '' : 'border border-workspace-border'} overflow-hidden transition-all duration-200`}>
+      <div className="hex-workspace-layout">
+        <div className={`hex-workspace-frame ${embedded ? '' : 'border border-workspace-border'} transition-all duration-200`}>
           
           {/* Product toolbar */}
-          <div className={`px-4 py-3 border-b flex items-center justify-between flex-wrap gap-3 select-none ${
+          <div className={`hex-product-toolbar border-b flex items-center justify-between flex-wrap gap-3 select-none ${
             isLight ? 'bg-workspace-surface border-workspace-border text-workspace-text' : 'bg-workspace-canvas/90 border-workspace-border text-workspace-text'
           }`}>
             {/* Product tools; native tablet controls belong to the shared frame. */}
@@ -619,7 +668,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         : isLight ? 'text-workspace-muted hover:text-workspace-text' : 'text-workspace-muted hover:text-workspace-text'
                     }`}
                   >
-                    {lvl[0].toUpperCase()}
+                    {lvl}
                   </button>
                 ))}
               </div>
@@ -670,14 +719,14 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
 
           {/* PERSPECTIVE 1: CLIENT EXPERIENCE (GUIDED LOCAL-FIRST SETUP) */}
           {perspective === 'client' && (
-            <div className="p-4 sm:p-6 space-y-5">
+            <div className="hex-product-body">
               
               {/* Front-Door Hero: "Make anything here, and keep all of it." */}
               <div className="hex-workspace-heading py-3 relative overflow-hidden">
                 <h1 className="text-xl sm:text-2xl font-semibold tracking-tight mb-2">
                   Make anything here, and keep all of it.
                 </h1>
-                <p className={`max-w-2xl text-sm leading-relaxed ${
+                <p className={`text-sm leading-relaxed ${
                   isLight ? 'text-workspace-muted' : 'text-workspace-muted'
                 }`}>
                   Choose your software and installation location. Review the changes before applying them.
@@ -686,7 +735,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
               </div>
 
               {/* The 3 Primary Hero Choices */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="hex-responsive-grid hex-grid-thirds">
                 {/* Choice 1: Use this computer (Recommended) */}
                 <div
                   role="button"
@@ -773,7 +822,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
               </div>
 
               {/* 5-STEP FIRST-RUN CUSTOMER JOURNEY */}
-              <div className={`p-6 sm:p-8 rounded-none border space-y-6 ${
+              <div className={`hex-journey-panel rounded-none border space-y-6 ${
                 isLight ? 'bg-workspace-surface border-workspace-border' : 'bg-workspace-surface border-workspace-border'
               }`}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-workspace-border">
@@ -788,7 +837,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                   </div>
 
                   {/* Step Indicators */}
-                  <div className="flex items-center gap-1.5" role="navigation" aria-label="First-run steps">
+                  <div className="hex-step-pager flex flex-wrap items-center gap-1.5" role="navigation" aria-label="First-run steps">
                     {[1, 2, 3, 4, 5].map((s) => (
                       <button
                         key={s}
@@ -797,7 +846,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         aria-label={`Jump to step ${s}`}
                         aria-current={journeyStep === s ? 'step' : undefined}
                         title="Navigation only — not a completed check"
-                        className={`min-h-[44px] min-w-[36px] rounded-none font-mono text-xs font-bold transition-all ${
+                        className={`min-h-[44px] min-w-[44px] shrink-0 rounded-none font-mono text-xs font-bold transition-all ${
                           journeyStep === s
                             ? 'bg-workspace-focus text-workspace-inverse ring-2 ring-workspace-focus/50'
                             : 'bg-workspace-surface text-workspace-muted'
@@ -824,22 +873,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       </div>
                     </div>
 
-                    <div className="p-4 rounded-none bg-workspace-canvas border border-workspace-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div>
-                        <div className="font-semibold text-sm text-workspace-text">HEX Local Installation</div>
-                        <div className="text-xs text-workspace-muted">
-                          Review a real plan inside native HEX. Browser preview cannot install; the current component candidate is Linux-only.
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => { setSelectedTarget('cli'); setPerspective('auditor'); setActiveView('installer'); }}
-                        className="min-h-[48px] px-6 py-2.5 rounded-none bg-workspace-focus hover:bg-workspace-focus text-workspace-inverse font-bold text-xs flex items-center gap-2 justify-center transition-all focus-visible:ring-2 focus-visible:ring-workspace-focus"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span>Review local installation</span>
-                      </button>
-                    </div>
+                    <SetupPackageDisclosure onReview={() => { setSelectedTarget('cli'); setPerspective('auditor'); setActiveView('installer'); }} />
 
                     {/* SDK Progressive Disclosure: Fallback Command for Developers */}
                     <details className="p-3 rounded-none border border-workspace-border text-xs text-workspace-muted">
@@ -865,7 +899,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                 {journeyStep === 2 && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-none bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-workspace-success">
+                      <div className="w-10 h-10 rounded-none bg-workspace-focus/10 border border-workspace-border-strong flex items-center justify-center text-workspace-success">
                         <Shield className="w-5 h-5" />
                       </div>
                       <div>
@@ -876,7 +910,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="hex-responsive-grid hex-grid-halves">
                       <div
                         role="button"
                         tabIndex={0}
@@ -884,7 +918,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setJourneyMode('local'); } }}
                         className={`min-h-[100px] p-4 rounded-none border cursor-pointer transition-all ${
                           journeyMode === 'local'
-                            ? 'bg-workspace-surface border-emerald-500 text-workspace-success ring-1 ring-emerald-500'
+                            ? 'bg-workspace-surface border-workspace-border-strong text-workspace-success ring-1 ring-workspace-focus'
                             : 'bg-workspace-canvas border-workspace-border text-workspace-muted'
                         }`}
                       >
@@ -904,7 +938,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setJourneyMode('account'); } }}
                         className={`min-h-[100px] p-4 rounded-none border cursor-pointer transition-all ${
                           journeyMode === 'account'
-                            ? 'bg-workspace-surface border-blue-500 text-workspace-text ring-1 ring-blue-500'
+                            ? 'bg-workspace-surface border-workspace-border-strong text-workspace-text ring-1 ring-workspace-focus'
                             : 'bg-workspace-canvas border-workspace-border text-workspace-muted'
                         }`}
                       >
@@ -935,7 +969,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                 {journeyStep === 3 && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-none bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-workspace-text">
+                      <div className="w-10 h-10 rounded-none bg-workspace-focus/10 border border-workspace-border-strong flex items-center justify-center text-workspace-text">
                         <Folder className="w-5 h-5" />
                       </div>
                       <div>
@@ -998,7 +1032,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                 {journeyStep === 4 && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-none bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-workspace-text">
+                      <div className="w-10 h-10 rounded-none bg-workspace-focus/10 border border-workspace-border-strong flex items-center justify-center text-workspace-text">
                         <Cpu className="w-5 h-5" />
                       </div>
                       <div>
@@ -1035,7 +1069,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                 {journeyStep === 5 && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-none bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-workspace-success">
+                      <div className="w-10 h-10 rounded-none bg-workspace-focus/10 border border-workspace-border-strong flex items-center justify-center text-workspace-success">
                         <CheckSquare className="w-5 h-5" />
                       </div>
                       <div>
@@ -1073,7 +1107,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
 
           {/* PERSPECTIVE 2: DEVELOPER & AUDITOR MODE (FULL TECHNICAL SPECS) */}
           {perspective === 'auditor' && (
-            <div className="p-4 sm:p-6 space-y-6">
+            <div className="hex-product-body">
 
               <section className="border border-workspace-border p-4 bg-workspace-surface">
                 {/* 4 Navigation Tabs for Auditor Mode */}
@@ -1141,7 +1175,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="hex-responsive-grid hex-grid-halves">
                     {SUITE_PRODUCTS.map((prod) => {
                       const IconComp = prod.icon;
                       return (
@@ -1428,7 +1462,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                   {/* 6 Physical Gates */}
                   <div className="space-y-3">
                     <h4 className="text-xs font-bold font-mono text-workspace-focus uppercase">Connection and operation checks</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="hex-responsive-grid hex-grid-halves">
                       {PHYSICAL_SIX_GATES.map((g) => (
                         <div key={g.gate} className="p-3 rounded-none bg-workspace-canvas border border-workspace-border text-xs space-y-1">
                           <div className="flex items-center justify-between">
@@ -1535,7 +1569,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                     <p className="text-workspace-text">
                       This example calculates a proposed cap: <code className="font-mono text-workspace-focus">C_reserved = Q_max * R + F</code> It does not enforce a service limit or authorize a paid task.
                     </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="hex-responsive-grid hex-grid-quarters">
                       <div>
                         <label className="text-[10px] text-workspace-muted block">Q_max (Units):</label>
                         <input
@@ -1585,7 +1619,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                     <p className="text-workspace-muted">
                       Illustrative calculation modeling support labor sensitivity and contribution margins.
                     </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="hex-responsive-grid hex-grid-quarters">
                       <div className="p-2 rounded bg-workspace-surface">
                         <div className="text-[10px] text-workspace-muted">Gross Revenue:</div>
                         <div className="text-sm font-bold text-workspace-text font-mono">${grossRevenue.toFixed(2)}</div>
@@ -1614,9 +1648,9 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
 
           <footer
             aria-label="About the maker"
-            className={`border-t px-6 py-6 sm:px-8 space-y-4 text-sm ${isLight ? 'border-workspace-border bg-workspace-surface text-workspace-muted' : 'border-workspace-border bg-workspace-canvas/50 text-workspace-muted'}`}
+            className={`hex-product-footer border-t space-y-4 text-sm ${isLight ? 'border-workspace-border bg-workspace-surface text-workspace-muted' : 'border-workspace-border bg-workspace-canvas/50 text-workspace-muted'}`}
           >
-            <p className="max-w-2xl leading-relaxed">
+            <p className="leading-relaxed">
               I’m one disabled UX designer trying to make the world a little better, one useful tool at a time. I’m building software for people who need it, especially when another subscription is one too many.
             </p>
             <div className="space-y-2">

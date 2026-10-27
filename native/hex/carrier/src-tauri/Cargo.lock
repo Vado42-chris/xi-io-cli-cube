@@ -4401,7 +4401,7 @@ dependencies = [
 
 [[package]]
 name = "xi-io-hex-dev"
-version = "0.1.0-dev.4"
+version = "0.1.0-dev.9"
 dependencies = [
  "gtk",
  "serde",

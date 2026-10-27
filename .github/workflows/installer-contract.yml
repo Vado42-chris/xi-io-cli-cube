@@ -25,6 +25,10 @@ jobs:
           npm test
           npm run test:bindings
           npm run test:source-adoption
+      - name: Qualify exact DEV9 bootstrap and guarded delivery
+        run: |
+          set -euo pipefail
+          python3 deliveries/hex-dev/0.1.0-dev.9/qualification/test_bootstrap.py
       - name: Audit actual page and release configuration
         run: npm run test:contract
 

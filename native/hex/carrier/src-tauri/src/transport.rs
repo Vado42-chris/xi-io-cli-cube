@@ -73,6 +73,7 @@ fn execute_deadline(request: InstallerRequest, adapter: PathBuf, home: PathBuf, 
         if let Some(id)=request_meta.get("plan_id") {response["result"]["plan_id"]=id.clone();}
         if let Some(id)=request_meta.get("proof_id") {response["result"]["proof_id"]=id.clone();}
         if request_meta["action"]=="safe_task_apply" {response["result"]["phase"]="SAFE_TASK_OUTCOME_UNCERTAIN".into();}
+        if request_meta["action"]=="apply_repair" {response["result"]["phase"]="LAUNCHER_REPAIR_OUTCOME_UNCERTAIN".into();response["result"]["kind"]="launcher_repair".into();}
         if request_meta["action"]=="rollback" {response["result"]["phase"]="ROLLBACK_OUTCOME_UNCERTAIN".into();}
     }
     response

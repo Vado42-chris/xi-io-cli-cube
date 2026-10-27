@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync, spawn } from 'node:child_process';
 import readline from 'node:readline/promises';
 import crypto from 'node:crypto';
+import {localScan,crossUxTriage,ibalBalanceGuide} from './local-ops.mjs';
 import {commitWorkspaceEditCAS} from './file-edit-cas.mjs';
 import {controlledChildEnv,verifyGeneration,readGenerationPointer,pointerTransactionPending,commitGenerationPointers,recoverGenerationPointers} from './runtime-integrity.mjs';
 
@@ -121,8 +122,8 @@ async function mutateOrObserveLocalServices(sub,args,flags){
     // Checks only each service's declared health URL on this computer. Reads,
     // never grants access, never guesses paths.
     const rows=[];
-    for(const s of loadCatalog().services){const u=loopbackUrl(s.probe);if(!u||s.id==='ollama')continue;const r=await httpProbe(u.href);rows.push({id:s.id,source:s.source,health_url:u.href,present:r.http_observed===true,health:r.state,identity_verified:false,status:r.status??null,access:'health'});}
-    return{schema:'xiio.cli.services-discover/v1',state:'PASS',host:os.hostname(),present:rows.filter(r=>r.present).map(r=>r.id),rows};
+    for(const s of loadCatalog().services){const u=loopbackUrl(s.probe);if(!u||s.id==='ollama')continue;const r=await httpProbe(u.href);rows.push({id:s.id,source:s.source,health_url:u.href,present:r.response_received===true,response_received:r.response_received===true,http_observed:r.http_observed===true,health:r.state,identity_verified:false,status:r.status??null,access:'health'});}
+    return{schema:'xiio.cli.services-discover/v1',state:'PASS',scope:'DECLARED_LOOPBACK_CATALOG_CANDIDATES_ONLY',completeness:'NOT_A_HOST_INVENTORY',effect_authority:0,host:os.hostname(),present:rows.filter(r=>r.present).map(r=>r.id),rows};
   }
   return null;
 }
@@ -151,17 +152,30 @@ function parse(argv){
 function activeWorkspace(){try{const p=fs.readFileSync(ACTIVE_WORKSPACE_FILE,'utf8').trim();return p&&fs.existsSync(p)&&fs.statSync(p).isDirectory()?{state:'PASS',path:p}:{state:'STALE',path:p||null};}catch{return{state:'UNSET',path:null};}}
 function activate(args,flags){try{const p=workspaceRoot(String(flags.path||args[0]||process.cwd()));if(!fs.existsSync(p)||!fs.statSync(p).isDirectory())return{schema:'xiio.cli.activate/v1',state:'FAIL',reason:'WORKSPACE_NOT_DIRECTORY',path:p};fs.mkdirSync(CONFIG_DIR,{recursive:true});fs.writeFileSync(ACTIVE_WORKSPACE_FILE,p+'\n',{mode:0o600});return{schema:'xiio.cli.activate/v1',state:'PASS',active_workspace:p,next:['xiio doctor','xiio services status','xiio runner diagnose'],effect_authority:0};}catch(error){return{schema:'xiio.cli.activate/v1',state:'FAIL',reason:String(error.message),modified:false};}}
 function systemctl(scope,args){return run('systemctl',[...(scope==='user'?['--user']:[]),...args]);}
-function serviceRows(service){const out=[];for(const scope of ['system','user'])for(const unit of service.systemd_candidates||[]){const exists=systemctl(scope,['show',unit,'-p','LoadState','--value']);if(exists.status!==0||['not-found',''].includes(exists.stdout))continue;const a=systemctl(scope,['is-active',unit]);const e=systemctl(scope,['is-enabled',unit]);out.push({scope,unit,active:a.stdout||'unknown',enabled:e.stdout||'unknown'});}return out;}
+function serviceRows(service,discovery=true){
+  const out=[];out.observation_incomplete=false;
+  const candidates=[...new Set([...(service.systemd_candidates||[]),...(discovery?service.discovery_systemd_candidates||[]:[])])];
+  for(const scope of ['system','user'])for(const unit of candidates){
+    const exists=systemctl(scope,['show',unit,'-p','LoadState','--value']);
+    if(exists.stdout==='not-found')continue;
+    if(exists.status!==0||!exists.stdout){out.observation_incomplete=true;continue;}
+    const a=systemctl(scope,['is-active',unit]),e=systemctl(scope,['is-enabled',unit]);
+    if(!['active','inactive','failed'].includes(a.stdout))out.observation_incomplete=true;
+    out.push({scope,unit,active:a.stdout||'unknown',enabled:e.stdout||'unknown'});
+  }
+  return out;
+}
 function httpProbe(url,timeout=2500){
   return new Promise(resolve=>{
     const u=loopbackUrl(url);
-    if(!u)return resolve({state:'FAIL',reason:'HEALTH_URL_MUST_BE_THIS_COMPUTER',http_observed:false,identity_verified:false});
+    if(!u)return resolve({state:'FAIL',reason:'HEALTH_URL_MUST_BE_THIS_COMPUTER',http_observed:false,response_received:false,identity_verified:false,effect_authority:0});
     const limit=65536,deadline=Math.max(1,Math.min(Number(timeout)||2500,15000));
-    let completed=false,timer,req;
-    const finish=result=>{if(completed)return;completed=true;clearTimeout(timer);resolve({...result,identity_verified:false,effect_authority:0});};
+    let completed=false,timer,req,responseReceived=false,responseStatus=null;
+    const finish=result=>{if(completed)return;completed=true;clearTimeout(timer);resolve({...result,response_received:responseReceived,...(responseReceived?{status:responseStatus}:{}),identity_verified:false,effect_authority:0});};
     const client=u.protocol==='https:'?https:http;
     timer=setTimeout(()=>{finish({state:'TRUE_WAIT',reason:'HEALTH_TIMEOUT',http_observed:false});req?.destroy();},deadline);
     try{req=client.get(u,{timeout:deadline,rejectUnauthorized:true,headers:{accept:'application/json'}},res=>{
+      responseReceived=true;responseStatus=res.statusCode;
       let size=0;
       res.on('data',chunk=>{size+=chunk.length;if(size>limit){finish({state:'FAIL',reason:'HEALTH_RESPONSE_TOO_LARGE',status:res.statusCode,http_observed:false});req.destroy();}});
       res.on('end',()=>{
@@ -179,8 +193,8 @@ function httpProbe(url,timeout=2500){
   });
 }
 
-async function serviceStatus(id){const c=loadCatalog();const s=c.services.find(x=>x.id===id);if(!s)return{state:'FAIL',reason:'UNKNOWN_SERVICE',id};const units=serviceRows(s);const probe=s.probe?await httpProbe(s.probe):null;let state='UNKNOWN';if(probe?.http_observed)state='HTTP_OBSERVED_UNQUALIFIED';else if(units.some(x=>x.active==='active'))state='RUNNING_UNPROVEN';else if(units.length)state='STOPPED';else state='NOT_OBSERVED';return{schema:'xiio.cli.service-status/v1',id:s.id,class:s.class,state,units,probe,model_agnostic:s.model_agnostic??null};}
-async function servicesCommand(sub,args,flags){if(['add','grant','remove','discover'].includes(sub)){const r=await servicesLocalCommand(sub,args,flags);if(r)return r;}const c=loadCatalog();if(sub==='list'||!sub)return{schema:'xiio.cli.services/v1',state:'PASS',services:c.services.map(s=>({id:s.id,class:s.class,probe:s.probe||null,model_agnostic:s.model_agnostic??null}))};if(sub==='status'){if(flags.profile&&!c.profiles?.[flags.profile])return{schema:'xiio.cli.services-status/v1',state:'FAIL',reason:'UNKNOWN_SERVICE_PROFILE',profile:flags.profile,rows:[]};const ids=args.length?args:(flags.profile?(c.profiles[flags.profile]?.services||[]):c.services.map(s=>s.id));const rows=[];for(const id of ids)rows.push(await serviceStatus(id));return{schema:'xiio.cli.services-status/v1',state:rows.length&&rows.every(r=>r.state==='PASS')?'PASS':'PARTIAL',profile:flags.profile||null,rows};}if(['start','stop','restart'].includes(sub)){const id=args[0];if(!id)return{state:'FAIL',reason:'SERVICE_ID_REQUIRED'};const s=c.services.find(x=>x.id===id);if(!s)return{state:'FAIL',reason:'UNKNOWN_SERVICE',id};const rows=serviceRows(s);if(!rows.length)return{state:'BLOCKED',reason:'SERVICE_UNIT_NOT_FOUND',id,candidates:s.systemd_candidates||[]};const target=rows.find(x=>x.active==='active')||rows[0];let r=systemctl(target.scope,[sub,target.unit]);if(r.status!==0&&target.scope==='system')r=run('sudo',['-n','systemctl',sub,target.unit]);return{schema:'xiio.cli.service-action/v1',state:r.status===0?'PASS':'BLOCKED',action:sub,id,unit:target,stdout:r.stdout,stderr:r.stderr,effect_authority:'LOCAL_SERVICE_ONLY'};}return{state:'FAIL',reason:'UNKNOWN_SERVICES_COMMAND',subcommand:sub};}
+async function serviceStatus(id){const c=loadCatalog();const s=c.services.find(x=>x.id===id);if(!s)return{state:'FAIL',reason:'UNKNOWN_SERVICE',id};const units=serviceRows(s);const probe=s.probe?await httpProbe(s.probe):null;let state='UNKNOWN';if(probe?.response_received)state='HTTP_OBSERVED_UNQUALIFIED';else if(units.some(x=>x.active==='active'))state='RUNNING_UNPROVEN';else if(units.observation_incomplete)state='OBSERVATION_INCOMPLETE';else if(units.length)state='STOPPED';else state='NOT_OBSERVED';return{schema:'xiio.cli.service-status/v1',id:s.id,class:s.class,state,unit_observation:units.observation_incomplete?'OBSERVATION_INCOMPLETE':'CATALOG_CANDIDATES_CHECKED',observation_scope:'DECLARED_CATALOG_CANDIDATES_ONLY',identity_verified:false,effect_authority:0,units,probe,model_agnostic:s.model_agnostic??null};}
+async function servicesCommand(sub,args,flags){if(['add','grant','remove','discover'].includes(sub)){const r=await servicesLocalCommand(sub,args,flags);if(r)return r;}const c=loadCatalog();if(sub==='list'||!sub)return{schema:'xiio.cli.services/v1',state:'PASS',services:c.services.map(s=>({id:s.id,class:s.class,probe:s.probe||null,model_agnostic:s.model_agnostic??null}))};if(sub==='status'){if(flags.profile&&!c.profiles?.[flags.profile])return{schema:'xiio.cli.services-status/v1',state:'FAIL',reason:'UNKNOWN_SERVICE_PROFILE',profile:flags.profile,rows:[]};const ids=args.length?args:(flags.profile?(c.profiles[flags.profile]?.services||[]):c.services.map(s=>s.id));const rows=[];for(const id of ids)rows.push(await serviceStatus(id));return{schema:'xiio.cli.services-status/v1',state:rows.length&&rows.every(r=>r.state==='PASS')?'PASS':'PARTIAL',profile:flags.profile||null,rows};}if(['start','stop','restart'].includes(sub)){const id=args[0];if(!id)return{state:'FAIL',reason:'SERVICE_ID_REQUIRED'};const s=c.services.find(x=>x.id===id);if(!s)return{state:'FAIL',reason:'UNKNOWN_SERVICE',id};const rows=serviceRows(s,false);if(!rows.length)return{state:'BLOCKED',reason:'SERVICE_UNIT_NOT_FOUND',id,candidates:s.systemd_candidates||[]};const target=rows.find(x=>x.active==='active')||rows[0];let r=systemctl(target.scope,[sub,target.unit]);if(r.status!==0&&target.scope==='system')r=run('sudo',['-n','systemctl',sub,target.unit]);return{schema:'xiio.cli.service-action/v1',state:r.status===0?'PASS':'BLOCKED',action:sub,id,unit:target,stdout:r.stdout,stderr:r.stderr,effect_authority:'LOCAL_SERVICE_ONLY'};}return{state:'FAIL',reason:'UNKNOWN_SERVICES_COMMAND',subcommand:sub};}
 function runnerProcesses(){const r=run('pgrep',['-af','Runner.Listener']);if(r.status!==0||!r.stdout)return[];return r.stdout.split('\n').filter(Boolean).map(line=>{const m=line.match(/^(\d+)\s+(.*)$/);return{pid:m?Number(m[1]):null,command:m?m[2]:line};});}
 function runnerServiceRows(){const fake={systemd_candidates:['xiio-github-actions-runner.service']};const rows=serviceRows(fake);for(const scope of ['system','user']){const l=systemctl(scope,['list-unit-files','actions.runner.*.service','--no-legend','--no-pager']);for(const line of l.stdout.split('\n').map(x=>x.trim()).filter(Boolean)){const unit=line.split(/\s+/)[0];if(rows.some(x=>x.scope===scope&&x.unit===unit))continue;const a=systemctl(scope,['is-active',unit]);const e=systemctl(scope,['is-enabled',unit]);rows.push({scope,unit,active:a.stdout||'unknown',enabled:e.stdout||'unknown'});}}return rows;}
 function runnerRoots(flags){const roots=[];const explicit=String(flags['search-root']||'').trim();if(explicit)for(const x of explicit.split(':'))if(x&&fs.existsSync(x))roots.push(path.resolve(x));else{}else{for(const x of [os.homedir(),'/opt','/srv'])if(fs.existsSync(x))roots.push(x);if(flags.deep){for(const x of [`/media/${process.env.USER}`,'/mnt'])if(fs.existsSync(x))roots.push(x);}}return[...new Set(roots)];}
@@ -202,7 +216,25 @@ async function modelsCommand(sub,args,flags){
     return{schema:'xiio.cli.models/v1',state:'PASS',engine,models:body.models.filter(m=>m&&typeof(m.name||m.model)==='string').map(m=>({name:m.name||m.model,size:m.size??null,modified_at:m.modified_at||null})),rule:'ENGINE != MODEL; no model is installed or selected by listing.'};
   }catch(e){return{schema:'xiio.cli.models/v1',state:'TRUE_WAIT',engine,models:[],reason:String(e.message||e)};}
 }
-function installCommand(target,flags){if(target==='ollama'){if(run('ollama',['--version']).status===0)return{schema:'xiio.cli.install/v1',state:'PASS_ALREADY_INSTALLED',target:'ollama',models_installed:0};if(!flags.apply)return{schema:'xiio.cli.install-plan/v1',state:'PLAN',target:'ollama',provider:'official_ollama_linux_installer',command:'curl -fsSL https://ollama.com/install.sh | sh',models_installed:0,hard:['INSTALL_ENGINE != INSTALL_MODEL','--apply REQUIRED']};const curl=run('curl',['-fsSL','https://ollama.com/install.sh']);if(curl.status!==0)return{state:'BLOCKED',reason:'OLLAMA_INSTALLER_DOWNLOAD_FAILED',stderr:curl.stderr};const sh=spawnSync('sh',[],{input:curl.stdout,encoding:'utf8',timeout:180000,env:controlledChildEnv()});return{schema:'xiio.cli.install/v1',state:sh.status===0?'PASS':'BLOCKED',target:'ollama',status:sh.status,stdout:(sh.stdout||'').slice(-2000),stderr:(sh.stderr||'').slice(-2000),models_installed:0,hard:['ENGINE_INSTALLED != MODEL_SELECTED']};}if(target==='mail-server')return{schema:'xiio.cli.install-plan/v1',state:'PROFILE_REQUIRED',target,reason:'Mail transport needs explicit provider/security profile before package mutation.',examples:['postfix+dovecot','existing external IMAP/SMTP'],apply:false};return{state:'FAIL',reason:'UNKNOWN_INSTALL_TARGET',target};}
+function installCommand(target,flags){
+  if(target==='ollama'){
+    if(run('ollama',['--version']).status===0)return{schema:'xiio.cli.install/v1',state:'PASS_ALREADY_INSTALLED',target:'ollama',models_installed:0};
+    if(!flags.apply)return{schema:'xiio.cli.install-plan/v1',state:'PLAN',target:'ollama',provider:'official_ollama_linux_installer',command:'curl -fsSL https://ollama.com/install.sh | sh',models_installed:0,hard:['INSTALL_ENGINE != INSTALL_MODEL','--apply REQUIRED']};
+    const curl=run('curl',['-fsSL','https://ollama.com/install.sh']);
+    if(curl.status!==0)return{state:'BLOCKED',reason:'OLLAMA_INSTALLER_DOWNLOAD_FAILED',stderr:curl.stderr};
+    const sh=spawnSync('sh',[],{input:curl.stdout,encoding:'utf8',timeout:180000,env:controlledChildEnv()});
+    const result={schema:'xiio.cli.install/v1',state:'BLOCKED',target:'ollama',status:sh.status,stdout:(sh.stdout||'').slice(-2000),stderr:(sh.stderr||'').slice(-2000),models_installed:0,hard:['ENGINE_INSTALLED != MODEL_SELECTED']};
+    if(sh.status!==0)return result;
+    // Installer exit zero is not evidence that the engine can now be invoked.
+    // Reuse the existing installed-engine observation, not a service-health claim.
+    const version=run('ollama',['--version']);
+    return{...result,state:version.status===0?'PASS':'BLOCKED',reason:version.status===0?null:'OLLAMA_INSTALLATION_UNVERIFIED',
+      installation_observation:{state:version.status===0?'VERSION_COMMAND_SUCCEEDED':'VERSION_COMMAND_FAILED',status:version.status,stdout:version.stdout.slice(0,2000),stderr:version.stderr.slice(0,2000),error:version.error},
+      service_health:'NOT_CHECKED',model_inference:'NOT_CHECKED'};
+  }
+  if(target==='mail-server')return{schema:'xiio.cli.install-plan/v1',state:'PROFILE_REQUIRED',target,reason:'Mail transport needs explicit provider/security profile before package mutation.',examples:['postfix+dovecot','existing external IMAP/SMTP'],apply:false};
+  return{state:'FAIL',reason:'UNKNOWN_INSTALL_TARGET',target};
+}
 function ghJson(args){
   const r=run('gh',args,{timeout:30000});
   if(r.status!==0)return{state:'TRUE_WAIT',reason:'GITHUB_UNREADABLE',stderr:r.stderr};
@@ -279,7 +311,7 @@ function externalToolsStatus(){
     }),hard:['INSTALLED != QUALIFIED','DISCOVERY != WARD_ADMISSION','VERSION != VERIFIED_EFFECT']};
 }
 
-function help(){return{schema:'xiio.cli.help/v1',product:'xi-io: CLI',state:'PASS',usage:['xiio [workspace] [--model NAME] [--execute]','xiio chat [workspace] [--model NAME] [--execute]','xiio menu [workspace] [--model NAME] [--execute]','xi-io-cli login','xi-io-cli whoami','xi-io-cli device sign <challenge>','xiio version','xiio activate [path]','xiio doctor','xiio services list','xi-io-cli services discover','xi-io-cli services add <id> <http://127.0.0.1:PORT/health> [--class NAME]','xi-io-cli services grant <id> health|read|read_write','xi-io-cli services remove <id>','xiio services status [service...] [--profile aries-dev]','xiio services start|stop|restart <service>','xiio engines list','xiio tools status','xiio models list --engine ollama','xiio install ollama [--apply]','xiio install mail-server','xiio registry discover [--owner Vado42-chris] [--prefix xi-io]','xiio runner diagnose [--deep] [--search-root PATH] [--repo owner/repo --run-id N --job-id N]','xiio runner recover [same flags]','xiio glass read'],hard:['ENGINE != MODEL','SERVICE != AUTHORITY','NO AUTOMATIC MODEL PULLS','NO NEW GITHUB RUNNER']};}
+function help(){return{schema:'xiio.cli.help/v1',product:'xi-io: CLI',state:'PASS',usage:['xiio [workspace] [--model NAME] [--execute]','xiio chat [workspace] [--model NAME] [--execute]','xiio menu [workspace] [--model NAME] [--execute]','xi-io-cli login','xi-io-cli whoami','xi-io-cli connect','xi-io-cli device sign <challenge>','xiio version','xiio activate [path]','xiio doctor','xiio services list','xi-io-cli services discover','xi-io-cli services add <id> <http://127.0.0.1:PORT/health> [--class NAME]','xi-io-cli services grant <id> health|read|read_write','xi-io-cli services remove <id>','xiio services status [service...] [--profile aries-dev]','xiio services start|stop|restart <service>','xiio engines list','xiio tools status','xiio models list --engine ollama','xiio install ollama [--apply]','xiio install mail-server','xiio registry discover [--owner Vado42-chris] [--prefix xi-io]','xiio runner diagnose [--deep] [--search-root PATH] [--repo owner/repo --run-id N --job-id N]','xiio runner recover [same flags]','xiio glass read','xiio scan local [--root PATH] --apply','xiio ux triage [--root PATH] [--terms a,b,c]','xiio ibal balance'],hard:['ENGINE != MODEL','SERVICE != AUTHORITY','NO AUTOMATIC MODEL PULLS','NO NEW GITHUB RUNNER']};}
 
 const MENU = [
   ['1','/help','What can you do?'],
@@ -392,10 +424,13 @@ function toolCatalog(){
     {name:'git_status',description:'Read git branch and working-tree status.',write:false},
     {name:'list_registries',description:'Find registry, ACK, current and manifest files.',write:false},
     {name:'resolve_registry',description:'Read one named registry/current/ACK file.',write:false},
+    {name:'local_scan',description:'Run the workspace baseline scanner in the no-network sandbox, after explicit approval. A receipt is not live authority.',write:true},
+    {name:'cross_ux_triage',description:'Read and deduplicate workspace artifact content; never delete duplicates.',write:false},
+    {name:'ibal_balance',description:'Read historical PR5 donor notes, explicitly not a qualified current mathematics contract.',write:false},
     {name:'edit_workspace_file',description:'Change an existing file using copied old_text, new_text and optional expected_sha256. The file is replaced only when its approved bytes still match under a local cooperative lock. To create a file, give path and content. Each change requires explicit approval. Local locking does not replace Ward or BINS authority.',write:true},
     {name:'install_dependencies',description:'Install the exact packages pinned in package-lock.json (npm ci, install scripts blocked) so builds can run. Sandboxed; needs your yes.',write:true},
-    {name:'list_services',description:'List your local XI-IO services (CRM, HEX, Inbox, Glass Box, Studio...) this CLI can call.',write:false},
-    {name:'call_service',description:'Call one of your local XI-IO services by name. GET reads; POST/PUT/PATCH/DELETE show the exact request and need your yes. Loopback only, no shell routes.',write:true},
+    {name:'list_services',description:'List configured local service candidates and their declared health endpoints. Listing proves neither installation nor current product identity or permission.',write:false},
+    {name:'call_service',description:'Read only the exact declared health endpoint of a configured loopback service. Broader APIs and writes are unavailable without independently bound current service identity. An HTTP response is not product-health or authority proof.',write:false},
     {name:'run_workspace_command',description:'Run a command inside a sandbox: the project folder is writable, the rest of the computer is hidden or read-only, and there is no network. The human approves each command.',write:true}
   ];
 }
@@ -421,6 +456,31 @@ function readText(p){
   if(!Buffer.from(text,'utf8').equals(buf))throw new Error('NOT_UTF8_TEXT_REFUSED');
   return {buf,text};
 }
+// Shared by direct reads and artifact triage: bounded allocation, descriptor
+// readback, regular files only, no path-component symlinks or credential paths.
+function readWorkspaceText(root,relative){
+  const realRoot=fs.realpathSync(root),target=path.resolve(realRoot,relative);
+  if(!within(realRoot,target))throw Error('PATH_OUTSIDE_WORKSPACE');
+  if(credentialPath(target))throw Error('CREDENTIAL_PATH_REFUSED');
+  let cursor=realRoot;
+  for(const part of path.relative(realRoot,target).split(path.sep).filter(Boolean)){
+    cursor=path.join(cursor,part);if(fs.lstatSync(cursor).isSymbolicLink())throw Error('SYMLINK_OUTSIDE_WORKSPACE');
+  }
+  const before=fs.lstatSync(target);if(!before.isFile())throw Error('NOT_A_REGULAR_FILE');
+  const limit=2*1024*1024;if(before.size>limit)throw Error('READ_FILE_TOO_LARGE: maximum 2097152 bytes');
+  const fd=fs.openSync(target,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0)|(fs.constants.O_NONBLOCK||0));
+  try{
+    const opened=fs.fstatSync(fd);if(!opened.isFile()||opened.dev!==before.dev||opened.ino!==before.ino)throw Error('READ_FILE_CHANGED');
+    if(!within(realRoot,fs.realpathSync(target))||credentialPath(fs.realpathSync(target)))throw Error('PATH_OUTSIDE_WORKSPACE');
+    const buffer=Buffer.alloc(limit+1);let size=0;
+    while(size<buffer.length){const n=fs.readSync(fd,buffer,size,buffer.length-size,null);if(!n)break;size+=n;}
+    if(size>limit)throw Error('READ_FILE_TOO_LARGE: maximum 2097152 bytes');
+    const after=fs.fstatSync(fd);if(after.size!==size||after.mtimeMs!==opened.mtimeMs)throw Error('READ_FILE_CHANGED');
+    const buf=buffer.subarray(0,size);if(buf.includes(0))throw Error('BINARY_FILE_REFUSED');
+    const text=buf.toString('utf8');if(!Buffer.from(text,'utf8').equals(buf))throw Error('NOT_UTF8_TEXT_REFUSED');
+    return{buf,text};
+  }finally{fs.closeSync(fd);}
+}
 function lineOf(text,index){return text.slice(0,index).split('\n').length;}
 function showLines(prefix,s){const lines=s.split('\n');if(lines.length>1&&lines.at(-1)==='')lines.pop();return lines.map(l=>prefix+' '+l).join('\n');}
 function describeAction(a){
@@ -430,6 +490,17 @@ function describeAction(a){
   if(a.tool==='call_service')return 'Proposed request to your local service:\n  '+a.method+' '+a.url+(a.body?'\n  body: '+a.body.slice(0,2000):'');
   if(a.tool==='run_workspace_command')return 'Proposed command (sandboxed: project folder writable, no network, rest of the computer hidden or read-only, '+(SANDBOX_TIMEOUT_MS/1000)+'s limit):\n  '+a.command+'\nin '+a.workspace;
   return JSON.stringify(a,null,2);
+}
+
+async function approvedLocalScan(root,approve){
+  const blocked=reason=>({schema:'xiio.cli.local-scan/v1',state:'BLOCKED',reason,effect_authority:0});
+  const command="python3 -I scripts/local_scan.py . (validated SDK source snapshot)";
+  if(typeof approve!=='function'||!await approve({tool:'run_workspace_command',command,workspace:root}))return blocked('HUMAN_APPROVAL_REQUIRED');
+  const sb=sandboxState();if(!sb.ok)return blocked(sb.reason);
+  const broad=sandboxRefusal(root);if(broad)return blocked(broad);
+  const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
+  const runScanner=source=>spawnSync(sb.bwrap,sandboxArgs(root,'python3 -I -c '+quote(source)+' .'),{cwd:root,encoding:'utf8',timeout:SANDBOX_TIMEOUT_MS,maxBuffer:16*1024*1024,env:{PATH:process.env.PATH||'/usr/bin:/bin'}});
+  return localScan(root,{runScanner,readArtifact:rel=>readWorkspaceText(root,rel)});
 }
 
 async function executeTool(name,args,{root,approve}){
@@ -449,6 +520,9 @@ async function executeTool(name,args,{root,approve}){
   const confirm=async(action)=>{
     if(typeof approve!=='function'||!await approve(action))throw new Error('HUMAN_APPROVAL_REQUIRED');
   };
+  if(name==='local_scan')return approvedLocalScan(root,approve);
+  if(name==='cross_ux_triage')return crossUxTriage(root,{terms:args?.terms?args.terms.split(','):undefined,maxFiles:args?.max_files?Number(args.max_files):4000,allowPath:p=>!credentialPath(p),readArtifact:rel=>readWorkspaceText(root,rel)});
+  if(name==='ibal_balance')return ibalBalanceGuide();
   if(name==='list_workspace'){
     const rel=String(args?.path||'.');const dir=safe(rel);
     return {path:rel,entries:fs.readdirSync(dir,{withFileTypes:true}).filter(x=>!credentialPath(path.join(dir,x.name))).slice(0,200).map(x=>({name:x.name,type:x.isDirectory()?'dir':x.isSymbolicLink()?'link':'file'}))};
@@ -466,7 +540,7 @@ async function executeTool(name,args,{root,approve}){
   }
   if(name==='read_workspace_file'||name==='resolve_registry'){
     const rel=String(args?.path||'');if(!rel)throw new Error('PATH_REQUIRED');const p=safe(rel);
-    const {buf,text}=readText(p);
+    const {buf,text}=readWorkspaceText(root,rel);
     return {path:rel,content:text.slice(0,120000),sha256:sha256(buf),byte_length:buf.length,
       full_content_returned:text.length<=120000,bins_version_qualified:false};
   }
@@ -476,7 +550,12 @@ async function executeTool(name,args,{root,approve}){
     const filters=readOnlyGit(['config','--includes','--null','--name-only','--get-regexp','^filter\\..*\\.(clean|smudge|process)$'],{cwd:root});
     if(filters.status===0)throw new Error('EXTERNAL_GIT_FILTER_CONFIGURED');
     if(filters.status!==1)throw new Error('GIT_CONFIG_INSPECTION_FAILED');
-    return {submodule_contents:'NOT_INSPECTED',branch:readOnlyGit(['branch','--show-current'],{cwd:root}).stdout,status:readOnlyGit(['status','--short','--ignore-submodules=all'],{cwd:root}).stdout,head:readOnlyGit(['rev-parse','HEAD'],{cwd:root}).stdout};
+    const observed={branch:readOnlyGit(['branch','--show-current'],{cwd:root}),status:readOnlyGit(['status','--short','--ignore-submodules=all'],{cwd:root}),head:readOnlyGit(['rev-parse','HEAD'],{cwd:root})};
+    // Exit status is evidence; stdout alone cannot establish a successful read.
+    // Do not expose stderr/error strings, which can carry repository secrets.
+    const checks=Object.fromEntries(Object.entries(observed).map(([key,r])=>[key,{status:r.status,signal:r.signal,error_present:!!r.error,stderr_present:!!r.stderr}]));
+    if(Object.values(observed).some(r=>r.status!==0||r.signal||r.error))return {state:'FAIL',reason:'GIT_INSPECTION_FAILED',submodule_contents:'NOT_INSPECTED',checks};
+    return {submodule_contents:'NOT_INSPECTED',branch:observed.branch.stdout,status:observed.status.stdout,head:observed.head.stdout,checks};
   }
   if(name==='list_registries'){
     const files=[];const re=/(ack|registry|current)/i;
@@ -612,48 +691,143 @@ function ollamaTools(){
   const defs={
     list_workspace:{path:{type:'string'}},search_workspace:{query:{type:'string'}},read_workspace_file:{path:{type:'string'}},
     git_status:{},list_registries:{},resolve_registry:{path:{type:'string'}},
+    local_scan:{},cross_ux_triage:{terms:{type:'string'},max_files:{type:'string'}},ibal_balance:{},
     edit_workspace_file:{path:{type:'string'},old_text:{type:'string'},new_text:{type:'string'},content:{type:'string'},expected_sha256:{type:'string'}},
-    run_workspace_command:{command:{type:'string'}},
+    run_workspace_command:{command:{type:'string'}},install_dependencies:{},
     list_services:{},call_service:{service:{type:'string'},method:{type:'string'},path:{type:'string'},body:{type:'string'}}
   };
   return toolCatalog().map(t=>({type:'function',function:{name:t.name,description:t.description,parameters:{type:'object',properties:defs[t.name],additionalProperties:false}}}));
 }
-// A model that cannot call tools often prints a tool call as text instead.
-// That text did nothing, and the person must be told so.
-const TOOL_NAMES=['list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','run_xiio_command','runtime_status'];
+// Text resembling a call is not a call. Earlier real tool outcomes still count.
+const TOOL_NAMES=['local_scan','cross_ux_triage','ibal_balance','list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','run_xiio_command','runtime_status'];
 function looksLikeToolCall(text){
   const t=String(text||'');
   if(TOOL_NAMES.some(n=>new RegExp(n+'\\s*\\(\\s*\\{').test(t)||new RegExp('"(name|function|tool)"\\s*:\\s*"'+n+'"').test(t)))return true;
   const m=t.match(/[{[][\s\S]*[}\]]/);if(!m)return false;
   try{const j=JSON.parse(m[0]);const o=Array.isArray(j)?j[0]:j;return !!o&&typeof o==='object'&&(('name' in o&&('arguments' in o||'parameters' in o))||'tool_calls' in o||'function_call' in o);}catch{return false;}
 }
-const FAKE_TOOL_NOTICE='Nothing was run. The model wrote text that looks like a tool call instead of actually calling a tool. Ask again, or pick a model with tool support using /models and /model NAME.';
-function toolFallbackText(results){
-  if(!results.length)return '';
-  if(results.length===1){
-    const out=results[0].result;
-    if(out&&typeof out.content==='string')return out.content;
-    if(out&&typeof out.readback==='string')return out.readback;
+// Provider prose is never an execution receipt. Both consumer paths and /read
+// render the same host-observed results; failures never erase earlier facts.
+const MAX_NATIVE_CALLS=8;
+const isRecord=(value)=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+const meaningfulReply=(value)=>typeof value==='string'&&value.trim()!==''&&!/^(null|undefined)$/i.test(value.trim());
+function providerMessage(body){
+  if(!isRecord(body)||body.error!==undefined||!isRecord(body.message))throw new Error('PROVIDER_ENVELOPE_INVALID');
+  const msg=body.message;
+  if(msg.role!=='assistant'||typeof msg.content!=='string'||(body.done!==undefined&&body.done!==true))throw new Error('PROVIDER_MESSAGE_INVALID');
+  if(msg.tool_calls!==undefined&&(!Array.isArray(msg.tool_calls)||msg.tool_calls.length>MAX_NATIVE_CALLS))throw new Error('PROVIDER_TOOL_CALLS_INVALID');
+  return msg;
+}
+function validateToolArgs(name,args){
+  const def=ollamaTools().find(t=>t.function.name===name)?.function.parameters;
+  if(!def)throw new Error('UNKNOWN_TOOL');
+  if(!isRecord(args)||Object.keys(args).some(k=>!Object.hasOwn(def.properties,k)||typeof args[k]!=='string'))throw new Error('TOOL_ARGUMENTS_INVALID');
+  const required={search_workspace:['query'],read_workspace_file:['path'],resolve_registry:['path'],edit_workspace_file:['path'],run_workspace_command:['command'],call_service:['service']};
+  if((required[name]||[]).some(k=>typeof args[k]!=='string'||!args[k].trim()))throw new Error('TOOL_REQUIRED_ARGUMENT_MISSING');
+  if(name==='edit_workspace_file'){
+    if(args.old_text!==undefined){if(!args.old_text||typeof args.new_text!=='string')throw new Error('EDIT_REPLACEMENT_INVALID');}
+    else if(typeof args.content!=='string')throw new Error('EDIT_CONTENT_REQUIRED');
   }
-  return 'Tool result:\n'+results.map(x=>x.name+': '+JSON.stringify(x.result,null,2)).join('\n');
+  return args;
+}
+function nativeCalls(msg){
+  // Validate the ENTIRE batch before executing any part of it.
+  return (msg.tool_calls||[]).map(call=>{
+    if(!isRecord(call)||!isRecord(call.function)||(call.type!==undefined&&call.type!=='function')||typeof call.function.name!=='string')throw new Error('PROVIDER_TOOL_CALL_INVALID');
+    let args=call.function.arguments;
+    if(typeof args==='string'){try{args=JSON.parse(args);}catch{throw new Error('TOOL_ARGUMENT_JSON_INVALID');}}
+    return {name:call.function.name,args:validateToolArgs(call.function.name,args)};
+  });
+}
+function executionFact(name,args,result){
+  let state='SUCCEEDED',reason=null;
+  if(!toolCatalog().some(t=>t.name===name)||!isRecord(result)){state='FAILED';reason='TOOL_RESULT_INVALID';}
+  else if(['local_scan','cross_ux_triage','ibal_balance'].includes(name)){
+    const expected={local_scan:['xiio.cli.local-scan/v1','LOCAL_STATIC_OBSERVED'],cross_ux_triage:['xiio.cli.cross-ux-triage/v1','OBSERVED'],ibal_balance:['xiio.cli.ibal-balance/v1','INFORMATIONAL_DONOR']}[name];
+    if(result.schema!==expected[0]||result.state!==expected[1]||result.effect_authority!==0||(name==='local_scan'&&(result.closure_credit!==false||result.live_authority!==false||result.producer?.bytes_verified!==true||result.receipt?.status!==result.status||result.receipt?.local_static_pass!==result.local_static_pass))){state='FAILED';reason=result.reason||'LOCAL_OPERATION_NOT_QUALIFIED';}
+    else if(name==='local_scan'&&result.local_static_pass!==true){state='PARTIAL';reason=result.status;}
+  }
+  else if(result.state==='FAIL'){state='FAILED';reason=typeof result.reason==='string'?result.reason:'TOOL_FAILED';}
+  else if(result.state==='PARTIAL'){state='PARTIAL';reason='TOOL_REPORTED_PARTIAL';}
+  else if(result.state!==undefined&&!(name==='edit_workspace_file'&&result.state==='LOCAL_CAS_COMMITTED')){state='FAILED';reason='TOOL_STATE_UNQUALIFIED';}
+  else if(name==='run_workspace_command'||name==='install_dependencies'){
+    if(result.status!==0||result.timed_out!==false||result.signal||typeof result.stdout!=='string'||typeof result.stderr!=='string'){state='FAILED';reason=result?.timed_out?'TOOL_TIMED_OUT':'TOOL_EXIT_NOT_ZERO';}
+  }else if(name==='call_service'){
+    if(!Number.isInteger(result.status)||!(result.status>=200&&result.status<300)||['service','method','url','body'].some(k=>typeof result[k]!=='string')){state='FAILED';reason='SERVICE_HTTP_NOT_SUCCESS';}
+  }else if(name==='edit_workspace_file'){
+    if(result?.readback_matches!==true){state='FAILED';reason='EDIT_READBACK_UNVERIFIED';}
+  }else if(name==='read_workspace_file'||name==='resolve_registry'){
+    if(typeof result.content!=='string'||result.path!==args.path||typeof result.sha256!=='string'||!/^[a-f0-9]{64}$/.test(result.sha256)||!Number.isSafeInteger(result.byte_length)||result.byte_length<0||typeof result.full_content_returned!=='boolean'){
+      state='FAILED';reason='READ_RESULT_INVALID';
+    }else if(result.full_content_returned){
+      const bytes=Buffer.from(result.content,'utf8');
+      if(bytes.length!==result.byte_length||sha256(bytes)!==result.sha256){state='FAILED';reason='READ_RESULT_DIGEST_MISMATCH';}
+    }else if(Buffer.byteLength(result.content,'utf8')>result.byte_length){state='FAILED';reason='READ_RESULT_INVALID';}
+    else{state='PARTIAL';reason='READ_CONTENT_TRUNCATED';}
+  }else{
+    const strings=value=>Array.isArray(value)&&value.every(x=>typeof x==='string');
+    const valid=name==='list_workspace'?typeof result.path==='string'&&Array.isArray(result.entries)&&result.entries.every(x=>isRecord(x)&&typeof x.name==='string'&&['file','dir','link'].includes(x.type))
+      :name==='search_workspace'?typeof result.query==='string'&&strings(result.matches)
+      :name==='list_registries'?strings(result.files)
+      :name==='list_services'?Array.isArray(result.services)&&result.services.every(x=>isRecord(x)&&typeof x.service==='string')
+      :name==='git_status'?typeof result.branch==='string'&&typeof result.status==='string'&&typeof result.head==='string'&&/^[a-f0-9]{40,64}$/.test(result.head)
+      :false;
+    if(!valid){state='FAILED';reason='TOOL_RESULT_INVALID';}
+  }
+  return {name,arguments:args,state,reason,result};
+}
+async function executeObservedTool(name,args,context){
+  let result;
+  try{result=await executeTool(name,args,context);}catch(error){result={state:'FAIL',reason:error instanceof Error?error.message:'TOOL_FAILED'};}
+  return executionFact(name,args,result);
+}
+function toolFallbackText(results,{text='',error=null,source='provider'}={}){
+  const firstFailed=results.find(r=>r.state==='FAILED');
+  const firstPartial=results.find(r=>r.state==='PARTIAL');
+  const firstRed=results.find(r=>r.reason)?.reason||error||null;
+  const state=firstFailed?'FAILED':error?(results.length?'PARTIAL':'FAILED'):firstPartial?'PARTIAL':results.length?'TOOL_RESULTS_RECORDED':'NO_TOOL_EXECUTION';
+  const receipt={schema:'xiio.cli.execution-return/v1',source,state,first_red:firstRed,provider_error:error,
+    request_fulfillment:'NOT_EVALUATED',tool_results:results};
+  // JSON escapes terminal-control bytes and preserves exact returned strings.
+  // A successful read is evidence of that read, not acceptance of requested
+  // formatting (for example, a request for only the first ten lines).
+  return {text:'Actual execution receipt (CLI-observed, not model claims):\n'+JSON.stringify(receipt,null,2)
+    +(results.length?'':'\nNo tools were executed.')
+    +(meaningfulReply(text)?'\nModel reply (unverified narrative; not an execution receipt):\n'+text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0')):''),
+    fake_tool_call:false,receipt};
+}
+function finishToolTurn(messages,results,{text='',error=null,source='provider'}={}){
+  if(!error&&!meaningfulReply(text)&&source==='provider')error='MODEL_ANSWER_EMPTY_OR_NULL';
+  if(!error&&looksLikeToolCall(text))error='MODEL_TEXT_IS_NOT_A_TOOL_CALL';
+  const answer=toolFallbackText(results,{text,error,source});
+  // Preserve the terminal outcome in this in-memory conversation, not a claim
+  // that a failed/empty/no-tool turn completed the user's task.
+  messages.push({role:'assistant',content:answer.text});
+  return answer;
+}
+async function providerReply(convo,{model,mode}){
+  const res=await fetch('http://127.0.0.1:11434/api/chat',{signal:AbortSignal.timeout(300000),method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,messages:convo,stream:false,...(mode==='native'?{tools:ollamaTools()}:{format:structuredSchema(),options:{temperature:0}})})});
+  if(!res.ok)throw new Error('OLLAMA_HTTP_'+res.status);
+  return providerMessage(await res.json());
 }
 // Structured tool mode (default). Small local models are unreliable at free-form
 // tool calling: they invent tool names, wrap calls in prose, or loop. Ollama's
-// `format` (a JSON schema) constrains every reply to one real tool or an answer,
-// so the model cannot emit an unknown tool. The CLI still validates every field
+// `format` requests one real tool or an answer. A provider can still violate
+// that schema; the CLI validates every returned action and field
 // and every edit/command still needs the human's yes. XIIO_TOOL_MODE=native keeps
 // the old provider tool-calling path.
-const STRUCTURED_TOOLS=['list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','install_dependencies','list_services','call_service'];
-const STRUCTURED_FIELDS=['path','query','content','old_text','new_text','expected_sha256','command','service','method','body','text'];
+const STRUCTURED_TOOLS=['local_scan','cross_ux_triage','ibal_balance','list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','install_dependencies','list_services','call_service'];
+const STRUCTURED_FIELDS=['max_files','terms','path','query','content','old_text','new_text','expected_sha256','command','service','method','body','text'];
 function structuredSchema(){
   const properties={tool:{type:'string',enum:[...STRUCTURED_TOOLS,'answer']}};
   for(const f of STRUCTURED_FIELDS)properties[f]={type:'string'};
-  return {type:'object',properties,required:['tool',...STRUCTURED_FIELDS]};
+  return {type:'object',properties,required:['tool',...STRUCTURED_FIELDS],additionalProperties:false};
 }
 const STRUCTURED_GUIDE=['Reply ONLY with one JSON object: {"tool":..., "path":"", "query":"", "content":"", "old_text":"", "new_text":"", "command":"", "text":""}. Use "" for fields a tool does not need.',
   'tool="answer": text = your reply to the person. Use it when the task is done or you need to ask something.',
   'list_workspace: path (folder, "." for top). search_workspace: query. read_workspace_file: path. git_status / list_registries: no fields. resolve_registry: path.',
   'edit_workspace_file NEW file: path + content. EXISTING file: read it first, then path + old_text (copied exactly) + new_text + optional expected_sha256 from the read result. Edits fail closed if source bytes changed. Never rewrite a whole existing file.',
+  'local_scan: no fields. Requires approval, accepted SDK producer bytes and a sandbox; returns local static observations only. cross_ux_triage: optional comma-separated terms and max_files. ibal_balance: no fields.',
   'run_workspace_command: command (runs sandboxed in the project, no network).',
   'install_dependencies: no fields. Use it before building or testing an npm project whose node_modules is missing.',
   'list_services: no fields. call_service: service (name from list_services), method, path (starting with /), body (JSON text or ""). Each service only allows what its access says (health = only GET its health_path). Never guess API paths.',
@@ -662,86 +836,186 @@ const STRUCTURED_GUIDE=['Reply ONLY with one JSON object: {"tool":..., "path":""
 function structuredArgs(d){
   const g=(k)=>typeof d[k]==='string'?d[k]:'';
   switch(d.tool){
+    case 'local_scan':return {};
+    case 'cross_ux_triage':return {...(g('terms')?{terms:g('terms')}:{}),...(g('max_files')?{max_files:g('max_files')}:{})};
     case 'list_workspace':return {path:g('path')||'.'};
     case 'search_workspace':return {query:g('query')};
     case 'read_workspace_file':case 'resolve_registry':return {path:g('path')};
-    case 'edit_workspace_file':return g('old_text')?{path:g('path'),old_text:g('old_text'),new_text:g('new_text'),...(g('expected_sha256')?{expected_sha256:g('expected_sha256')}:{})}:{path:g('path'),content:g('content')};
+    case 'edit_workspace_file':return g('old_text')?{path:g('path'),old_text:g('old_text'),new_text:g('new_text'),...(g('expected_sha256')?{expected_sha256:g('expected_sha256')}:{})}:{path:g('path'),content:g('content'),...(g('expected_sha256')?{expected_sha256:g('expected_sha256')}:{})};
     case 'run_workspace_command':return {command:g('command')};
     case 'call_service':return {service:g('service'),method:g('method')||'GET',path:g('path')||'/',body:g('body')};
     default:return {};
   }
 }
-async function ollamaChatStructured(messages,{model,root,approve}){
-  const convo=[...messages];
-  if(convo[0]?.role==='system')convo[0]={...convo[0],content:convo[0].content+'\n'+STRUCTURED_GUIDE};
-  let lastError=null;const results=[];
-  for(let turn=0;turn<12;turn++){
-    const res=await fetch('http://127.0.0.1:11434/api/chat',{signal:AbortSignal.timeout(300000),method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,messages:convo,stream:false,format:structuredSchema(),options:{temperature:0}})});
-    if(!res.ok){let detail='';try{detail=(await res.json()).error||'';}catch{}throw new Error('OLLAMA_HTTP_'+res.status+(detail?': '+detail:''));}
-    const body=await res.json();const raw=String(body.message?.content||'');
-    convo.push({role:'assistant',content:raw});
-    let d;try{d=JSON.parse(raw);}catch{d=null;}
-    if(!d||typeof d!=='object'||!(d.tool==='answer'||STRUCTURED_TOOLS.includes(d.tool))){
-      lastError='MODEL_REPLY_NOT_A_VALID_ACTION';
-      convo.push({role:'user',content:'TOOL RESULT: invalid reply. Reply with exactly one JSON object as instructed.'});continue;
-    }
-    if(d.tool==='answer'){
-      const text=String(d.text||'').trim();
-      messages.push({role:'assistant',content:text});
-      if(looksLikeToolCall(text))return {text,fake_tool_call:true};
-      // The model's words never stand alone: the CLI states what each tool
-      // actually did, so "Done" after a failure cannot read as success.
-      const facts=results.map(({name,result:r})=>{
-        if(r?.state==='FAIL')return '  ✗ '+name+' failed: '+r.reason;
-        if(name==='run_workspace_command')return (r?.status===0?'  ✓ ':'  ✗ ')+'command exit '+(r?.status??'none')+(r?.timed_out?' (timed out)':'');
-        if(name==='install_dependencies')return (r?.status===0?'  ✓ ':'  ✗ ')+'npm ci exit '+(r?.status??'none');
-        if(name==='call_service')return (r?.status>=200&&r?.status<300?'  ✓ ':'  ✗ ')+r?.method+' '+r?.url+' → HTTP '+r?.status;
-        if(name==='edit_workspace_file')return (r?.readback_matches?'  ✓ ':'  ✗ ')+'wrote '+r?.path+(r?.readback_matches?' (read back OK)':' (read back FAILED)');
-        return '  ✓ '+name;
-      });
-      const body=text||(results.length?toolFallbackText(results):'');
-      return {text:facts.length?'What actually happened:\n'+facts.join('\n')+'\n\n'+body:body,fake_tool_call:false};
-    }
-    let out;try{out=await executeTool(d.tool,structuredArgs(d),{root,approve});lastError=null;}catch(e){out={state:'FAIL',reason:String(e.message||e)};lastError=out.reason;}
-    results.push({name:d.tool,result:out});
-    convo.push({role:'user',content:'TOOL RESULT for '+d.tool+': '+JSON.stringify(out).slice(0,20000)});
-    // A declined approval ends the turn: the person said no.
-    if(out.state==='FAIL'&&out.reason==='HUMAN_APPROVAL_REQUIRED'){messages.push({role:'assistant',content:'Declined.'});return {text:'Okay, I did not make that change (HUMAN_APPROVAL_REQUIRED).',fake_tool_call:false};}
+function structuredAction(msg){
+  if(msg.tool_calls?.length)throw new Error('STRUCTURED_NATIVE_CALLS_UNEXPECTED');
+  let d;try{d=JSON.parse(msg.content);}catch{throw new Error('MODEL_REPLY_NOT_A_VALID_ACTION');}
+  if(!isRecord(d)||typeof d.tool!=='string'||!(d.tool==='answer'||STRUCTURED_TOOLS.includes(d.tool)))throw new Error('MODEL_REPLY_NOT_A_VALID_ACTION');
+  if(Object.keys(d).some(k=>k!=='tool'&&(!STRUCTURED_FIELDS.includes(k)||typeof d[k]!=='string')))throw new Error('STRUCTURED_FIELD_INVALID');
+  if(d.tool==='answer'){
+    if(!meaningfulReply(d.text))throw new Error('MODEL_ANSWER_EMPTY_OR_NULL');
+    return {name:'answer',text:d.text.trim()};
   }
-  throw new Error('TOOL_LOOP_LIMIT'+(lastError?': last error was '+lastError:''));
+  // Fields are checked before projection; wrong types are never silently erased.
+  const args=structuredArgs(d);
+  if(d.tool==='edit_workspace_file'){
+    if(d.old_text){if(typeof d.new_text!=='string')throw new Error('EDIT_REPLACEMENT_INVALID');}
+    else if(typeof d.content!=='string')throw new Error('EDIT_CONTENT_REQUIRED');
+  }
+  return {name:d.tool,args:validateToolArgs(d.tool,args)};
+}
+async function ollamaChatStructured(messages,{model,root,approve}){
+  const convo=[...messages],results=[];
+  if(convo[0]?.role==='system')convo[0]={...convo[0],content:convo[0].content+'\n'+STRUCTURED_GUIDE};
+  for(let turn=0;turn<12;turn++){
+    let msg,action;
+    try{msg=await providerReply(convo,{model,mode:'structured'});action=structuredAction(msg);}
+    catch(error){return finishToolTurn(messages,results,{error:error instanceof Error?error.message:'PROVIDER_REQUEST_FAILED'});}
+    convo.push({role:'assistant',content:msg.content});
+    if(action.name==='answer')return finishToolTurn(messages,results,{text:action.text});
+    const fact=await executeObservedTool(action.name,action.args,{root,approve});
+    results.push(fact);
+    convo.push({role:'user',content:'TOOL RESULT for '+action.name+': '+JSON.stringify(fact.result).slice(0,20000)});
+    if(fact.reason==='HUMAN_APPROVAL_REQUIRED')return finishToolTurn(messages,results,{error:'HUMAN_APPROVAL_REQUIRED'});
+  }
+  return finishToolTurn(messages,results,{error:'TOOL_LOOP_LIMIT'});
 }
 async function ollamaChat(messages,opts){
   if(String(process.env.XIIO_TOOL_MODE||'structured').toLowerCase()!=='native')return ollamaChatStructured(messages,opts);
   return ollamaChatNative(messages,opts);
 }
 async function ollamaChatNative(messages,{model,root,approve}){
-  let lastToolResults=[];
+  const convo=[...messages],results=[];
   for(let turn=0;turn<12;turn++){
-    const res=await fetch('http://127.0.0.1:11434/api/chat',{signal:AbortSignal.timeout(300000),method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,messages,stream:false,tools:ollamaTools()})});
-    if(!res.ok){let detail='';try{detail=(await res.json()).error||'';}catch{}if(/does not support tools/i.test(detail))throw new Error('MODEL_HAS_NO_TOOL_SUPPORT: '+model+' cannot use tools; pick another with /models and /model NAME');throw new Error('OLLAMA_HTTP_'+res.status+(detail?': '+detail:''));}
-    const body=await res.json();const msg=body.message||{};messages.push(msg);
-    const calls=Array.isArray(msg.tool_calls)?msg.tool_calls:[];
-    if(!calls.length){
-      const text=String(msg.content||'').trim();
-      if(looksLikeToolCall(text))return {text,fake_tool_call:true};
-      if(!text&&lastToolResults.length)return {text:toolFallbackText(lastToolResults),fake_tool_call:false,tool_result_fallback:true};
-      return {text,fake_tool_call:false};
-    }
-    lastToolResults=[];
-    for(const call of calls){
-      const name=call.function?.name;let args=call.function?.arguments||{};
-      if(typeof args==='string'){try{args=JSON.parse(args);}catch{args={};}}
-      let out;try{out=await executeTool(name,args,{root,approve});}catch(e){out={state:'FAIL',reason:String(e.message||e)};}
-      lastToolResults.push({name,result:out});
-      messages.push({role:'tool',tool_name:name,content:JSON.stringify(out)});
+    let msg,calls;
+    try{msg=await providerReply(convo,{model,mode:'native'});calls=nativeCalls(msg);}
+    catch(error){return finishToolTurn(messages,results,{error:error instanceof Error?error.message:'PROVIDER_REQUEST_FAILED'});}
+    if(!calls.length)return finishToolTurn(messages,results,{text:msg.content.trim()});
+    // Keep only validated provider fields in the conversation.
+    convo.push({role:'assistant',content:msg.content,tool_calls:msg.tool_calls});
+    for(const {name,args} of calls){
+      const fact=await executeObservedTool(name,args,{root,approve});
+      results.push(fact);
+      convo.push({role:'tool',tool_name:name,content:JSON.stringify(fact.result)});
+      if(fact.reason==='HUMAN_APPROVAL_REQUIRED')return finishToolTurn(messages,results,{error:'HUMAN_APPROVAL_REQUIRED'});
     }
   }
-  throw new Error('TOOL_LOOP_LIMIT');
+  return finishToolTurn(messages,results,{error:'TOOL_LOOP_LIMIT'});
 }
+// Human-facing views consume existing observations; they do not grant access,
+// infer task completion, or change the machine-readable execution receipt.
+function humanText(value){return String(value??'').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));}
+function humanCommands(){
+  const sb=sandboxState();
+  if(sb.ok)return 'Commands and pinned npm dependencies: available in the sandbox, only after your approval.';
+  const why={SANDBOX_DISABLED_BY_ENVIRONMENT:'disabled for this session',SANDBOX_UNAVAILABLE_NO_BWRAP:'the required sandbox is not installed',SANDBOX_UNAVAILABLE_NAMESPACES_BLOCKED:'the sandbox could not start'};
+  return 'Commands and dependency installs are unavailable here: '+(why[sb.reason]||'this computer has no working supported sandbox')+'. Local file reads and approved edits do not require it.';
+}
+function humanHelp(model){
+  return ['I can read, explain, search, and edit files in this workspace. Try:',
+    '  “Read README.md and explain how to use this project.”',
+    '  “Find where the launch date is mentioned.”',
+    '  “Change the launch date in README.md to 13 November; leave everything else alone.”',
+    'I show each edit first and wait for your yes.',
+    model?null:'No local model is selected. Use /models, then /model NAME for natural-language work.',
+    '/connect runs one configured native broker cycle; it does not register this computer. /read README.md reads a file without a model. /tools shows available actions. /menu shows the choices.'
+  ].filter(Boolean).join('\n');
+}
+function humanTools(){
+  return ['Available actions in this workspace:',
+    '  • Browse folders, search text, and read text files (credential files stay closed).',
+    '  • Inspect the Git branch and changed files; locate and read possible project-rule/current-work files.',
+    '  • Create a text file or replace an exact piece of text after you approve the displayed change.',
+    '  • Check a configured local health endpoint only; a response does not prove the product is ready. Broader service access is unavailable.',
+    humanCommands(),
+    '/tools details shows the technical tool names and full descriptions.'].join('\n');
+}
+function humanExamples(){
+  return ['Tell me what you need, for example:',
+    '  “Read README.md and explain how to use this project.”',
+    '  “Find every mention of the launch date.”',
+    '  “Which files have changed in Git?”',
+    '  “Change the launch date in README.md to 13 November; leave everything else alone.”',
+    'File names and dates above are examples, not work already done. I read before proposing an edit; it waits for your yes.',
+    humanCommands(),
+    'For an exact text read without a model: /read PATH. For the last turn’s full evidence: /details.'].join('\n');
+}
+function humanRegistry(rows,{details=false}={}){
+  if(!rows.files.length)return 'I did not find files named like ACK, current, registry or manifest in this workspace. That does not prove there are no project rules. Tell me your task or a known rules file to read.';
+  const files=details?rows.files:rows.files.slice(0,10);
+  return ['These files may describe project rules or current work. They were found by filename, not read or verified; no binding or permission is established by this search.',
+    ...files.map(p=>'  '+humanText(p)),
+    ...(files.length<rows.files.length?[String(rows.files.length-files.length)+' more candidates; /ack details lists all discovered paths.']:[]),
+    rows.files.length===200?'The search reached its 200-candidate limit; this is not a complete inventory.':null,
+    'Tell me what you are working on and I can read the relevant file, or use /read PATH to inspect one directly.'].filter(Boolean).join('\n');
+}
+function humanDoctor(d,root){
+  const lines=['Local setup: '+(d.state==='PASS'?'the reported checks passed':d.state==='PARTIAL'?'not fully verified (PARTIAL)':'readiness unknown ('+humanText(d.state)+')')+'.',
+    'Local file work is separate from these service checks. Workspace: '+humanText(root)+'.'];
+  const reasons={HOST_PROFILE_UNRESOLVED:'There is no service profile for this computer, so no services were checked.',HOST_PROFILE_AMBIGUOUS:'More than one service profile matches this computer; I did not choose one.',LOCAL_SERVICES_HOST_MISMATCH:'The local service list belongs to another computer and was not accepted.',LOCAL_SERVICES_SCHEMA_INVALID:'The local service list has an unsupported format.',LOCAL_SERVICES_CUSTODY_UNVERIFIED:'The local service list did not pass file type or permission checks.',LOCAL_SERVICES_RECORD_INVALID:'The local service list contains an invalid entry.',LOCAL_SERVICES_UNREADABLE:'The local service list could not be read safely.'};
+  if(d.first_red)lines.push(reasons[d.first_red]||'A setup check is unresolved ('+humanText(d.first_red)+').');
+  if(!d.services.length&&!d.first_red)lines.push('No services were checked; this is not an all-clear.');
+  for(const row of d.services){
+    let observation;
+    const p=row.probe;
+    if(row.state==='HTTP_OBSERVED_UNQUALIFIED')observation='endpoint responded; product health and identity are not verified';
+    else if(row.state==='RUNNING_UNPROVEN')observation='service unit is running; this does not confirm product readiness';
+    else if(row.state==='STOPPED')observation='catalog candidate service units were found, but none was observed running';
+    else if(row.state==='OBSERVATION_INCOMPLETE')observation='catalog candidate checks were incomplete; installation and health remain unknown';
+    else if(row.state==='NOT_OBSERVED')observation='no declared catalog candidate was observed; installation and health remain unknown';
+    else if(row.state==='PASS')observation='reported checks passed';
+    else observation='unverified ('+humanText(row.reason||row.state)+')';
+    if(p&&!p.http_observed){
+      const why=p.reason==='HEALTH_REDIRECT_REFUSED'?'endpoint redirected; redirect was not followed':p.status?'endpoint returned HTTP '+p.status:p.reason==='HEALTH_TIMEOUT'?'endpoint check timed out':p.reason==='HEALTH_TRANSPORT_UNVERIFIED'?'could not reach the declared endpoint':'endpoint check unverified ('+humanText(p.reason||p.state)+')';
+      observation=row.state==='NOT_OBSERVED'?why+'; health unknown':observation+'; '+why;
+    }
+    lines.push('  • '+humanText(row.id)+': '+observation+'.');
+  }
+  if(d.unprofiled_candidates.length)lines.push(d.unprofiled_candidates.length+' other catalog entries were not checked.');
+  lines.push(humanCommands(),'Nothing was changed. /status details shows the full doctor findings.');
+  return lines.join('\n');
+}
+function humanToolTurn(answer){
+  const r=answer.receipt,lines=[];
+  const labels={local_scan:'Local baseline',cross_ux_triage:'Artifact deduplication',ibal_balance:'Opposite-seat witness guide',list_workspace:'List files',search_workspace:'Search text',read_workspace_file:'Read file',resolve_registry:'Read project record',list_registries:'Find project records',git_status:'Inspect Git',edit_workspace_file:'Change file',run_workspace_command:'Run command',install_dependencies:'Install pinned dependencies',list_services:'List configured services',call_service:'Check service endpoint'};
+  const preview=(text)=>{const s=humanText(text);return s.length>4000?s.slice(0,4000)+'\n[Display shortened; /details retains the full returned value.]':s;};
+  const reasons={HUMAN_APPROVAL_REQUIRED:'No approval was given, so this action was not performed.',CREDENTIAL_PATH_REFUSED:'Credential files are not accessible.',PATH_OUTSIDE_WORKSPACE:'That path is outside this workspace.',SYMLINK_OUTSIDE_WORKSPACE:'That link leaves the workspace.',BINARY_FILE_REFUSED:'This is not a text file.',NOT_UTF8_TEXT_REFUSED:'This file is not valid UTF-8 text.',NOT_A_REGULAR_FILE:'That path is not a regular file.',MODEL_ANSWER_EMPTY_OR_NULL:'The model did not return a usable answer.',MODEL_TEXT_IS_NOT_A_TOOL_CALL:'The model printed a tool-shaped reply instead of a valid action.',TOOL_LOOP_LIMIT:'The model reached the action limit without a final answer.'};
+  for(const fact of r.tool_results){
+    const v=fact.result||{},label=labels[fact.name]||'Action',where=v.path||fact.arguments?.path;
+    if(fact.state==='FAILED'){
+      const reason=String(fact.reason||'UNKNOWN');
+      lines.push(label+(where?' '+humanText(where):'')+' — failed. '+(reasons[reason]||(reason.startsWith('ENOENT')?'The file was not found.':'The action could not be verified.'))+' ('+humanText(reason)+')');
+    }else if(['read_workspace_file','resolve_registry'].includes(fact.name)){
+      lines.push('Read '+humanText(v.path)+' ('+v.byte_length+' bytes)'+(fact.state==='PARTIAL'?' — only part of the file was returned.':' — file content returned.')+'\n'+(v.content===''?'[Empty file: 0 bytes.]':preview(v.content)));
+    }else if(fact.name==='edit_workspace_file')lines.push((v.created?'Created ':'Changed ')+humanText(v.path)+' — written bytes match the readback.'+(v.bytes_outside_change_preserved===true?' Other bytes were preserved.':''));
+    else if(fact.name==='list_workspace')lines.push('Files in '+humanText(v.path)+':\n'+preview(v.entries.map(x=>x.name+(x.type==='dir'?'/':'')).join('\n')||'[No entries returned.]'));
+    else if(fact.name==='search_workspace')lines.push('Matches for '+humanText(v.query)+':\n'+preview(v.matches.join('\n')||'[No matches returned.]'));
+    else if(fact.name==='git_status')lines.push('Git branch: '+humanText(v.branch||'(detached HEAD)')+'\n'+preview(v.status||'No working-tree changes reported.')+'\nSubmodule contents were not inspected.');
+    else if(fact.name==='list_registries')lines.push(humanRegistry(v));
+    else if(fact.name==='list_services')lines.push('Configured service candidates: '+humanText(v.services.map(x=>x.service).join(', ')||'none')+'. Listing is not product health or permission. Only declared health endpoints are available.');
+    else if(fact.name==='call_service')lines.push(humanText(v.service)+': endpoint returned HTTP '+v.status+'. Product health, identity and broader permission are not verified.\n'+preview(v.body));
+    else if(['local_scan','cross_ux_triage','ibal_balance'].includes(fact.name))lines.push(label+' — '+humanText(v.state)+'. Local observation only; no live, closure or effect authority.\n'+preview(JSON.stringify(v)));
+    else if(['run_workspace_command','install_dependencies'].includes(fact.name))lines.push(label+' — process exited with code '+v.status+'.');
+    else lines.push(label+' — '+humanText(fact.state)+'.');
+    if(['run_workspace_command','install_dependencies'].includes(fact.name)){
+      if(typeof v.stdout==='string'&&v.stdout)lines.push('Command output:\n'+preview(v.stdout));
+      if(typeof v.stderr==='string'&&v.stderr)lines.push('Command error output:\n'+preview(v.stderr));
+    }
+  }
+  if(!r.tool_results.length)lines.push('No tools were executed.');
+  if(r.provider_error&&!r.tool_results.some(f=>f.reason===r.provider_error))lines.push((r.source==='direct_read'?'The direct read did not complete: ':'The local model turn did not complete: ')+(reasons[r.provider_error]||humanText(r.provider_error))+(reasons[r.provider_error]?'':'.')+(r.tool_results.length?' Earlier tool results above still stand.':''));
+  if(r.state==='FAILED'||r.state==='PARTIAL')lines.push('This request did not finish successfully.');
+  const marker='\nModel reply (unverified narrative; not an execution receipt):\n';
+  const at=answer.text.indexOf(marker);
+  if(at>=0&&r.state!=='FAILED'&&r.state!=='PARTIAL')lines.push('Model explanation (unverified):\n'+humanText(answer.text.slice(at+marker.length)));
+  lines.push('/details shows the full execution receipt and model reply.');
+  return lines.join('\n');
+}
+
 function printMenu(){
   process.stdout.write('\nxi-io: CLI\nWhat would you like to do?\n\n');
   for(const [n,,label] of MENU)process.stdout.write('  '+n+'. '+label+'\n');
-  process.stdout.write('\nOr just tell me what you need in plain language.\n\n');
+  process.stdout.write('\nOr just tell me what you need in plain language.\n/read PATH reads a text file without a model. /menu returns to these choices.\n\n');
 }
 const MODEL_FILE=path.join(CONFIG_DIR,'model');
 function savedModel(){try{return fs.readFileSync(MODEL_FILE,'utf8').trim()||null;}catch{return null;}}
@@ -759,6 +1033,8 @@ async function interactive(flags,args=[]){
   const remembered=savedModel();
   let model=requestedModel||(remembered&&names.includes(remembered)?remembered:null)||names[0]||null;
   const rl=readline.createInterface({input:process.stdin,output:process.stdout,terminal:Boolean(process.stdin.isTTY&&process.stdout.isTTY)});
+  let lastTurn=null;
+  const showTurn=answer=>{lastTurn=answer;process.stdout.write((process.stdin.isTTY&&process.stdout.isTTY?humanToolTurn(answer):answer.text)+'\n');};
   let messages=[{role:'system',content:[
     'You are @ibal inside xi-io: CLI. Be conversational, concise, and practical.',
     'The user is the Pilot; you are the Navigator/Engineer.',
@@ -785,11 +1061,15 @@ async function interactive(flags,args=[]){
       if(choice.invalid){process.stdout.write('Unknown menu number. Choose 1-10 or /exit. Nothing was sent to Ollama.\n');continue;}
       const cmd=choice.command;
       if(cmd==='/exit'){process.stdout.write('See you next time.\n');break;}
-      if(cmd==='/clear'){messages=messages.slice(0,1);process.stdout.write('Conversation cleared. Workspace stays '+root+'.\n');continue;}
-      if(cmd==='/help'){printMenu();continue;}
+      if(cmd==='/clear'){messages=messages.slice(0,1);lastTurn=null;process.stdout.write('Conversation cleared. Workspace stays '+root+'.\n');continue;}
+      if(cmd==='/menu'){printMenu();continue;}
+      if(cmd==='/connect'){process.stdout.write(JSON.stringify(connectCommand(),null,2)+'\n');continue;}
+      if(cmd==='/help'){process.stdout.write(humanHelp(model)+'\n');continue;}
+      if(cmd==='/details'){process.stdout.write(lastTurn?lastTurn.text+'\n':'No execution receipt yet. Ask for work or use /read PATH first.\n');continue;}
       if(cmd==='/workspace'){process.stdout.write('You are working in '+root+'.\n');continue;}
-      if(cmd==='/tools'){for(const t of toolCatalog())process.stdout.write('  '+t.name+(t.write?' [asks you first]':' [read]')+' — '+t.description+'\n');process.stdout.write(commandLine()+'\n');continue;}
-      if(cmd==='/commands'){process.stdout.write('Ask naturally, or use the numbered menu. Every edit and command is shown to you and waits for your yes.\n'+commandLine()+'\n');continue;}
+      if(cmd==='/tools'){process.stdout.write(humanTools()+'\n');continue;}
+      if(cmd==='/tools details'){for(const t of toolCatalog())process.stdout.write('  '+t.name+(t.write?' [asks you first]':' [read]')+' — '+t.description+'\n');process.stdout.write(commandLine()+'\n');continue;}
+      if(cmd==='/commands'){process.stdout.write(humanExamples()+'\n');continue;}
       if(cmd.startsWith('/model ')){const selected=cmd.slice(7).trim();if(!names.includes(selected)){process.stdout.write('Choose a discovered installed model from /models.\n');continue;}model=selected;saveModel(model);process.stdout.write('Local model changed to '+model+'.\n');continue;}
       if(cmd==='/model'){process.stdout.write('Local model: '+(model||'none selected')+' via Ollama. Use /model NAME to switch among /models.\n');continue;}
       if(cmd==='/models'){
@@ -799,18 +1079,26 @@ async function interactive(flags,args=[]){
         else process.stdout.write(names.length?names.map((x,i)=>'  '+(i+1)+'. '+x).join('\n')+'\nUse /model NAME to select one.\n':'No local Ollama models were discovered.\n');
         continue;
       }
-      if(cmd==='/status'){const d=await doctor();process.stdout.write('Local xi-io status: '+d.state+'. Workspace: '+root+'. '+commandLine()+'\n');continue;}
-      if(cmd==='/ack'){
+      if(cmd==='/status'||cmd==='/status details'){const d=await doctor();process.stdout.write((cmd==='/status details'?JSON.stringify(d,null,2):humanDoctor(d,root))+'\n');continue;}
+      if(cmd==='/ack'||cmd==='/ack details'){
         const rows=await executeTool('list_registries',{}, {root});
-        process.stdout.write(rows.files.length?'I found '+rows.files.length+' ACK/current/registry candidates. Tell me what you are working on and I will resolve only the relevant ones.\n':'I did not find a local ACK/current registry in this workspace.\n');
+        process.stdout.write(humanRegistry(rows,{details:cmd==='/ack details'})+'\n');
+        continue;
+      }
+      if(cmd==='/read'||cmd.startsWith('/read ')){
+        const file=cmd.slice(5).trim();
+        if(!file||file.length>4096||/[\x00-\x1f\x7f]/.test(file)){
+          showTurn(toolFallbackText([],{source:'direct_read',error:'READ_PATH_INVALID'}));continue;
+        }
+        const fact=await executeObservedTool('read_workspace_file',{path:file},{root});
+        showTurn(toolFallbackText([fact],{source:'direct_read'}));
         continue;
       }
       if(!model){process.stdout.write('No local model selected. No request sent.\n');continue;}
       messages.push({role:'user',content:input});
       try{
         const answer=await ollamaChat(messages,{model,root,approve});
-        if(answer.fake_tool_call)process.stdout.write(FAKE_TOOL_NOTICE+'\nWhat the model wrote:\n'+answer.text+'\n');
-        else process.stdout.write((answer.text||'I completed the tool turn but have no text to add.')+'\n');
+        showTurn(answer);
       }
       catch(e){process.stdout.write('I could not complete that locally: '+String(e.message||e)+'.\n');}
     }
@@ -831,7 +1119,52 @@ function receipt(){try{return JSON.parse(fs.readFileSync(path.join(ROOT,'install
 // signatures made with it. Identity is not permission: Ward grants per device.
 const DEVICE_FILE=path.join(CONFIG_DIR,'device.json');
 const DEVICE_KEY_FILE=path.join(CONFIG_DIR,'device-key.pem');
-function readDevice(){try{return JSON.parse(fs.readFileSync(DEVICE_FILE,'utf8'));}catch{return null;}}
+function readDevice(){
+  // Absence permits first-time sign-in. A failed read is not absence and must
+  // never turn an existing device into a new identity or recommend that repair.
+  let bytes,st;
+  try{
+    st=fs.lstatSync(DEVICE_FILE);
+  }catch(error){return error.code==='ENOENT'?{state:'ABSENT'}:{state:'BLOCKED',reason:'DEVICE_IDENTITY_UNREADABLE'};}
+  if(!st.isFile()||st.isSymbolicLink()||st.size>65536||(process.platform!=='win32'&&(st.mode&0o077)!==0))
+    return{state:'BLOCKED',reason:'DEVICE_IDENTITY_CUSTODY_UNVERIFIED'};
+  // Once observed, a disappearing record is an unreadable existing identity.
+  try{bytes=fs.readFileSync(DEVICE_FILE);}catch{return{state:'BLOCKED',reason:'DEVICE_IDENTITY_UNREADABLE'};}
+  try{
+    const device=JSON.parse(bytes.toString('utf8'));
+    // Existing device/v1 producers use UUIDs; match the bound observer contract.
+    // Unsupported records remain intact, never normalized into another identity.
+    if(device?.schema!=='xiio.cli.device/v1'||typeof device.device_id!=='string'||!/^device:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(device.device_id)
+      ||typeof device.principal!=='string'||!/^github:[0-9]+$/.test(device.principal)||typeof device.login!=='string'||!device.login
+      ||typeof device.hostname!=='string'||!device.hostname||typeof device.platform!=='string'||!device.platform
+      ||typeof device.public_key!=='string'||typeof device.fingerprint!=='string'
+      ||crypto.createPublicKey(device.public_key).asymmetricKeyType!=='ed25519'
+      ||deviceFingerprint(device.public_key)!==device.fingerprint)
+      return{state:'BLOCKED',reason:'DEVICE_IDENTITY_INVALID'};
+    return{state:'PASS',device,bytes};
+  }catch{return{state:'BLOCKED',reason:'DEVICE_IDENTITY_INVALID'};}
+}
+function deviceReadResult(observed,schema){
+  return observed.state==='ABSENT'?{schema,state:'UNSET',fix:'Run: xi-io-cli login'}
+    :{schema,state:'BLOCKED',reason:observed.reason,modified:false,note:'Existing identity was not replaced. Review the existing device record without re-registering this computer.'};
+}
+function readBoundDeviceKey(device){
+  try{
+    const st=fs.lstatSync(DEVICE_KEY_FILE);
+    if(!st.isFile()||st.isSymbolicLink()||st.size>65536||(process.platform!=='win32'&&(st.mode&0o077)!==0))throw Error('KEY_CUSTODY');
+    const privateKey=crypto.createPrivateKey(fs.readFileSync(DEVICE_KEY_FILE));
+    const publicKey=crypto.createPublicKey(privateKey).export({type:'spki',format:'pem'});
+    if(privateKey.asymmetricKeyType!=='ed25519'||deviceFingerprint(publicKey)!==device.fingerprint)throw Error('KEY_CHANGED');
+    return{state:'PASS',privateKey};
+  }catch{return{state:'BLOCKED',reason:'DEVICE_KEY_MISSING_OR_CHANGED',modified:false};}
+}
+function deviceHostHold(device,schema){
+  if(device.hostname===os.hostname()&&device.platform===process.platform)return null;
+  return{schema,state:'BLOCKED',reason:'DEVICE_HOST_RECONCILIATION_REQUIRED',modified:false,
+    device_id:device.device_id,principal:device.principal,hostname:device.hostname,platform:device.platform,
+    device_key_matches_record:true,current_host_binding_verified:false,
+    note:'The existing device identity is retained. A renamed or different host needs owner/Ward binding reconciliation before this target-bound operation; do not re-register or replace the key.'};
+}
 function githubIdentity(){
   const r=spawnSync(process.env.XIIO_GH||'gh',['api','user','--jq','{id:.id,login:.login}'],{encoding:'utf8',timeout:20000,env:controlledChildEnv()});
   if(r.error)return {state:'BLOCKED',reason:'GH_NOT_INSTALLED',fix:'Install the GitHub CLI, then run: gh auth login'};
@@ -841,29 +1174,47 @@ function githubIdentity(){
 }
 function deviceFingerprint(pubPem){return 'SHA256:'+crypto.createHash('sha256').update(crypto.createPublicKey(pubPem).export({type:'spki',format:'der'})).digest('base64').replace(/=+$/,'');}
 function login(){
+  const observed=readDevice();
+  if(observed.state==='BLOCKED')return deviceReadResult(observed,'xiio.cli.login/v1');
   const who=githubIdentity();
   if(who.state!=='PASS')return {schema:'xiio.cli.login/v1',...who};
-  fs.mkdirSync(CONFIG_DIR,{recursive:true,mode:0o700});
-  let created=false;
-  if(!fs.existsSync(DEVICE_KEY_FILE)){
-    const {privateKey}=crypto.generateKeyPairSync('ed25519');
-    fs.writeFileSync(DEVICE_KEY_FILE,privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600,flag:'wx'});
-    created=true;
-  }
-  try{fs.chmodSync(DEVICE_KEY_FILE,0o600);}catch{}
-  const priv=crypto.createPrivateKey(fs.readFileSync(DEVICE_KEY_FILE));
-  const pub=crypto.createPublicKey(priv).export({type:'spki',format:'pem'});
-  const prev=readDevice();
+  const prev=observed.device||null;
   const principal='github:'+who.id;
-  if(prev&&prev.principal&&prev.principal!==principal)return {schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_BOUND_TO_OTHER_ACCOUNT',bound_to:prev.principal,signed_in_as:principal,fix:'This computer is registered to another account. Remove '+DEVICE_FILE+' only if you mean to re-register it.'};
-  const device={schema:'xiio.cli.device/v1',device_id:prev?.device_id||('device:'+crypto.randomUUID()),hostname:os.hostname(),platform:process.platform,principal,login:who.login,public_key:pub,fingerprint:deviceFingerprint(pub),created_at:prev?.created_at||new Date().toISOString(),signed_in_at:new Date().toISOString(),authority:'NONE_UNTIL_WARD_GRANT'};
-  const t=DEVICE_FILE+'.tmp-'+process.pid;fs.writeFileSync(t,JSON.stringify(device,null,2)+'\n',{mode:0o600});fs.renameSync(t,DEVICE_FILE);
-  return {schema:'xiio.cli.login/v1',state:'PASS',signed_in_as:who.login,principal,device_id:device.device_id,hostname:device.hostname,fingerprint:device.fingerprint,device_key:created?'CREATED':'EXISTING',note:'Identity only. Ward grants what this computer may do.'};
+  if(prev&&prev.principal!==principal)return {schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_BOUND_TO_OTHER_ACCOUNT',bound_to:prev.principal,signed_in_as:principal,modified:false,note:'This computer remains bound to its existing account. No identity or key was changed.'};
+  let priv;
+  if(prev){
+    const key=readBoundDeviceKey(prev);
+    if(key.state!=='PASS')return{schema:'xiio.cli.login/v1',...key};
+    const hold=deviceHostHold(prev,'xiio.cli.login/v1');if(hold)return hold;
+    priv=key.privateKey;
+  }else{
+    // An orphan key is retained for review, not adopted into a replacement ID.
+    try{fs.lstatSync(DEVICE_KEY_FILE);return{schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_KEY_WITHOUT_IDENTITY',modified:false};}
+    catch(error){if(error.code!=='ENOENT')return{schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_KEY_UNREADABLE',modified:false};}
+  }
+  let created=false;
+  try{
+    if(!prev){
+      fs.mkdirSync(CONFIG_DIR,{recursive:true,mode:0o700});
+      priv=crypto.generateKeyPairSync('ed25519').privateKey;
+      fs.writeFileSync(DEVICE_KEY_FILE,priv.export({type:'pkcs8',format:'pem'}),{mode:0o600,flag:'wx'});
+      created=true;
+    }
+    const pub=crypto.createPublicKey(priv).export({type:'spki',format:'pem'});
+    const device={schema:'xiio.cli.device/v1',device_id:prev?.device_id||('device:'+crypto.randomUUID()),hostname:os.hostname(),platform:process.platform,principal,login:who.login,public_key:pub,fingerprint:deviceFingerprint(pub),created_at:prev?.created_at||new Date().toISOString(),signed_in_at:new Date().toISOString(),authority:'NONE_UNTIL_WARD_GRANT'};
+    const bytes=Buffer.from(JSON.stringify(device,null,2)+'\n');
+    if(prev)commitWorkspaceEditCAS({file:path.resolve(DEVICE_FILE),expectedBytes:observed.bytes,nextBytes:bytes});
+    else fs.writeFileSync(DEVICE_FILE,bytes,{mode:0o600,flag:'wx'});
+    const returned=readDevice();
+    if(returned.state!=='PASS'||!returned.bytes.equals(bytes)||readBoundDeviceKey(returned.device).state!=='PASS')throw Error('DEVICE_IDENTITY_READBACK_MISMATCH');
+    return {schema:'xiio.cli.login/v1',state:'PASS',signed_in_as:who.login,principal,device_id:device.device_id,hostname:device.hostname,fingerprint:device.fingerprint,device_key:created?'CREATED':'EXISTING',note:'Identity only. Ward grants what this computer may do.'};
+  }catch(error){return{schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_IDENTITY_UPDATE_REFUSED',detail:String(error.code||error.message),modified:'UNKNOWN',note:'Existing files were not removed. Review the retained identity and key before retrying.'};}
 }
 function whoami(){
-  const d=readDevice();
-  if(!d)return {schema:'xiio.cli.whoami/v1',state:'UNSET',fix:'Run: xi-io-cli login'};
-  let keyOk=false;try{keyOk=deviceFingerprint(crypto.createPublicKey(crypto.createPrivateKey(fs.readFileSync(DEVICE_KEY_FILE))).export({type:'spki',format:'pem'}))===d.fingerprint;}catch{}
+  const observed=readDevice();
+  if(observed.state!=='PASS')return deviceReadResult(observed,'xiio.cli.whoami/v1');
+  const d=observed.device,keyOk=readBoundDeviceKey(d).state==='PASS';
+  if(keyOk){const hold=deviceHostHold(d,'xiio.cli.whoami/v1');if(hold)return hold;}
   return {schema:'xiio.cli.whoami/v1',state:keyOk?'PASS':'FAIL',reason:keyOk?null:'DEVICE_KEY_MISSING_OR_CHANGED',login:d.login,principal:d.principal,device_id:d.device_id,hostname:d.hostname,platform:d.platform,fingerprint:d.fingerprint,authority:d.authority};
 }
 function deviceSign(args){
@@ -871,8 +1222,11 @@ function deviceSign(args){
   // the registered device. Refuses anything that is not a plain nonce.
   const challenge=String(args[0]||'');
   if(!/^[A-Za-z0-9._:-]{16,256}$/.test(challenge))return {state:'FAIL',reason:'CHALLENGE_INVALID'};
-  const d=readDevice();if(!d)return {state:'UNSET',fix:'Run: xi-io-cli login'};
-  const sig=crypto.sign(null,Buffer.from('xiio-device-challenge/v1\n'+d.device_id+'\n'+challenge),crypto.createPrivateKey(fs.readFileSync(DEVICE_KEY_FILE)));
+  const observed=readDevice();if(observed.state!=='PASS')return deviceReadResult(observed,'xiio.cli.device-signature/v1');
+  const d=observed.device,key=readBoundDeviceKey(d);
+  if(key.state!=='PASS')return{schema:'xiio.cli.device-signature/v1',...key};
+  const hold=deviceHostHold(d,'xiio.cli.device-signature/v1');if(hold)return hold;
+  const sig=crypto.sign(null,Buffer.from('xiio-device-challenge/v1\n'+d.device_id+'\n'+challenge),key.privateKey);
   return {schema:'xiio.cli.device-signature/v1',state:'PASS',device_id:d.device_id,principal:d.principal,challenge,signature:sig.toString('base64'),fingerprint:d.fingerprint};
 }
 function version({staged=false}={}){
@@ -903,6 +1257,60 @@ function rollback(flags={}){
   }catch(error){return{schema:'xiio.cli.rollback/v1',state:'FAIL',reason:String(error.message),next:'xi-io-cli version'};}
 }
 
+// Explicit finite connection invocation. No enrollment, service, login, retries,
+// broker implementation or authority is supplied by this client.
+const CONNECTION_REF='ffbcd216d4c673de826242662271add63112c49a';
+const CONNECTION_FILES=Object.freeze({
+  "scripts/device-native-consumer.mjs": "418b840eb2a4f18ff3dd743aa14e082c3ef1d07bb507edc01a40352200531351",
+  "lib/device-broker.mjs": "142f291535e21c5d238351d09e36ab09398da96e9530efba8bde34b845dac6aa",
+  "lib/device-execute-pull-worker.mjs": "a6192a2e1695a48ddb727b7742482fa74526da3224d65f34a882f96321234aa8",
+  "lib/device-execute.mjs": "3bb24e7702e421c7f1ce9f61f13453df496e93d8c61030a08e20c7dfe282ca23",
+  "lib/operational-job.ts": "a4a97ba764ebd79b7678ccc3feae76f28b6b141912b1ed0e7764b4725087f3fe"
+});
+function connectCommand(args=[]){
+  const base={schema:'xiio.cli.connection/v1',connected:false,returnCertified:false,execution_verified:false,job_execution_state:'NOT_REPORTED_BY_NATIVE_CONSUMER',source_ref:CONNECTION_REF};
+  const blocked=reason=>({...base,state:'BLOCKED',firstRed:reason});
+  const unknown=reason=>({...base,state:'OUTCOME_UNKNOWN',firstRed:reason,retry_safe:false,note:'Do not automatically retry: reconcile the existing broker job/result first.'});
+  if(args.length)return blocked('CONNECTION_ARGUMENTS_NOT_SUPPORTED');
+  const required=['XIIO_DEVICE_REF','XIIO_DEVICE_BROKER_URL','XIIO_DEVICE_PORTS_MODULE'];
+  if(required.some(k=>!process.env[k]))return {...base,state:'CONFIGURATION_REQUIRED',firstRed:'EXISTING_DEVICE_BROKER_AND_WARD_PORTS_REQUIRED',required_bindings:required};
+  try{const url=new URL(process.env.XIIO_DEVICE_BROKER_URL);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw Error();}
+  catch{return blocked('NATIVE_BROKER_HTTPS_REQUIRED');}
+  // These values select existing backend bindings; they do not grant authority.
+  // Local CLI login identity is deliberately not substituted for Ward enrollment.
+  const layout=installLayout();
+  if(!layout)return blocked('CONNECTION_INSTALLED_LAYOUT_REQUIRED');
+  try{
+    verifyGeneration(layout.prefix,layout.generation);
+    if(pointerTransactionPending(layout.prefix))throw Error('POINTER_TRANSACTION_PENDING');
+    if(readGenerationPointer(layout.prefix,'current')!==layout.generation)throw Error('GENERATION_NOT_CURRENT');
+  }catch(e){return blocked(/^[A-Z0-9_]+$/.test(e.message)?e.message:'CONNECTION_GENERATION_UNVERIFIED');}
+  const root=path.join(layout.prefix,'connection','switchboard',CONNECTION_REF);
+  try{
+    for(const [rel,expected] of Object.entries(CONNECTION_FILES)){
+      const file=path.join(root,rel),st=fs.lstatSync(file);
+      if(!st.isFile()||st.nlink!==1||fs.realpathSync(file)!==file||(st.mode&0o022))throw Error('CONNECTION_SOURCE_CUSTODY_INVALID');
+      if(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==expected)throw Error('CONNECTION_SOURCE_CHANGED');
+    }
+  }catch(e){return blocked(['CONNECTION_SOURCE_CHANGED','CONNECTION_SOURCE_CUSTODY_INVALID'].includes(e.message)?e.message:'CONNECTION_RUNTIME_UNAVAILABLE');}
+  const env={...process.env};delete env.NODE_OPTIONS;delete env.NODE_PATH;
+  const child=spawnSync(process.execPath,['--experimental-strip-types',path.join(root,'scripts/device-native-consumer.mjs'),'--once'],{env,encoding:'utf8',timeout:70000,killSignal:'SIGKILL',maxBuffer:65536});
+  if(child.error||child.signal)return unknown('CONNECTION_PROCESS_INTERRUPTED');
+  try{
+    const output=(child.status===0?child.stdout:(child.stdout||child.stderr)).trim();
+    const value=JSON.parse(output);
+    const allowed=['EMPTY','BLOCKED','WAIT_TRANSPORT','RESULT_UNRETURNED','RESULT_RETURNED_TO_BROKER'];
+    const success=['EMPTY','RESULT_RETURNED_TO_BROKER'].includes(value?.state);
+    if(!allowed.includes(value?.state)||child.status!==(success?0:3)
+      ||(value.deviceRef!==undefined&&value.deviceRef!==process.env.XIIO_DEVICE_REF)
+      ||(value.state!=='BLOCKED'&&value.deviceRef!==process.env.XIIO_DEVICE_REF)
+      ||(value.state==='RESULT_RETURNED_TO_BROKER'&&value.brokerReturned!==true)
+      ||(value.state!=='RESULT_RETURNED_TO_BROKER'&&value.brokerReturned===true))throw Error('INVALID');
+    // Preserve native loss/return distinctions. Process success is not live proof.
+    return {...base,state:value.state,firstRed:value.firstRed||null,deviceRef:value.deviceRef||null,jobRef:value.jobRef||null,brokerReturned:value.brokerReturned===true,native_exit:child.status};
+  }catch{return unknown('CONNECTION_NATIVE_RESULT_INVALID');}
+}
+
 const rawArgv=process.argv.slice(2);
 let pre;try{pre=parse(rawArgv);}catch(e){emit({state:'FAIL',reason:String(e.message||e)},2);process.exit(2);}
 const explicitHelp=Boolean(pre.flags.help)||['help','-h'].includes(pre.command)&&pre.positionals.length>0;
@@ -923,6 +1331,7 @@ else if(explicitHelp||['help','--help','-h'].includes(p.command)) result=help();
 else if(p.command==='rollback') result=rollback(p.flags);
 else if(p.command==='login') result=login();
 else if(p.command==='whoami') result=whoami();
+else if(p.command==='connect') result=connectCommand(rawArgv.slice(1));
 else if(p.command==='device'&&p.subcommand==='sign') result=deviceSign(p.args);
 else if(p.command==='activate') result=activate(p.positionals.slice(1),p.flags);
 else if(p.command==='doctor') result=await doctor();
@@ -934,5 +1343,8 @@ else if(p.command==='install') result=installCommand(p.subcommand||p.args[0],p.f
 else if(p.command==='registry') result=registryCommand(p.subcommand,p.args,p.flags);
 else if(p.command==='runner') result=p.subcommand==='recover'?runnerRecover(p.flags):runnerDiagnose(p.flags);
 else if(p.command==='glass') result=await glassRead(p.flags);
+else if(p.command==='scan'&&p.subcommand==='local') result=await approvedLocalScan(workspaceRoot(p.flags.root||null),async()=>p.flags.apply===true);
+else if(p.command==='ux'&&['walk','triage'].includes(p.subcommand)){const root=workspaceRoot(p.flags.root||null);result=crossUxTriage(root,{terms:String(p.flags.terms||'local_scan,RCP,ibal').split(','),maxFiles:Number(p.flags['max-files']||4000),allowPath:p=>!credentialPath(p),readArtifact:rel=>readWorkspaceText(root,rel)});}
+else if(p.command==='ibal'&&p.subcommand==='balance') result=ibalBalanceGuide();
 else result={schema:'xiio.cli.error/v1',state:'FAIL',reason:'UNKNOWN_COMMAND',command:p.command,usage:help().usage};
-emit(result,result?.state==='FAIL'?2:0);
+emit(result,p.command==='scan'?(result?.state==='LOCAL_STATIC_OBSERVED'?result.process_status:2):p.command==='connect'&&!['EMPTY','RESULT_RETURNED_TO_BROKER'].includes(result?.state)?3:result?.state==='FAIL'?2:0);

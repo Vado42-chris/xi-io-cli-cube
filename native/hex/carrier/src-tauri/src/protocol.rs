@@ -13,6 +13,10 @@ pub enum InstallerRequest {
     #[serde(rename = "safe_task_apply")]
     SafeTaskApply { plan_id: String, proof_id: String, approval_digest: String, approved: bool },
     Inspect { #[serde(default, skip_serializing_if = "Option::is_none")] plan_id: Option<String> },
+    #[serde(rename = "prepare_repair")]
+    PrepareRepair { prefix: String, node: String, bin_dir: String },
+    #[serde(rename = "apply_repair")]
+    ApplyRepair { plan_id: String, approval_digest: String, approved: bool },
     Prepare { prefix: String, node: String, components: Vec<String> },
     Readback { plan_id: String },
     Apply { plan_id: String, approval_digest: String, approved: bool },
@@ -36,11 +40,13 @@ impl InstallerRequest {
                 *approved && id(plan_id) && lower_hex(proof_id,32) && lower_hex(approval_digest,64),
             Self::Inspect { plan_id } => plan_id.as_deref().map(id).unwrap_or(true),
             Self::Readback { plan_id } => id(plan_id),
+            Self::PrepareRepair { prefix, node, bin_dir } => absolute(prefix) && absolute(node) && absolute(bin_dir),
             Self::Prepare { prefix, node, components } => absolute(prefix) && absolute(node)
                 && (1..=3).contains(&components.len()) && components.iter().any(|x| x == "cli")
                 && components.iter().all(|x| ["cli", "bins", "switchboard"].contains(&x.as_str()))
                 && components.iter().enumerate().all(|(i, x)| !components[..i].contains(x)),
-            Self::Apply { plan_id, approval_digest, approved }
+            Self::ApplyRepair { plan_id, approval_digest, approved }
+            | Self::Apply { plan_id, approval_digest, approved }
             | Self::Rollback { plan_id, approval_digest, approved } => *approved && id(plan_id)
                 && approval_digest.len() == 64
                 && approval_digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
@@ -77,6 +83,16 @@ mod tests {
         value["approved"]=false.into();assert!(!valid(&value.to_string()));value["approved"]=true.into();
         value["proof_id"]="../bad".into();assert!(!valid(&value.to_string()));value["proof_id"]="b".repeat(32).into();
         value["command"]="bash".into();assert!(!valid(&value.to_string()));
+    }
+    #[test] fn bounded_launcher_repair() {
+        let mut p=serde_json::json!({"action":"prepare_repair","prefix":"/home/a/cli-v1","node":"/home/a/node","bin_dir":"/home/a/.local/bin"});
+        assert!(valid(&p.to_string()));
+        p["node"]="node".into(); assert!(!valid(&p.to_string())); p["node"]="/home/a/node".into();
+        p["bin_dir"]="/tmp/../bin".into(); assert!(!valid(&p.to_string())); p["bin_dir"]="/home/a/.local/bin".into();
+        p["command"]="sh".into(); assert!(!valid(&p.to_string()));
+        let mut a=serde_json::json!({"action":"apply_repair","plan_id":"a".repeat(32),"approval_digest":"b".repeat(64),"approved":true});
+        assert!(valid(&a.to_string())); a["approved"]=false.into(); assert!(!valid(&a.to_string()));
+        a["approved"]=true.into(); a["approval_digest"]="stale".into(); assert!(!valid(&a.to_string()));
     }
     #[test] fn approval_is_explicit_and_bound() {
         let mut value=serde_json::json!({"action":"apply","plan_id":"plan-1","approval_digest":"a".repeat(64),"approved":true});

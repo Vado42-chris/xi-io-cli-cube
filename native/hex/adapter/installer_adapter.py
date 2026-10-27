@@ -100,6 +100,7 @@ def observation(base,p,action):
         return None
 
 def project(base,p):
+    if p.get('kind')=='launcher_repair':return repair_project(base,p)
     out=dict(p);out['component_availability']=AVAILABILITY;out['supported_components']=AVAILABILITY;out['receipt_directory']=str(base/'operations')
     a=observation(base,p,'apply');r=observation(base,p,'rollback')
     out['rollback_available']=False
@@ -122,7 +123,8 @@ def installed(p, expected_sha=None, expected_generation=None):
     demand('/' not in current and current not in ('','.','..'),'GENERATION_INVALID')
     if expected_generation: demand(current==expected_generation,'INSTALLED_GENERATION_CHANGED')
     verify_node(p)
-    receipt=json.loads(file_bytes(prefix/'versions'/current/'install-receipt.json'))
+    receipt_bytes=file_bytes(prefix/'versions'/current/'install-receipt.json')
+    receipt=json.loads(receipt_bytes)
     demand(receipt.get('source_sha')==(expected_sha or p['payload']['manifest']['source_sha']),'INSTALLED_SOURCE_MISMATCH')
     demand(receipt.get('prefix')==str(prefix),'INSTALLED_PREFIX_MISMATCH')
     for f,h in receipt['files'].items():
@@ -130,7 +132,14 @@ def installed(p, expected_sha=None, expected_generation=None):
         demand(digest(file_bytes(prefix/'versions'/current/f))==h,'INSTALLED_BYTES_CHANGED')
         expected=p['payload']['manifest']['files'][f]['sha256'] if not expected_sha else p['destination_before']['versions/'+current+'/'+f]['sha256']
         demand(h==expected,'INSTALLED_PAYLOAD_NOT_REVIEWED')
-    demand(set(receipt['files'])==set(p['payload']['manifest']['files']),'INSTALLED_FILES_INCOMPLETE')
+    if expected_sha:
+        # Rollback has its own reviewed denominator: never require yesterday's
+        # six-file generation to contain today's newly added payload module.
+        demand(current==p.get('previous_current'),'ROLLBACK_GENERATION_NOT_REVIEWED')
+        reviewed=p['destination_before'].get('versions/'+current+'/install-receipt.json',{})
+        demand(digest(receipt_bytes)==reviewed.get('sha256'),'ROLLBACK_RECEIPT_NOT_REVIEWED')
+    else:
+        demand(set(receipt['files'])==set(p['payload']['manifest']['files']),'INSTALLED_FILES_INCOMPLETE')
     launcher=prefix/'bin/xi-io-cli'
     quote=lambda s: "'"+s.replace("'", "'\"'\"'")+"'"
     expected_launcher='#!/bin/sh\n# xi-io-cli launcher written by install.mjs; the generation is chosen by current\nP='+quote(str(prefix))+'\nexec '+quote(p['node']['path'])+' "$P/versions/$(cat "$P/current")/src/xiio.mjs" "$@"\n'
@@ -139,9 +148,197 @@ def installed(p, expected_sha=None, expected_generation=None):
     demand(result.get('integrity_verified') is True and result.get('source_sha')==receipt['source_sha'],'CLI_VERSION_NOT_VERIFIED')
     return {'generation':current,'source_sha':receipt['source_sha'],'files':receipt['files'],'launcher_sha256':digest(file_bytes(launcher)),'version_readback':result}
 
+# Exact upstream PR15 launcher-only path, packaged beside (not replacing) the
+# offline transport adaptation. These hashes are authority, not mutable metadata.
+REPAIR_REF='0f2b444abbe8f7a99c5f4520b1222c568eba6dd1'
+REPAIR_INSTALLER='launcher-repair.install.mjs'
+REPAIR_SHA256='61fd09c0d0de09fb2b3aec4e94b34d013cd35ddc60eb44f86443a5d2b5812a4d'
+REPAIR_VERIFY_SHA256='de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912'
+
+def repair_source():
+    installer=file_bytes(SOURCE/REPAIR_INSTALLER)
+    demand(digest(installer)==REPAIR_SHA256,'REPAIR_SOURCE_NOT_EXACT_PR15')
+    demand(digest(file_bytes(SOURCE/'launcher-repair.runtime-integrity.mjs'))==REPAIR_VERIFY_SHA256,'REPAIR_VERIFIER_NOT_EXACT_PR15')
+    return {'ref':REPAIR_REF,'resource':REPAIR_INSTALLER,'sha256':REPAIR_SHA256,'size':len(installer),'verifier_sha256':REPAIR_VERIFY_SHA256,'modified':False}
+
+def repair_history(prefix,node):
+    # Call the unchanged, hash-qualified upstream verifier. Never execute the
+    # existing launcher or installed generation during preparation/approval.
+    script="""import {pathToFileURL} from 'node:url';
+const [resource,prefix]=process.argv.slice(1);
+const {readGenerationPointer,verifyGeneration,pointerTransactionPending}=await import(pathToFileURL(resource));
+if(pointerTransactionPending(prefix))throw Error('POINTER_RECOVERY_REQUIRED');
+const current=readGenerationPointer(prefix,'current'),previous=readGenerationPointer(prefix,'previous');
+if(!current)throw Error('CURRENT_GENERATION_MISSING');
+const receipts={current:verifyGeneration(prefix,current),previous:previous?verifyGeneration(prefix,previous):null};
+console.log(JSON.stringify({current,previous,receipts}));"""
+    return json.loads(run([node['path'],'--input-type=module','--eval',script,str(SOURCE/'launcher-repair.runtime-integrity.mjs'),str(prefix)],30))
+
+def repair_node(raw):
+    n=node_identity(raw)
+    actual=json.loads(run([n['path'],'--input-type=module','--eval',"console.log(JSON.stringify({path:process.execPath,version:'v'+process.versions.node}))"],10))
+    demand(actual=={'path':n['path'],'version':n['version']},'ACTUAL_NODE_IDENTITY_NOT_VERIFIED')
+    return n
+
+def repair_expected_launcher(prefix,node):
+    # Independent read-only assertion of the qualified installer's exact output.
+    # This function never writes a launcher; canonical PR15 alone owns effects.
+    quote=lambda value: "'"+value.replace("'", "'\\'"+"'")+"'"
+    return ('#!/bin/sh\n# xi-io-cli launcher written by install.mjs; the generation is chosen by current\nP='+quote(prefix)+'\nexec '+quote(node)+' "$P/versions/$(cat "$P/current")/src/xiio.mjs" "$@"\n').encode()
+
+def repair_launcher(path):
+    b=file_bytes(path);s=path.stat()
+    demand(s.st_uid==os.getuid() and not (s.st_mode&0o022) and s.st_mode&0o111 and not(s.st_mode&0o7000) and len(b)<=8192,'LAUNCHER_FILE_UNTRUSTED')
+    return {'sha256':digest(b),'size':len(b),'mode':stat.S_IMODE(s.st_mode),'uid':s.st_uid,'gid':s.st_gid,'dev':s.st_dev,'ino':s.st_ino}
+
+def repair_bin(path):
+    safe_path(path);s=path.stat()
+    demand(stat.S_ISDIR(s.st_mode) and s.st_uid==os.getuid() and not(s.st_mode&0o002),'LAUNCHER_DIRECTORY_UNTRUSTED')
+    return {'mode':stat.S_IMODE(s.st_mode),'uid':s.st_uid,'gid':s.st_gid,'dev':s.st_dev,'ino':s.st_ino}
+
+def repair_pending(path):
+    # Canonical transaction artifacts are owned by the canonical installer only.
+    # Never clear a lock, infer owner death, or overwrite an interrupted repair.
+    demand(not any(path.parent.glob(path.name+'.repair-*')),'CANONICAL_LAUNCHER_RECOVERY_REQUIRED_NO_RETRY')
+
+def repair_snapshot(p):
+    # Preserve the entire prefix, including both receipts and every generation.
+    # Only the selected launcher and its exact canonical backup are excluded if
+    # the user explicitly selected a launcher located inside the CLI prefix.
+    rows=tree(Path(p['prefix']));demand(rows is not None,'EXISTING_CLI_REQUIRED')
+    for raw in [p['launcher'],p['backup']]:
+        try: rows.pop(str(Path(raw).relative_to(p['prefix'])),None)
+        except ValueError: pass
+    return rows
+
+def repair_unresolved(base,prefix,launcher,except_plan=None):
+    # A new plan is not a way around an old incomplete OperationJournal.
+    files=list((base/'native-plans').glob('*.json'))
+    demand(len(files)<=2048,'TOO_MANY_PLANS_REVIEW_REQUIRED')
+    for f in files:
+        if f.stem==except_plan:continue
+        prior=load_plan(base,f.stem)
+        if prior.get('kind')!='launcher_repair':continue
+        if prior.get('prefix')!=str(prefix) and prior.get('launcher')!=str(launcher):continue
+        op=observation(base,prior,'apply_repair')
+        demand(not op or op['final_state']=='passed','UNRESOLVED_REPAIR_OUTCOME_DO_NOT_RETRY')
+
+def repair_project(base,p):
+    out=dict(p);out.update(receipt_directory=str(base/'operations'),rollback_available=False,connected=False,full_cli_acceptance=False)
+    op=observation(base,p,'apply_repair')
+    out['phase']='PREPARED_REPAIR_NOT_APPLIED' if not op else ('LAUNCHER_REPAIR_READBACK_VERIFIED' if op['final_state']=='passed' else 'LAUNCHER_REPAIR_OUTCOME_UNCERTAIN')
+    out['do_not_retry']=bool(op and op['final_state']!='passed')
+    out['recovery_required']=out['do_not_retry']
+    if out['do_not_retry']:
+        out['recovery']={'owner':'canonical_cli_installer','automatic':False,'installer':str(SOURCE/REPAIR_INSTALLER),'node':p['node']['path'],'prefix':p['prefix'],'bin_dir':p['bin_dir'],'original_launcher_sha256':p['original_launcher_sha256'],'instruction':'Review saved OperationJournal and canonical repair intent. Explicit recovery must use this exact canonical installer; do not repeat apply or prepare another plan.'}
+    return out
+
+def prepare_repair(req,base):
+    demand(sys.platform.startswith('linux'),'LAUNCHER_REPAIR_PLATFORM_NOT_QUALIFIED')
+    prefix=safe_path(req['prefix']);bin_dir=safe_path(req['bin_dir']);launcher=bin_dir/'xi-io-cli'
+    demand(len(prefix.parts)>=3 and prefix!=Path.home(),'DEDICATED_DESTINATION_REQUIRED')
+    demand(not(prefix==base or prefix in base.parents or base in prefix.parents),'DESTINATION_EVIDENCE_OVERLAP')
+    demand(not(bin_dir==base or bin_dir in base.parents or base in bin_dir.parents),'LAUNCHER_EVIDENCE_OVERLAP')
+    repair_unresolved(base,prefix,launcher);repair_pending(launcher)
+    source=repair_source();node=repair_node(req['node']);directory=repair_bin(bin_dir);original=repair_launcher(launcher)
+    backup=str(launcher)+'.pre-v1-'+original['sha256'][:12]
+    if os.path.lexists(backup):demand(digest(file_bytes(Path(backup)))==original['sha256'],'LAUNCHER_BACKUP_CONFLICT')
+    p={'kind':'launcher_repair','plan_id':uuid.uuid4().hex,'prefix':str(prefix),'bin_dir':str(bin_dir),'launcher':str(launcher),'backup':backup,'node':node,'repair_source':source,'launcher_directory_before':directory,'launcher_before':original,'original_launcher_sha256':original['sha256'],'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'components':['cli'],'changes':['Repair only the explicitly selected existing CLI launcher with exact PR15 installer','Pin the verified existing Node executable; preserve original launcher in canonical backup'],'limitations':['No runtime download or replacement CLI generation','No pointer, receipt, payload, connection or service changes','Launcher version verification only; not doctor, local-read or complete CLI acceptance','Interrupted outcomes require explicitly reviewed canonical recovery; no automatic retry']}
+    before=repair_snapshot(p);history=repair_history(prefix,node)
+    demand(repair_snapshot(p)==before and repair_launcher(launcher)==original and repair_bin(bin_dir)==directory,'REPAIR_TARGET_CHANGED_DURING_REVIEW')
+    demand(repair_source()==source,'REPAIR_SOURCE_CHANGED_DURING_REVIEW')
+    p['expected_launcher_sha256']=digest(repair_expected_launcher(str(prefix),node['path']))
+    p.update(preservation_before=before,preservation_digest=digest(canonical(before)),preserved_generation=history,payload_files=0,payload_bytes=0)
+    p['approval_digest']=digest(canonical(p));save_plan(base,p)
+    return repair_project(base,p)
+
+def repair_readback(p,expected_launcher_sha):
+    verify_node(p);demand(repair_source()==p['repair_source'],'REPAIR_SOURCE_CHANGED_SINCE_REVIEW')
+    demand(repair_bin(Path(p['bin_dir']))==p['launcher_directory_before'],'LAUNCHER_DIRECTORY_CHANGED_SINCE_REVIEW')
+    repair_pending(Path(p['launcher']))
+    demand(repair_snapshot(p)==p['preservation_before'],'REPAIR_PRESERVATION_DRIFT')
+    history=repair_history(Path(p['prefix']),p['node']);demand(history==p['preserved_generation'],'REPAIR_GENERATION_HISTORY_CHANGED')
+    demand(expected_launcher_sha==p['expected_launcher_sha256'],'CANONICAL_LAUNCHER_DIGEST_UNEXPECTED')
+    demand(file_bytes(Path(p['launcher']))==repair_expected_launcher(p['prefix'],p['node']['path']),'REPAIRED_LAUNCHER_BYTES_UNEXPECTED')
+    launcher=repair_launcher(Path(p['launcher']));demand(launcher['sha256']==expected_launcher_sha,'REPAIRED_LAUNCHER_CHANGED')
+    demand(all(launcher[k]==p['launcher_before'][k] for k in ['mode','uid','gid']),'REPAIRED_LAUNCHER_METADATA_CHANGED')
+    demand(digest(file_bytes(Path(p['backup'])))==p['original_launcher_sha256'],'ORIGINAL_LAUNCHER_BACKUP_CHANGED')
+    actual=json.loads(run([p['launcher'],'version'],30))
+    receipt=history['receipts']['current']
+    legacy=receipt['source_sha'] in {'385c85d53f99ac2f9e6c4fecb6d3c76ee772590d','16d0fb4101d0674f8bd57858ac04d7fabf02aed2'}
+    if legacy:
+        want={'schema':'xiio.cli.version/v1','product':'xi-io: CLI','source_sha':receipt['source_sha'],'ref':receipt['ref'],'generation':history['current'],'current':history['current'],'previous':history['previous'],'platform':sys.platform,'running_file_sha256':receipt['files']['src/xiio.mjs'],'receipt_file_sha256':receipt['files']['src/xiio.mjs']}
+        version_verified=all(actual.get(k)==v for k,v in want.items()) and 'state' not in actual and 'integrity_verified' not in actual
+    else:
+        version_verified=actual.get('state')=='PASS' and actual.get('integrity_verified') is True and actual.get('generation')==history['current']
+    demand(version_verified,'ACTUAL_LAUNCHER_VERSION_NOT_VERIFIED')
+    demand(actual.get('source_sha')==history['receipts']['current']['source_sha'],'ACTUAL_LAUNCHER_SOURCE_MISMATCH')
+    demand(repair_snapshot(p)==p['preservation_before'] and repair_launcher(Path(p['launcher']))==launcher,'REPAIR_READBACK_CONCURRENT_CHANGE')
+    return {'generation':history['current'],'previous':history['previous'],'source_sha':actual['source_sha'],'launcher':p['launcher'],'launcher_sha256':launcher['sha256'],'version_readback':actual,'history_unchanged':True,'actual_launcher_version_verified':True,'doctor_and_local_read_verified':False,'full_cli_acceptance':False}
+
+def repair_uncertain_observation(base,p,view):
+    # Diagnostics only. Never execute the launcher, resolve an intent, amend a
+    # journal, or promote an uncertain operation on the strength of file presence.
+    observed={'effects_authorized':False,'recovery_performed':False,'errors':[]}
+    def check(name,fn):
+        try: observed[name]=fn()
+        except Exception as e: observed['errors'].append({'check':name,'error':str(e)[:512]})
+    check('launcher',lambda:repair_launcher(Path(p['launcher'])))
+    live=observed.get('launcher',{}).get('sha256')
+    observed['launcher_bytes']='ORIGINAL' if live==p['original_launcher_sha256'] else ('EXPECTED_REPAIR' if live==p['expected_launcher_sha256'] else ('DIFFERENT' if live else 'UNOBSERVED'))
+    check('backup_matches_original',lambda:digest(file_bytes(Path(p['backup'])))==p['original_launcher_sha256'])
+    check('generation_history_bytes_unchanged',lambda:repair_snapshot(p)==p['preservation_before'])
+    check('node_bytes_unchanged',lambda:digest(file_bytes(Path(p['node']['path'])))==p['node']['sha256'])
+    check('repair_source_unchanged',lambda:repair_source()==p['repair_source'])
+    check('canonical_artifacts',lambda:sorted(x.name for x in Path(p['launcher']).parent.glob(Path(p['launcher']).name+'.repair-*'))[:64])
+    op=observation(base,p,'apply_repair')
+    observed['recorded_outcome']=op['final_state'] if op else None
+    observed['recorded_failure']=(op['events'][-1].get('details',{}).get('failure') if op else None)
+    return {**view,'uncertain_observation':observed,'observation_current':False,'full_cli_acceptance':False,'do_not_retry':True,'recovery_required':True}
+
+def handle_repair(req,base,p):
+    act=req['action'];view=repair_project(base,p)
+    if act=='inspect':return view
+    if act=='readback':
+        if view['phase']=='PREPARED_REPAIR_NOT_APPLIED':return view
+        if view['do_not_retry']:return repair_uncertain_observation(base,p,view)
+        op=observation(base,p,'apply_repair')
+        rb=repair_readback(p,op['events'][-1]['details'].get('launcher_sha256'))
+        return {**view,'readback':rb,'observation_current':True}
+    demand(act=='apply_repair','REPAIR_PLAN_ACTION_MISMATCH')
+    demand(req.get('approved') is True and req.get('approval_digest')==p['approval_digest'],'EXACT_APPROVAL_REQUIRED')
+    demand(not view['do_not_retry'],'UNCERTAIN_REPAIR_OUTCOME_DO_NOT_RETRY')
+    demand(view['phase']=='PREPARED_REPAIR_NOT_APPLIED','DUPLICATE_REPAIR_REFUSED')
+    repair_unresolved(base,p['prefix'],p['launcher'],p['plan_id'])
+    verify_node(p);demand(repair_source()==p['repair_source'],'REPAIR_SOURCE_CHANGED_SINCE_REVIEW')
+    demand(repair_bin(Path(p['bin_dir']))==p['launcher_directory_before'],'LAUNCHER_DIRECTORY_CHANGED_SINCE_REVIEW')
+    repair_pending(Path(p['launcher']))
+    demand(repair_launcher(Path(p['launcher']))==p['launcher_before'],'LAUNCHER_CHANGED_SINCE_REVIEW')
+    demand(repair_snapshot(p)==p['preservation_before'],'REPAIR_PRESERVATION_CHANGED_SINCE_REVIEW')
+    demand(repair_history(Path(p['prefix']),p['node'])==p['preserved_generation'],'REPAIR_HISTORY_CHANGED_SINCE_REVIEW')
+    if os.path.lexists(p['backup']):demand(digest(file_bytes(Path(p['backup'])))==p['original_launcher_sha256'],'LAUNCHER_BACKUP_CONFLICT')
+    journal=OperationJournal('native-cli-installer','apply_repair',operation_id=p['plan_id']+'-apply_repair',correlation_id=p['plan_id'],root=base)
+    journal.start('Repair only exact reviewed existing CLI launcher',details={'approval_digest':p['approval_digest'],'repair_source_sha256':REPAIR_SHA256,'preservation_digest':p['preservation_digest']})
+    try:
+        # Sole mutation owner. No --ref/--packaged-source, fetch or generation
+        # staging path is reachable. The exact installer owns backup and recovery.
+        # No adapter deadline may kill this consequential child at a durable
+        # transaction boundary. The carrier bounds response waiting, retains
+        # process custody/gating, and leaves this owner to record the outcome.
+        result=json.loads(run([p['node']['path'],str(SOURCE/REPAIR_INSTALLER),'--repair-launcher','--prefix',p['prefix'],'--bin-dir',p['bin_dir'],'--expect-launcher-sha256',p['original_launcher_sha256']],None))
+        demand(result.get('schema')=='xiio.cli.launcher-repair/v1' and result.get('state')=='LAUNCHER_VERSION_VERIFIED' and result.get('history_unchanged') is True and result.get('actual_launcher_version_verified') is True,'CANONICAL_REPAIR_NOT_VERIFIED')
+        demand(result.get('generation')==p['preserved_generation']['current'] and result.get('previous')==p['preserved_generation']['previous'] and result.get('previous_launcher_sha256')==p['original_launcher_sha256'] and result.get('backup')==p['backup'],'CANONICAL_REPAIR_RESULT_MISMATCH')
+        rb=repair_readback(p,result.get('launcher_sha256'))
+        journal.finish('passed','Actual launcher version verified; complete prefix history preserved',expected_action='apply_repair',details={'approval_digest':p['approval_digest'],'launcher_sha256':rb['launcher_sha256'],'preservation_digest':p['preservation_digest'],'generation':rb['generation'],'repair_source_sha256':REPAIR_SHA256})
+        return {**repair_project(base,p),'readback':rb,'observation_current':True}
+    except Exception as error:
+        try:journal.finish('unknown','Launcher repair execution or readback uncertain; canonical recovery requires review',expected_action='apply_repair',details={'approval_digest':p['approval_digest'],'repair_source_sha256':REPAIR_SHA256,'failure':str(error)[:2048]})
+        except Exception:pass
+        raise Refused('REPAIR_OUTCOME_UNCERTAIN_CANONICAL_RECOVERY_REQUIRED_DO_NOT_RETRY')
+
 def handle(req):
     demand(isinstance(req,dict),'REQUEST_OBJECT_REQUIRED')
-    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
+    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
     act=req.get('action');demand(act in allowed and set(req)<=allowed[act],'REQUEST_FIELDS_INVALID')
     base=root();lock=base/'native-adapter.lock'
     fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
@@ -153,7 +350,8 @@ def handle(req):
             for f in sorted((base/'native-plans').glob('*.json'))[-20:]:
                 try: plans.append(project(base,load_plan(base,f.stem)))
                 except Exception: plans.append({'plan_id':f.stem,'phase':'EVIDENCE_UNREADABLE_DO_NOT_RETRY','do_not_retry':True})
-            return {'plans':plans,'component_availability':AVAILABILITY,'supported_components':AVAILABILITY,'prefix_suggestion':str(Path.home()/'.local/share/xi-io/cli-v1'),**observed_preflight()}
+            return {'plans':plans,'component_availability':AVAILABILITY,'supported_components':AVAILABILITY,'prefix_suggestion':str(Path.home()/'.local/share/xi-io/cli-v1'),'bin_dir_suggestion':str(Path.home()/'.local/bin'),**observed_preflight()}
+        if act=='prepare_repair':return prepare_repair(req,base)
         if act=='prepare':
             demand(req.get('components')==['cli'],'ONLY_QUALIFIED_CLI_COMPONENT_AVAILABLE')
             prefix=safe_path(req['prefix']);demand(len(prefix.parts)>=3 and prefix!=Path.home(),'DEDICATED_DESTINATION_REQUIRED')
@@ -176,6 +374,8 @@ def handle(req):
             p['approval_digest']=digest(canonical(p));save_plan(base,p)
             return project(base,p)
         p=load_plan(base,req.get('plan_id'));view=project(base,p)
+        if p.get('kind')=='launcher_repair':return handle_repair(req,base,p)
+        demand(act!='apply_repair','INSTALL_PLAN_ACTION_MISMATCH')
         if act=='inspect': return view
         if act=='safe_task_inspect':return local_step_actions.handle(req,base,p,None)
         if act in ['local_ai_status','safe_task_prepare','safe_task_apply']:

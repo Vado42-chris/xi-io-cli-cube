@@ -1,0 +1,57 @@
+{
+  "schema": "xiio.hex.hotpatch-qualification/v1",
+  "package_version": "0.1.0-dev.8",
+  "package_sha256": "0b2a8f30f34c9883ee8eee80b60001b91f7160945698bbfbe2004e68b11441e0",
+  "package_bytes": 6668934,
+  "cli_consumer_ref": "aff03d8181afce44602e3a35d732736bdef6f5d2",
+  "cli_consumer_sha256": "108fb492d32a9538ccf2c4c64eebcd67c7f1b76810a9a3ede9019c88355e5485",
+  "launcher_repair_ref": "0f2b444abbe8f7a99c5f4520b1222c568eba6dd1",
+  "launcher_repair_sha256": "61fd09c0d0de09fb2b3aec4e94b34d013cd35ddc60eb44f86443a5d2b5812a4d",
+  "offline_installer_sha256": "6311b606049f07d35bc31e78f73218a95a114d3723c9f8b97bcb8f3262d8d5a6",
+  "adapter_sha256": "4d200d42f653706d138af3a4eba587dff28c98e9f7a7285cf90a2c34efd32794",
+  "package_resources": {
+    "exact_source_matches": 39,
+    "pyc_files": 0
+  },
+  "executed_checks": {
+    "cli_end_to_end": 155,
+    "cli_result_shapes": 132,
+    "independent_original_response_cases": 35,
+    "independent_git_cases": 2,
+    "legacy_repair_cases": 14,
+    "adapter_legacy_cases": 10,
+    "uncertain_observation_cases": 6,
+    "adapter_suite": 36,
+    "ui_interaction": 16,
+    "ui_bindings": 26,
+    "ui_focused": 11,
+    "rust_transport": 11
+  },
+  "counts_note": "Suites overlap; no summed unique coverage or product acceptance asserted. Fixtures are isolated; model responses instrumented.",
+  "physical_cloud_observations": {
+    "native_package_opened": true,
+    "light_dark_switch": true,
+    "native_widths": [
+      1188,
+      1440
+    ],
+    "browser_widths": [
+      1180,
+      640
+    ],
+    "pager_css_px": [
+      44,
+      44
+    ],
+    "horizontal_overflow_640": false,
+    "narrow_tauri_resize": "NOT_QUALIFIED"
+  },
+  "owner_acceptance": {
+    "aries_dev8": "NOT_INSTALLED",
+    "local_model_workflow": "NOT_QUALIFIED",
+    "remote_connection": "NOT_VERIFIED",
+    "complete_oct25_section_interactions": "UNRECOVERED_NOT_CLAIMED",
+    "studio_settings_sync": "NOT_IMPLEMENTED"
+  },
+  "concierge": "Separate orchestration invokes existing guarded APT bootstrap and unchanged offline installer; fresh CLI update approval required. No new runtime/service/credentials/model downloads."
+}
