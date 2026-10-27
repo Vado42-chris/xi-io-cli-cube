@@ -111,7 +111,7 @@ export default function NativeInstallerPanel() {
               : coreBundle.state === 'INSTALLED_BYTES_VERIFIED' || coreBundle.phase === 'INSTALLED_BYTES_VERIFIED'
                 ? 'Verified child bytes installed. Service startup, authentication and two-way device connection are not yet proven.'
                 : 'Installation result requires review.'}</p>}
-      {coreBundle?.phase === 'REVIEW_REQUIRED' && !coreUnknown && <>
+      {['REVIEW_REQUIRED', 'RECONCILED_NOT_INSTALLED'].includes(coreBundle?.phase) && !coreUnknown && <>
         <p className="text-xs font-mono break-all text-workspace-text">Release manifest SHA-256: {coreBundle.lock_sha256}</p>
         <label className="text-xs text-workspace-text block"><input type="checkbox" disabled={busy}
           checked={coreApproved} onChange={e => setCoreApproved(e.target.checked)} /> I approve these exact child artifacts and XDG installations.</label>
