@@ -78,7 +78,7 @@ export default function NativeInstallerPanel() {
     try {
       const result = await client(request);
       setCoreBundle(result);
-      if (effect && result?.state === 'INSTALLED_BYTES_VERIFIED') setCoreUnknown(false);
+      setCoreUnknown(result?.do_not_retry === true ? true : effect && result?.state !== 'INSTALLED_BYTES_VERIFIED');
     } catch (error) {
       setCoreError(String(error instanceof Error ? error.message : error));
     } finally {busyRef.current = false; setBusy(false);}
@@ -104,9 +104,13 @@ export default function NativeInstallerPanel() {
         ? 'Core installer is blocked: qualified release package manifest is not yet shipped. No files were installed.'
         : coreBundle.phase === 'REVIEW_REQUIRED'
           ? 'All six core manifest roles are present. Review the exact release digest before installing; operation and connectivity still require independent qualification.'
-          : coreBundle.state === 'INSTALLED_BYTES_VERIFIED'
-            ? 'Verified child bytes installed. Service startup, authentication and two-way device connection are not yet proven.'
-            : 'Installation result requires review.'}</p>}
+          : coreBundle.phase === 'RECONCILED_NOT_INSTALLED'
+            ? 'A prior attempt is durably reconciled as not installed. A fresh exact approval may be attempted.'
+            : coreBundle.phase === 'APPLY_OUTCOME_UNCERTAIN'
+              ? 'A prior core install has unreconciled receipts or destination bytes. Retry is blocked until exact readback is clean.'
+              : coreBundle.state === 'INSTALLED_BYTES_VERIFIED' || coreBundle.phase === 'INSTALLED_BYTES_VERIFIED'
+                ? 'Verified child bytes installed. Service startup, authentication and two-way device connection are not yet proven.'
+                : 'Installation result requires review.'}</p>}
       {coreBundle?.phase === 'REVIEW_REQUIRED' && !coreUnknown && <>
         <p className="text-xs font-mono break-all text-workspace-text">Release manifest SHA-256: {coreBundle.lock_sha256}</p>
         <label className="text-xs text-workspace-text block"><input type="checkbox" disabled={busy}
