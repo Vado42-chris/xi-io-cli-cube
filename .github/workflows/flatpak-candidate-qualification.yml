@@ -1,0 +1,148 @@
+name: HEX Flatpak candidate native build and install
+on:
+  pull_request:
+    paths:
+      - 'packaging/flatpak/**'
+      - 'native/hex/carrier/**'
+      - 'native/hex/adapter/**'
+      - 'native/hex/cli-source/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/native-package.mjs'
+      - 'scripts/build-flatpak.sh'
+      - 'tests/flatpak-builder-admission.test.mjs'
+      - '.github/workflows/flatpak-candidate-qualification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  flatpak-native-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact product carrier and build manifests
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Use pinned Node 24.22.1
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Verify exact npm package-lock custody
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install actual Flatpak Linux build prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder imagemagick xvfb xdotool dbus-x11 build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf
+          flatpak --version
+          flatpak-builder --version
+          # Ubuntu 22.04 builder 1.2.x attempts removed appstream-compose
+          # inside GNOME50. Builder >=1.4 uses appstreamcli and preserves
+          # metadata validation; never bypass appstream-compose.
+          python3 -c 'import subprocess,re; raw=subprocess.check_output(["flatpak-builder","--version"],text=True); m=re.search(r"([0-9]+)[.]([0-9]+)",raw); assert m and (int(m[1]),int(m[2])) >= (1,4), "FLATPAK_BUILDER_1_4_REQUIRED"'
+      - name: Pin current Rust compiler for exact Cargo.lock native build
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+          rustc --version
+          cargo --version
+      - name: Materialize referenced GNOME 50 SDK and runtime
+        run: |
+          set -euo pipefail
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
+      - name: Build the existing native Flatpak candidate, without fallback
+        run: |
+          set -euo pipefail
+          bash scripts/build-flatpak.sh
+          test -s dist/flatpak/com.xiio.hex.flatpak
+          test ! -e packaging/flatpak/.xiio-hex-fresh-carrier
+          test ! -e packaging/flatpak/.xiio-hex-source-provenance.json
+          test ! -e packaging/flatpak/.xiio-hex-icon-512.png
+          stat -c 'FLATPAK_ACTUAL_BYTES=%s' dist/flatpak/com.xiio.hex.flatpak
+          sha256sum dist/flatpak/com.xiio.hex.flatpak
+      - name: Install the actual built bundle, then independently inspect it
+        run: |
+          set -euo pipefail
+          flatpak install --user -y --noninteractive dist/flatpak/com.xiio.hex.flatpak
+          flatpak info --user com.xiio.hex
+          flatpak run --user --command=sh com.xiio.hex -c 'test -x /app/bin/xi-io-hex-dev && test -f "/app/lib/xi-io-hex/adapter/installer_adapter.py"'
+          # Library closure is independent of presence of an executable bit.
+          # A missing WebKit/GTK/JSCore dependency is a typed first red, not a built app.
+          flatpak run --user --command=sh com.xiio.hex -c 'set -e; ldd /app/bin/xi-io-hex-dev > /tmp/xiio-hex-ldd.txt || exit 72; cat /tmp/xiio-hex-ldd.txt; if grep -q "not found" /tmp/xiio-hex-ldd.txt; then echo "FLATPAK_ELF_DEPENDENCY_UNRESOLVED"; exit 72; fi'
+          echo "INSTALLED_FLATPAK_ELF_AND_ADAPTER_READBACK_PASS_NOT_PHYSICAL_POP_OS"
+      - name: Validate fresh source proof in installed carrier and bounded Python adapter
+        run: |
+          set -euo pipefail
+          flatpak run --user --command=sh com.xiio.hex -c 'test -s /app/share/xi-io-hex/source-provenance.json && test -x /app/bin/xi-io-hex-dev'
+          export EXPECTED_SOURCE_COMMIT="$(git rev-parse --verify HEAD)"
+          export EXPECTED_CARGO_LOCK_SHA="$(sha256sum native/hex/carrier/src-tauri/Cargo.lock | cut -d' ' -f1)"
+          flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B -c 'import json,pathlib,sys; p=json.loads(pathlib.Path("/app/share/xi-io-hex/source-provenance.json").read_text()); assert p["schema"]=="xiio.flatpak.native-source-provenance/v1"; assert p["historical_dev9_elf_used"] is False; assert p["source_commit"]==sys.argv[1]; assert p["cargo_lock_sha256"]==sys.argv[2]; assert len(p["native_elf_sha256"])==64 and len(p["native_elf_build_id"])>=32; print("FRESH_NATIVE_ELF_PROVENANCE_SOURCE_BINDING_PASS")' "$EXPECTED_SOURCE_COMMIT" "$EXPECTED_CARGO_LOCK_SHA"
+          INSTALL_LOCATION="$(flatpak info --user --show-location com.xiio.hex)"
+          test -f "$INSTALL_LOCATION/files/bin/xi-io-hex-dev"
+          INSTALLED_BUILD_ID="$(readelf -n "$INSTALL_LOCATION/files/bin/xi-io-hex-dev" | awk '/Build ID:/{print $3; exit}')"
+          EXPECTED_BUILD_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_elf_build_id"])' "$INSTALL_LOCATION/files/share/xi-io-hex/source-provenance.json")"
+          test -n "$INSTALLED_BUILD_ID"
+          test "$INSTALLED_BUILD_ID" = "$EXPECTED_BUILD_ID"
+          echo "EXACT_SOURCE_TO_INSTALLED_STRIPPED_ELF_BUILD_ID_PASS:$INSTALLED_BUILD_ID"
+          flatpak run --user --command=sh com.xiio.hex -c 'test -n "$HOME" && test -d "$HOME"'
+          # No adapter was invoked so far. A native-IPC-produced file must be
+          # absent BEFORE the GUI, otherwise the window test is contaminated.
+          flatpak run --user --command=sh com.xiio.hex -c 'test ! -e "${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}/xi-io/installer/native-adapter.lock"'
+      - name: Launch actual installed HEX native window under disposable Xvfb
+        run: |
+          set -euo pipefail
+          dbus-run-session -- xvfb-run -a bash -c '
+            set -euo pipefail
+            flatpak run --user com.xiio.hex > hex-window.log 2>&1 &
+            app_pid=$!
+            trap "kill $app_pid 2>/dev/null || true; wait $app_pid 2>/dev/null || true" EXIT
+            found=0
+            for attempt in $(seq 1 30); do
+              if xdotool search --onlyvisible --name "XI-IO HEX" >/dev/null 2>&1; then
+                found=1
+                break
+              fi
+              if ! kill -0 "$app_pid" 2>/dev/null; then
+                cat hex-window.log
+                echo HEX_NATIVE_WINDOW_EXITED_BEFORE_VISIBLE
+                exit 81
+              fi
+              sleep 1
+            done
+            if [ "$found" != 1 ]; then
+              cat hex-window.log
+              echo HEX_NATIVE_WINDOW_NOT_OBSERVED
+              exit 82
+            fi
+            echo HEX_INSTALLED_WINDOW_VISIBLE_ON_DISPOSABLE_LINUX
+            # Default guided first page mounts SetupPackageDisclosure, which
+            # invokes installer_request(inspect) through Tauri's native IPC.
+            # The Python adapter creates native-adapter.lock. This must be an
+            # independently observed effect, not our direct Python fixture.
+            ipc=0
+            for attempt in $(seq 1 15); do
+              if flatpak run --user --command=sh com.xiio.hex -c '\''test -f "${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}/xi-io/installer/native-adapter.lock"'\''; then
+                ipc=1; break
+              fi
+              sleep 1
+            done
+            if [ "$ipc" != 1 ]; then
+              cat hex-window.log
+              echo HEX_NATIVE_WINDOW_IPC_INSPECT_NOT_OBSERVED
+              exit 83
+            fi
+            echo HEX_TAURI_IPC_AUTO_INSPECT_NATIVE_PYTHON_LOCK_OBSERVED
+          '
+          # Independently call installed Python adapter only after the native
+          # window has produced the same state file via Tauri IPC.
+          echo '{"action":"inspect"}' | flatpak run --user --command=sh com.xiio.hex -c 'XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}"; export XDG_STATE_HOME; exec /usr/bin/python3 -I -B /app/lib/xi-io-hex/adapter/installer_adapter.py' > sandbox-inspect.json
+          python3 -c 'import json; r=json.load(open("sandbox-inspect.json")); assert r.get("ok") is True and isinstance(r.get("result"),dict); print("NATIVE_PYTHON_ADAPTER_INSPECT_READBACK_PASS")'
+          echo "NATIVE_GUI_IPC_AND_ADAPTER_READBACK_PASS_NOT_ARIES_LOKI"
+
+      - name: Publish inspectable exact candidate artifact, never claim an approved release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hex-flatpak-native-candidate-${{ github.sha }}
+          path: dist/flatpak/com.xiio.hex.flatpak
+          if-no-files-found: error

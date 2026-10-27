@@ -70,13 +70,13 @@ flatpak run com.xiio.hex
 
 ## 4. Runtime Dependencies & Offline Availability
 
-* **Base Runtime:** `org.gnome.Platform//46` and `org.gnome.Sdk//46`.
-  * **Why GNOME 46?** Tauri v2 dynamically links against `libwebkit2gtk-4.1.so.0`, `libsoup-3.0.so.0`, `libgtk-3.so.0`, and Python 3.10+. `org.gnome.Platform` supplies all four dependencies natively inside the sandbox without bundling redundant binary shared objects.
-* **Online Systems:** If the GNOME 46 runtime is not present, Flatpak prompts to automatically install it from Flathub during `flatpak install`.
+* **Base Runtime:** `org.gnome.Platform//50` and `org.gnome.Sdk//50`.
+  * **Why GNOME 50?** Tauri v2 dynamically links against `libwebkit2gtk-4.1.so.0`, `libsoup-3.0.so.0`, `libgtk-3.so.0`, and Python 3.10+. `org.gnome.Platform` supplies all four dependencies natively inside the sandbox without bundling redundant binary shared objects.
+* **Online Systems:** If the GNOME 50 runtime is not present, Flatpak prompts to automatically install it from Flathub during `flatpak install`.
 * **Airgapped / Strict Offline Qualification:** For offline Pop!_OS hosts, the runtime can be pre-cached or exported as a standalone bundle:
   ```bash
-  flatpak build-bundle --runtime /var/lib/flatpak/repo org.gnome.Platform-46.flatpak org.gnome.Platform 46
-  flatpak install --user org.gnome.Platform-46.flatpak
+  flatpak build-bundle --runtime /var/lib/flatpak/repo org.gnome.Platform-50.flatpak org.gnome.Platform 50
+  flatpak install --user org.gnome.Platform-50.flatpak
   ```
 
 ---
@@ -88,10 +88,10 @@ Broad `--filesystem=home` is explicitly avoided. Sandboxed permissions are stric
 | Permission | Purpose |
 | :--- | :--- |
 | `--filesystem=xdg-data/xi-io:create` | Dedicated local product storage (`~/.local/share/xi-io/`) |
-| `--filesystem=xdg-state/xi-io:create` | Pinned state and receipt storage (`~/.local/state/xi-io/`) |
+| (app-private `~/.var/app/com.xiio.hex/state`; no unsupported `xdg-state` Flatpak grant) | Pinned state and receipt storage (`~/.local/state/xi-io/`) |
 | `--filesystem=xdg-config/xi-io:create` | Device identity and non-secret config (`~/.config/xi-io/`) |
 | `--filesystem=xdg-cache/xi-io:create` | Temporary download cache (`~/.cache/xi-io/`) |
-| `--filesystem=~/.local/bin:create` | Installation target for CLI symlink launchers |
+| Host `~/.local/bin` | **Not granted to the Flatpak**; host CLI launchers belong to the separate Debian/CLI installer |
 | `--talk-name=org.freedesktop.portal.FileChooser` | Scoped, user-approved directory access via native portal |
 | `--socket=fallback-x11`, `--socket=wayland` | Pop!_OS desktop window rendering (X11 & COSMIC/Wayland) |
 | `--device=dri` | GPU rendering acceleration |
@@ -129,3 +129,18 @@ flatpak update com.xiio.hex
 flatpak uninstall --user com.xiio.hex
 ```
 
+
+## Release qualification status
+
+The historical DEV9 .deb and its ELF are not a current Flatpak carrier. A current
+Flatpak build must compile the native Tauri source and embedded frontend using
+`Cargo.lock` from its exact Git generation, then package the resulting binary
+with `/app/share/xi-io-hex/source-provenance.json`. The actual installed GUI,
+Python adapter, workspace XDG directories, restart, rollback and user-visible
+readback must pass independently on disposable Linux before any release.
+
+Flatpak's sandbox does not grant access to host `~/.local/bin`, and must not be used to promise a host-native `xi-io-cli` launcher.
+That remains the Debian/CLI owner's delivery contract. The single-file Flatpak
+bundle does not contain the GNOME 50 runtime; preprovision it for offline use.
+Do not advertise the example remote or repository descriptors until its signed,
+reachable provider deployment is independently verified.
