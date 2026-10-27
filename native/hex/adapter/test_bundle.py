@@ -157,6 +157,27 @@ class BundleTests(unittest.TestCase):
         with self.assertRaisesRegex(BundleError, "BUNDLE_BASELINE_REQUIRED_PRODUCT_MISSING"):
             load_bundle_profile(lock)
 
+    def test_all_six_required_roles_run_exact_kernel_in_synthetic_release(self):
+        # Production-shaped manifest graph with synthetic fixture bytes.
+        # No real child release, runnable service or Ward authority is claimed.
+        f = self.fixture()
+        roles = ("cli", "ibal", "switchboard", "bins", "ward", "inbox")
+        for role in roles:
+            f.child(role, depends_on=("cli",) if role != "cli" else (),
+                    fixture=False)
+        lock, digest = f.lock(fixture=False)
+        view = load_bundle_profile(lock)
+        self.assertEqual(set(view["ordered_roles"]), set(roles))
+        result = install_bundle(lock, approved_lock_sha256=digest,
+                                env=f.env, fetch=f.fetch)
+        self.assertEqual(result["receipt_count"], 6)
+        self.assertEqual(set(result["roles"]), set(roles))
+        self.assertFalse(result["device_connected"])
+        self.assertFalse(result["runtime_qualified"])
+        for role in roles:
+            file = Path(f.env["XDG_DATA_HOME"]) / ("xi-io/" + role + "/" + role + ".bin")
+            self.assertEqual(file.read_bytes(), (role + " delivered\n").encode())
+
     def test_duplicate_destinations_rejected(self):
         f = self.fixture()
         f.child("cli", destination="xi-io/shared/common.bin")
