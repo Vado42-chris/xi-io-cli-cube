@@ -4,6 +4,10 @@ use std::path::{Component, Path};
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "action", rename_all = "lowercase", deny_unknown_fields)]
 pub enum InstallerRequest {
+    #[serde(rename = "bundle_inspect")]
+    BundleInspect {},
+    #[serde(rename = "bundle_apply")]
+    BundleApply { lock_sha256: String, approved: bool },
     #[serde(rename = "local_ai_status")]
     LocalAiStatus { plan_id: String },
     #[serde(rename = "safe_task_inspect")]
@@ -34,6 +38,8 @@ fn absolute(s: &str) -> bool {
 impl InstallerRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
         let valid = match self {
+            Self::BundleInspect {} => true,
+            Self::BundleApply { lock_sha256, approved } => *approved && lower_hex(lock_sha256, 64),
             Self::LocalAiStatus { plan_id } | Self::SafeTaskInspect { plan_id } => id(plan_id),
             Self::SafeTaskPrepare { plan_id, workspace } => id(plan_id) && absolute(workspace),
             Self::SafeTaskApply { plan_id, proof_id, approval_digest, approved } =>
@@ -93,6 +99,15 @@ mod tests {
         let mut a=serde_json::json!({"action":"apply_repair","plan_id":"a".repeat(32),"approval_digest":"b".repeat(64),"approved":true});
         assert!(valid(&a.to_string())); a["approved"]=false.into(); assert!(!valid(&a.to_string()));
         a["approved"]=true.into(); a["approval_digest"]="stale".into(); assert!(!valid(&a.to_string()));
+    }
+    #[test] fn core_bundle_request_is_explicitly_approved_and_bounded() {
+        assert!(valid(r#"{"action":"bundle_inspect"}"#));
+        assert!(!valid(r#"{"action":"bundle_inspect","url":"http://localhost:8798"}"#));
+        let mut v=serde_json::json!({"action":"bundle_apply","lock_sha256":"a".repeat(64),"approved":true});
+        assert!(valid(&v.to_string()));
+        v["approved"]=false.into();assert!(!valid(&v.to_string()));v["approved"]=true.into();
+        v["lock_sha256"]="sha256:abc".into();assert!(!valid(&v.to_string()));v["lock_sha256"]="a".repeat(64).into();
+        v["url"]="http://localhost".into();assert!(!valid(&v.to_string()));
     }
     #[test] fn approval_is_explicit_and_bound() {
         let mut value=serde_json::json!({"action":"apply","plan_id":"plan-1","approval_digest":"a".repeat(64),"approved":true});

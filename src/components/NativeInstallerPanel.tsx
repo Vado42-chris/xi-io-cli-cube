@@ -5,7 +5,7 @@ import {selectNativeDirectory} from '../lib/nativeDirectory.mjs';
 import {availabilityFrom, availableSelection, canPrepareComponents, canRollbackPlan, installerComponents} from '../lib/installerAvailability.mjs';
 
 type Plan = {plan_id: string; phase: string; prefix?: string; components?: string[]; approval_digest?: string; payload_files?: number; payload_bytes?: number; created_at?: string; [key: string]: any};
-type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true};
+type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true} | {action: 'bundle_inspect'} | {action: 'bundle_apply'; lock_sha256: string; approved: true};
 
 /** Local native controls within the accepted Cube design, not another launcher. */
 export default function NativeInstallerPanel() {
@@ -20,6 +20,11 @@ export default function NativeInstallerPanel() {
   const [components, setComponents] = useState<string[]>([]);
   const [availability, setAvailability] = useState(() => availabilityFrom(null));
   const [history, setHistory] = useState<Plan[]>([]);
+  const [coreBundle, setCoreBundle] = useState<any>(null);
+  const [coreApproved, setCoreApproved] = useState(false);
+  const [coreUnknown, setCoreUnknown] = useState(false);
+  const [coreError, setCoreError] = useState('');
+
   const [preflight, setPreflight] = useState<any>(null);
   async function chooseInstallationFolder() {
     try {
@@ -65,6 +70,19 @@ export default function NativeInstallerPanel() {
       if (effect || request.action === 'readback') setObserved(false);
     } finally {busyRef.current = false; setBusy(false);}
   }
+  async function coreRequest(request: Extract<Request, {action:'bundle_inspect'|'bundle_apply'}>) {
+    if (busyRef.current || (coreUnknown && request.action === 'bundle_apply')) return;
+    busyRef.current = true; setBusy(true); setCoreError('');
+    const effect = request.action === 'bundle_apply';
+    if (effect) {setCoreUnknown(true); setCoreApproved(false);}
+    try {
+      const result = await client(request);
+      setCoreBundle(result);
+      setCoreUnknown(result?.do_not_retry === true ? true : effect && result?.state !== 'INSTALLED_BYTES_VERIFIED');
+    } catch (error) {
+      setCoreError(String(error instanceof Error ? error.message : error));
+    } finally {busyRef.current = false; setBusy(false);}
+  }
   useEffect(() => {if (native) void run({action: 'inspect'}, false);}, []);
   function edit() {setPlan(null); setObserved(false); setApproval(false); setRollbackApproval(false);}
   const status = installerStatus(plan, observed);
@@ -77,6 +95,34 @@ export default function NativeInstallerPanel() {
   return <section aria-label="Native HEX installer" className="hex-installer-panel space-y-4 p-5 rounded-none border border-workspace-border-strong/40 bg-workspace-canvas">
     <div><h3 className="font-bold text-workspace-text">Install on this computer</h3>
       <p className="text-sm text-workspace-muted">Local Linux candidate · Available packaged components only · No sign-in required</p></div>
+    <div className="space-y-2 border border-workspace-border-strong/40 p-3" aria-label="XI-IO core baseline">
+      <h4 className="font-semibold text-workspace-text">XI-IO core baseline</h4>
+      <p className="text-xs text-workspace-muted">CLI, @ibal, Ward, Switchboard, BINS and Inbox. Automatic XDG locations; no computer address or installation folder required. Exact release packages must be published before installation can be enabled.</p>
+      {native && <button className={button} disabled={busy}
+        onClick={() => {setCoreApproved(false);void coreRequest({action:'bundle_inspect'});}}>Check core package availability</button>}
+      {coreBundle && <p role="status" className="text-xs text-workspace-text">{coreBundle.phase === 'BLOCKED_RELEASE_PROFILE_UNPUBLISHED'
+        ? 'Core installer is blocked: qualified release package manifest is not yet shipped. No files were installed.'
+        : coreBundle.phase === 'REVIEW_REQUIRED'
+          ? 'All six core manifest roles are present. Review the exact release digest before installing; operation and connectivity still require independent qualification.'
+          : coreBundle.phase === 'RECONCILED_NOT_INSTALLED'
+            ? 'A prior attempt is durably reconciled as not installed. A fresh exact approval may be attempted.'
+            : coreBundle.phase === 'APPLY_IN_PROGRESS'
+              ? 'Another core install currently holds cross-process custody. Read-only inspection remains available; a second apply is blocked.'
+              : coreBundle.phase === 'APPLY_OUTCOME_UNCERTAIN'
+                ? 'A prior core install has unreconciled receipts or destination bytes. Retry is blocked until exact readback is clean.'
+                : coreBundle.state === 'INSTALLED_BYTES_VERIFIED' || coreBundle.phase === 'INSTALLED_BYTES_VERIFIED'
+                ? 'Verified child bytes installed. Service startup, authentication and two-way device connection are not yet proven.'
+                : 'Installation result requires review.'}</p>}
+      {['REVIEW_REQUIRED', 'RECONCILED_NOT_INSTALLED'].includes(coreBundle?.phase) && !coreUnknown && <>
+        <p className="text-xs font-mono break-all text-workspace-text">Release manifest SHA-256: {coreBundle.lock_sha256}</p>
+        <label className="text-xs text-workspace-text block"><input type="checkbox" disabled={busy}
+          checked={coreApproved} onChange={e => setCoreApproved(e.target.checked)} /> I approve these exact child artifacts and XDG installations.</label>
+        <button className={button} disabled={busy || !coreApproved}
+          onClick={() => void coreRequest({action:'bundle_apply',lock_sha256:coreBundle.lock_sha256,approved:true})}>Install approved core products</button>
+      </>}
+      {coreUnknown && <p role="alert" className="text-xs text-workspace-danger">Core installation outcome may be uncertain. Do not retry until exact installed receipts are reconciled.</p>}
+      {coreError && <p role="alert" className="text-xs text-workspace-danger">{coreError}</p>}
+    </div>
     {!native ? <p role="status" className="text-sm text-workspace-focus">Native HEX is required. This browser preview cannot inspect, install or roll back files. The guides below are not proof of an installation.</p> : <>
       <p className="text-xs text-workspace-muted">Requires system Python 3.10+, bash and your selected Node 22.13+. Preparing a plan runs that Node executable to check its identity/version, but does not install the payload. Choose the intended installation folder on this computer.</p>
       <label className="block text-sm text-workspace-text"><input type="checkbox" checked={repairMode} disabled={busy || unknown} onChange={e => {edit(); setRepairMode(e.target.checked);}} /> Repair only the existing CLI launcher. Keep the installed runtime and generations.</label>
