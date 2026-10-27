@@ -91,7 +91,7 @@ Broad `--filesystem=home` is explicitly avoided. Sandboxed permissions are stric
 | (app-private `~/.var/app/com.xiio.hex/state`; no unsupported `xdg-state` Flatpak grant) | Pinned state and receipt storage (`~/.local/state/xi-io/`) |
 | `--filesystem=xdg-config/xi-io:create` | Device identity and non-secret config (`~/.config/xi-io/`) |
 | `--filesystem=xdg-cache/xi-io:create` | Temporary download cache (`~/.cache/xi-io/`) |
-| `--filesystem=~/.local/bin:create` | Installation target for CLI symlink launchers |
+| Host `~/.local/bin` | **Not granted to the Flatpak**; host CLI launchers belong to the separate Debian/CLI installer |
 | `--talk-name=org.freedesktop.portal.FileChooser` | Scoped, user-approved directory access via native portal |
 | `--socket=fallback-x11`, `--socket=wayland` | Pop!_OS desktop window rendering (X11 & COSMIC/Wayland) |
 | `--device=dri` | GPU rendering acceleration |
@@ -139,7 +139,7 @@ with `/app/share/xi-io-hex/source-provenance.json`. The actual installed GUI,
 Python adapter, workspace XDG directories, restart, rollback and user-visible
 readback must pass independently on disposable Linux before any release.
 
-Flatpak's sandbox must not be used to promise a host-native `xi-io-cli` launcher.
+Flatpak's sandbox does not grant access to host `~/.local/bin`, and must not be used to promise a host-native `xi-io-cli` launcher.
 That remains the Debian/CLI owner's delivery contract. The single-file Flatpak
 bundle does not contain the GNOME 50 runtime; preprovision it for offline use.
 Do not advertise the example remote or repository descriptors until its signed,
