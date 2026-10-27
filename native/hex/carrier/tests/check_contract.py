@@ -4,7 +4,7 @@ class Contract(unittest.TestCase):
  def test_local_only(self):
   s=(root/'src-tauri/src/lib.rs').read_text();self.assertIn('WebviewUrl::App',s);self.assertNotIn('WebviewUrl::External',s);self.assertIn('on_navigation',s)
  def test_fixed_python_no_shell(self):
-  s=(root/'src-tauri/src/transport.rs').read_text();self.assertIn('Command::new("/usr/bin/python3")',s);self.assertIn('cmd.arg("-I").arg("-B").arg(&adapter)',s);self.assertIn('.env_clear()',s);self.assertNotIn('.kill(',s);self.assertNotIn('Command::new("sh")',s);self.assertIn('try_lock()',s)
+  s=(root/'src-tauri/src/transport.rs').read_text();self.assertIn('let mut cmd = Command::new("/usr/bin/python3");',s);self.assertIn('cmd.arg("-I").arg("-B").arg(&adapter);',s);self.assertIn('.env_clear()',s);self.assertNotIn('.kill(',s);self.assertNotIn('Command::new("sh")',s);self.assertIn('try_lock()',s)
  def test_permissions(self):
   c=json.loads((root/'src-tauri/capabilities/hex-local.json').read_text());self.assertNotIn('remote',c);self.assertEqual(c['permissions'],[])
   c=json.loads((root/'src-tauri/tauri.conf.json').read_text());self.assertTrue(c['bundle']['active']);self.assertNotIn('devUrl',c['build']);self.assertTrue(c['app']['withGlobalTauri'])
