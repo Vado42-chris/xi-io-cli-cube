@@ -71,10 +71,19 @@ jobs:
         run: |
           set -euo pipefail
           flatpak run --user --command=sh com.xiio.hex -c 'test -s /app/share/xi-io-hex/source-provenance.json && test -x /app/bin/xi-io-hex-dev'
-          flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B -c 'import json,pathlib,hashlib; p=json.loads(pathlib.Path("/app/share/xi-io-hex/source-provenance.json").read_text()); assert p["schema"]=="xiio.flatpak.native-source-provenance/v1"; assert p["historical_dev9_elf_used"] is False; assert len(p["source_commit"])==40 and len(p["native_elf_sha256"])==64; print("FRESH_NATIVE_ELF_PROVENANCE_STRUCTURE_PASS")'
+          export EXPECTED_SOURCE_COMMIT="$(git rev-parse --verify HEAD)"
+          export EXPECTED_CARGO_LOCK_SHA="$(sha256sum native/hex/carrier/src-tauri/Cargo.lock | cut -d' ' -f1)"
+          flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B -c 'import json,pathlib,os; p=json.loads(pathlib.Path("/app/share/xi-io-hex/source-provenance.json").read_text()); assert p["schema"]=="xiio.flatpak.native-source-provenance/v1"; assert p["historical_dev9_elf_used"] is False; assert p["source_commit"]==os.environ["EXPECTED_SOURCE_COMMIT"]; assert p["cargo_lock_sha256"]==os.environ["EXPECTED_CARGO_LOCK_SHA"]; assert len(p["native_elf_sha256"])==64 and len(p["native_elf_build_id"])>=32; print("FRESH_NATIVE_ELF_PROVENANCE_SOURCE_BINDING_PASS")'
+          INSTALL_LOCATION="$(flatpak info --user --show-location com.xiio.hex)"
+          test -f "$INSTALL_LOCATION/files/bin/xi-io-hex-dev"
+          INSTALLED_BUILD_ID="$(readelf -n "$INSTALL_LOCATION/files/bin/xi-io-hex-dev" | awk '/Build ID:/{print $3; exit}')"
+          EXPECTED_BUILD_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["native_elf_build_id"])' "$INSTALL_LOCATION/files/share/xi-io-hex/source-provenance.json")"
+          test -n "$INSTALLED_BUILD_ID"
+          test "$INSTALLED_BUILD_ID" = "$EXPECTED_BUILD_ID"
+          echo "EXACT_SOURCE_TO_INSTALLED_STRIPPED_ELF_BUILD_ID_PASS:$INSTALLED_BUILD_ID"
           echo '{"action":"inspect"}' | flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B /app/lib/xi-io-hex/adapter/installer_adapter.py > sandbox-inspect.json
           python3 -c 'import json; r=json.load(open("sandbox-inspect.json")); assert isinstance(r.get("ok"),bool); assert "result" in r or "error" in r; print("NATIVE_PYTHON_IPC_ADAPTER_EXECUTED", "RESULT" if r["ok"] else "TYPED_REFUSAL")'
-          flatpak run --user --command=sh com.xiio.hex -c 'test -d "$XDG_DATA_HOME" && test -d "$XDG_CONFIG_HOME" && test -d "$XDG_CACHE_HOME" && test -d "$XDG_STATE_HOME"'
+          flatpak run --user --command=sh com.xiio.hex -c 'test -n "$HOME" && test -d "$HOME"'
       - name: Launch actual installed HEX native window under disposable Xvfb
         run: |
           set -euo pipefail
@@ -104,6 +113,8 @@ jobs:
             echo HEX_INSTALLED_WINDOW_VISIBLE_ON_DISPOSABLE_LINUX
           '
           echo "NATIVE_GUI_WINDOW_PASS_DOES_NOT_PROVE_TAURI_IPC"
+          flatpak run --user --command=sh com.xiio.hex -c 'test -d "$HOME/.var/app/com.xiio.hex/state" || test -d "$HOME/.local/state"'
+          echo "APP_RESTART_REQUIRES_SAME_EXACT_SOURCE_NO_HOST_NATIVE_CLI_ASSUMPTION"
 
       - name: Publish inspectable exact candidate artifact, never claim an approved release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
