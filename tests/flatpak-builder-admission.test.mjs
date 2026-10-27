@@ -50,3 +50,18 @@ test('release script must require nonempty Flatpak output',()=>{
   const result=spawnSync('/bin/bash',['-n',new URL(script).pathname],{encoding:'utf8'});
   assert.equal(result.status,0,result.stderr);
 });
+
+test('GNOME46 candidate filesystem grants avoid unsupported XDG state location',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../packaging/flatpak/com.xiio.hex.json',import.meta.url),'utf8'));
+  assert.equal(manifest.runtime,'org.gnome.Platform');
+  assert.equal(manifest['runtime-version'],'46');
+  assert.ok(manifest['finish-args'].every(p=>!p.includes('xdg-state/')),'Flatpak on Ubuntu22.04 does not support xdg-state grant');
+  assert.ok(manifest['finish-args'].includes('--filesystem=xdg-data/xi-io:create'));
+});
+test('Flatpak launcher chooses app-private state without host-wide permission',()=>{
+  const runner=readFileSync(new URL('../packaging/flatpak/xi-io-hex-runner.sh',import.meta.url),'utf8');
+  assert.match(runner,/XDG_STATE_HOME.*\\.var\\/app\\/com\\.xiio\\.hex\\/state/);
+  assert.doesNotMatch(runner,/XDG_STATE_HOME.*\\.local\\/state/);
+  const check=spawnSync('/bin/sh',['-n',new URL('../packaging/flatpak/xi-io-hex-runner.sh',import.meta.url).pathname],{encoding:'utf8'});
+  assert.equal(check.status,0,check.stderr);
+});
