@@ -119,7 +119,7 @@ class LauncherRepairIntegration(unittest.TestCase):
 
     def test_stale_canonical_verifier_rejected_before_effect(self):
         bundle=self.copy_adapter();p=self.prepare()
-        with (bundle/'cli-source/src/runtime-integrity.mjs').open('ab') as f:f.write(b'\n// changed\n')
+        with (bundle/'cli-source/launcher-repair.runtime-integrity.mjs').open('ab') as f:f.write(b'\n// changed\n')
         self.assertFalse(self.apply(p)['ok']);self.assert_no_effect();self.assertFalse(self.journal(p).exists())
 
     def test_stale_pointer_and_receipt_payload_refuse_without_staging(self):

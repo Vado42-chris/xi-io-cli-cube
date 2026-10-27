@@ -67,9 +67,22 @@ test('current payload provenance and bounded fresh-generation custody producer a
  assert.equal(source.current_packaged_payload.ref,payload.source_sha);
  assert.deepEqual(source.current_packaged_payload.files,payload.files);
  assert.equal(source.current_packaged_payload.local_payload_modifications,false);
- assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),'284fc73f855550ddb51c3c1042fa2efaddab923cbde084b409479b165698746e');
+ assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),'fa77fafefdf3e73e20e71b824752f15c14bd7ca3af0fb5f1396f62c162f70aed');
  assert.equal(source.offline_installer_successor.base_ref,'f1bca1245436167fc7767bc31925486643e5d2e7');
  assert.equal(source.offline_installer_successor.base_sha256,'6311b606049f07d35bc31e78f73218a95a114d3723c9f8b97bcb8f3262d8d5a6');
- assert.equal(source.offline_installer_successor.sha256,'b817d87049e68d5db5dc55aa19a02ec28e8ff43156259807f77709e0b8cb96fd');
+ assert.equal(source.offline_installer_successor.sha256,'14730c1f91609d40b1289b98228aef19f048833d36126ca35531e69d7fc6f418');
  assert.equal(createHash('sha256').update(read(base+'install.mjs')).digest('hex'),source.offline_installer_successor.sha256);
+});
+
+test('current seven-file payload and historical repair verifier keep separate exact custody',()=>{
+ const base='native/hex/cli-source/',payload=json(base+'packaged-source.json'),repair=json(base+'launcher-repair.SOURCE.json');
+ assert.equal(payload.source_sha,'958a5fe9d4a409e4ab2b690b6a2cc357539908cf');
+ assert.equal(Object.keys(payload.files).length,7);assert.ok(payload.files['src/local-ops.mjs']);
+ const helper=read(base+'src/runtime-integrity.mjs').split('\n').filter(line=>!line.startsWith('import ')).join('\n').replace(/^export /gm,'').trim();
+ const producer=read(base+'install.mjs');const start=producer.indexOf('\n',producer.indexOf('// BEGIN runtime-integrity standalone mirror'));
+ const mirror=producer.slice(start,producer.indexOf('// END runtime-integrity standalone mirror')).trim();
+ assert.equal(mirror,helper);
+ assert.equal(repair.verification_resource.path,'launcher-repair.runtime-integrity.mjs');
+ assert.equal(createHash('sha256').update(read(base+repair.verification_resource.path)).digest('hex'),repair.verification_resource.sha256);
+ assert.notEqual(repair.verification_resource.sha256,payload.files['src/runtime-integrity.mjs'].sha256);
 });

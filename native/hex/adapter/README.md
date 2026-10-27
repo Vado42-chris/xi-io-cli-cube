@@ -15,7 +15,7 @@ authority or changes the selected launcher, generations or application profiles.
 
 This is the editable local DEV composition, not a LIVE or connected distribution.
 Its source adoption does not establish owner acceptance or broker admission.
-Upstream CLI source is pinned in `../cli-source/SOURCE.json`; six payload files
+Upstream CLI source is pinned in `../cli-source/SOURCE.json`; seven payload files
 are Git-blob-identical. Only `install.mjs` is adapted: `--packaged-source` verifies
 all manifest files into memory before destination effects, then supplies bytes
 to the existing generation/receipt/launcher/pointer implementation. No gh or
@@ -123,7 +123,7 @@ JSON API (same finite stdin/stdout protocol):
   `kind="launcher_repair"`; install/rollback/local-task actions cannot consume it.
 
 Preparation verifies the selected existing actual Node executable is 22.13+,
-imports unchanged hash-qualified PR15 `src/runtime-integrity.mjs` for both
+imports unchanged hash-qualified PR15 `launcher-repair.runtime-integrity.mjs` for both
 current and previous generation/receipt verification, and binds an entire-prefix
 snapshot. It does **not** execute the existing possibly broken launcher. The plan
 also binds original launcher bytes/SHA/inode/owner/mode, launcher directory
@@ -182,3 +182,11 @@ response deadline and completing its terminal receipt, SIGKILL canonical durable
 recovery, declared inspection state/lock writes, unknown journal/no-retry behavior,
 and refusal to execute a later tampered launcher. All filesystem effects are in
 disposable test fixtures, never the user's installed CLI or application profiles.
+
+## Current CLI connection delivery join
+
+The existing packaged source now carries exact CLI PR16 `958a5fe9d4a409e4ab2b690b6a2cc357539908cf` (seven files). Its installer integrity mirror is identical to that source. The existing connection profile still installs the five unmodified Switchboard `ffbcd216d4c673de826242662271add63112c49a` files before the CLI generation; no second installer or runtime acquisition is introduced.
+
+Rollback readback binds the exact reviewed previous receipt, rather than demanding that a historical six-file generation contain the newly added module. PR15 launcher-only repair retains its original verifier bytes in the separately named resource above; its installer, hashes and generation-preservation contract are unchanged.
+
+`test_connection_delivery.py` exercises actual adapter install, installed CLI invocation through native refusal, six-to-seven-file update and rollback, missing-payload refusal and prior-receipt drift. Missing/invalid bindings are deliberate negative tests, not enrollment, authentication, connected or remote-execution evidence.

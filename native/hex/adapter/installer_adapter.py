@@ -123,7 +123,8 @@ def installed(p, expected_sha=None, expected_generation=None):
     demand('/' not in current and current not in ('','.','..'),'GENERATION_INVALID')
     if expected_generation: demand(current==expected_generation,'INSTALLED_GENERATION_CHANGED')
     verify_node(p)
-    receipt=json.loads(file_bytes(prefix/'versions'/current/'install-receipt.json'))
+    receipt_bytes=file_bytes(prefix/'versions'/current/'install-receipt.json')
+    receipt=json.loads(receipt_bytes)
     demand(receipt.get('source_sha')==(expected_sha or p['payload']['manifest']['source_sha']),'INSTALLED_SOURCE_MISMATCH')
     demand(receipt.get('prefix')==str(prefix),'INSTALLED_PREFIX_MISMATCH')
     for f,h in receipt['files'].items():
@@ -131,7 +132,14 @@ def installed(p, expected_sha=None, expected_generation=None):
         demand(digest(file_bytes(prefix/'versions'/current/f))==h,'INSTALLED_BYTES_CHANGED')
         expected=p['payload']['manifest']['files'][f]['sha256'] if not expected_sha else p['destination_before']['versions/'+current+'/'+f]['sha256']
         demand(h==expected,'INSTALLED_PAYLOAD_NOT_REVIEWED')
-    demand(set(receipt['files'])==set(p['payload']['manifest']['files']),'INSTALLED_FILES_INCOMPLETE')
+    if expected_sha:
+        # Rollback has its own reviewed denominator: never require yesterday's
+        # six-file generation to contain today's newly added payload module.
+        demand(current==p.get('previous_current'),'ROLLBACK_GENERATION_NOT_REVIEWED')
+        reviewed=p['destination_before'].get('versions/'+current+'/install-receipt.json',{})
+        demand(digest(receipt_bytes)==reviewed.get('sha256'),'ROLLBACK_RECEIPT_NOT_REVIEWED')
+    else:
+        demand(set(receipt['files'])==set(p['payload']['manifest']['files']),'INSTALLED_FILES_INCOMPLETE')
     launcher=prefix/'bin/xi-io-cli'
     quote=lambda s: "'"+s.replace("'", "'\"'\"'")+"'"
     expected_launcher='#!/bin/sh\n# xi-io-cli launcher written by install.mjs; the generation is chosen by current\nP='+quote(str(prefix))+'\nexec '+quote(p['node']['path'])+' "$P/versions/$(cat "$P/current")/src/xiio.mjs" "$@"\n'
@@ -150,7 +158,7 @@ REPAIR_VERIFY_SHA256='de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0
 def repair_source():
     installer=file_bytes(SOURCE/REPAIR_INSTALLER)
     demand(digest(installer)==REPAIR_SHA256,'REPAIR_SOURCE_NOT_EXACT_PR15')
-    demand(digest(file_bytes(SOURCE/'src/runtime-integrity.mjs'))==REPAIR_VERIFY_SHA256,'REPAIR_VERIFIER_NOT_EXACT_PR15')
+    demand(digest(file_bytes(SOURCE/'launcher-repair.runtime-integrity.mjs'))==REPAIR_VERIFY_SHA256,'REPAIR_VERIFIER_NOT_EXACT_PR15')
     return {'ref':REPAIR_REF,'resource':REPAIR_INSTALLER,'sha256':REPAIR_SHA256,'size':len(installer),'verifier_sha256':REPAIR_VERIFY_SHA256,'modified':False}
 
 def repair_history(prefix,node):
@@ -164,7 +172,7 @@ const current=readGenerationPointer(prefix,'current'),previous=readGenerationPoi
 if(!current)throw Error('CURRENT_GENERATION_MISSING');
 const receipts={current:verifyGeneration(prefix,current),previous:previous?verifyGeneration(prefix,previous):null};
 console.log(JSON.stringify({current,previous,receipts}));"""
-    return json.loads(run([node['path'],'--input-type=module','--eval',script,str(SOURCE/'src/runtime-integrity.mjs'),str(prefix)],30))
+    return json.loads(run([node['path'],'--input-type=module','--eval',script,str(SOURCE/'launcher-repair.runtime-integrity.mjs'),str(prefix)],30))
 
 def repair_node(raw):
     n=node_identity(raw)

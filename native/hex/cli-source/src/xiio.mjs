@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync, spawn } from 'node:child_process';
 import readline from 'node:readline/promises';
 import crypto from 'node:crypto';
+import {localScan,crossUxTriage,ibalBalanceGuide} from './local-ops.mjs';
 import {commitWorkspaceEditCAS} from './file-edit-cas.mjs';
 import {controlledChildEnv,verifyGeneration,readGenerationPointer,pointerTransactionPending,commitGenerationPointers,recoverGenerationPointers} from './runtime-integrity.mjs';
 
@@ -121,8 +122,8 @@ async function mutateOrObserveLocalServices(sub,args,flags){
     // Checks only each service's declared health URL on this computer. Reads,
     // never grants access, never guesses paths.
     const rows=[];
-    for(const s of loadCatalog().services){const u=loopbackUrl(s.probe);if(!u||s.id==='ollama')continue;const r=await httpProbe(u.href);rows.push({id:s.id,source:s.source,health_url:u.href,present:r.http_observed===true,health:r.state,identity_verified:false,status:r.status??null,access:'health'});}
-    return{schema:'xiio.cli.services-discover/v1',state:'PASS',host:os.hostname(),present:rows.filter(r=>r.present).map(r=>r.id),rows};
+    for(const s of loadCatalog().services){const u=loopbackUrl(s.probe);if(!u||s.id==='ollama')continue;const r=await httpProbe(u.href);rows.push({id:s.id,source:s.source,health_url:u.href,present:r.response_received===true,response_received:r.response_received===true,http_observed:r.http_observed===true,health:r.state,identity_verified:false,status:r.status??null,access:'health'});}
+    return{schema:'xiio.cli.services-discover/v1',state:'PASS',scope:'DECLARED_LOOPBACK_CATALOG_CANDIDATES_ONLY',completeness:'NOT_A_HOST_INVENTORY',effect_authority:0,host:os.hostname(),present:rows.filter(r=>r.present).map(r=>r.id),rows};
   }
   return null;
 }
@@ -151,17 +152,30 @@ function parse(argv){
 function activeWorkspace(){try{const p=fs.readFileSync(ACTIVE_WORKSPACE_FILE,'utf8').trim();return p&&fs.existsSync(p)&&fs.statSync(p).isDirectory()?{state:'PASS',path:p}:{state:'STALE',path:p||null};}catch{return{state:'UNSET',path:null};}}
 function activate(args,flags){try{const p=workspaceRoot(String(flags.path||args[0]||process.cwd()));if(!fs.existsSync(p)||!fs.statSync(p).isDirectory())return{schema:'xiio.cli.activate/v1',state:'FAIL',reason:'WORKSPACE_NOT_DIRECTORY',path:p};fs.mkdirSync(CONFIG_DIR,{recursive:true});fs.writeFileSync(ACTIVE_WORKSPACE_FILE,p+'\n',{mode:0o600});return{schema:'xiio.cli.activate/v1',state:'PASS',active_workspace:p,next:['xiio doctor','xiio services status','xiio runner diagnose'],effect_authority:0};}catch(error){return{schema:'xiio.cli.activate/v1',state:'FAIL',reason:String(error.message),modified:false};}}
 function systemctl(scope,args){return run('systemctl',[...(scope==='user'?['--user']:[]),...args]);}
-function serviceRows(service){const out=[];for(const scope of ['system','user'])for(const unit of service.systemd_candidates||[]){const exists=systemctl(scope,['show',unit,'-p','LoadState','--value']);if(exists.status!==0||['not-found',''].includes(exists.stdout))continue;const a=systemctl(scope,['is-active',unit]);const e=systemctl(scope,['is-enabled',unit]);out.push({scope,unit,active:a.stdout||'unknown',enabled:e.stdout||'unknown'});}return out;}
+function serviceRows(service,discovery=true){
+  const out=[];out.observation_incomplete=false;
+  const candidates=[...new Set([...(service.systemd_candidates||[]),...(discovery?service.discovery_systemd_candidates||[]:[])])];
+  for(const scope of ['system','user'])for(const unit of candidates){
+    const exists=systemctl(scope,['show',unit,'-p','LoadState','--value']);
+    if(exists.stdout==='not-found')continue;
+    if(exists.status!==0||!exists.stdout){out.observation_incomplete=true;continue;}
+    const a=systemctl(scope,['is-active',unit]),e=systemctl(scope,['is-enabled',unit]);
+    if(!['active','inactive','failed'].includes(a.stdout))out.observation_incomplete=true;
+    out.push({scope,unit,active:a.stdout||'unknown',enabled:e.stdout||'unknown'});
+  }
+  return out;
+}
 function httpProbe(url,timeout=2500){
   return new Promise(resolve=>{
     const u=loopbackUrl(url);
-    if(!u)return resolve({state:'FAIL',reason:'HEALTH_URL_MUST_BE_THIS_COMPUTER',http_observed:false,identity_verified:false});
+    if(!u)return resolve({state:'FAIL',reason:'HEALTH_URL_MUST_BE_THIS_COMPUTER',http_observed:false,response_received:false,identity_verified:false,effect_authority:0});
     const limit=65536,deadline=Math.max(1,Math.min(Number(timeout)||2500,15000));
-    let completed=false,timer,req;
-    const finish=result=>{if(completed)return;completed=true;clearTimeout(timer);resolve({...result,identity_verified:false,effect_authority:0});};
+    let completed=false,timer,req,responseReceived=false,responseStatus=null;
+    const finish=result=>{if(completed)return;completed=true;clearTimeout(timer);resolve({...result,response_received:responseReceived,...(responseReceived?{status:responseStatus}:{}),identity_verified:false,effect_authority:0});};
     const client=u.protocol==='https:'?https:http;
     timer=setTimeout(()=>{finish({state:'TRUE_WAIT',reason:'HEALTH_TIMEOUT',http_observed:false});req?.destroy();},deadline);
     try{req=client.get(u,{timeout:deadline,rejectUnauthorized:true,headers:{accept:'application/json'}},res=>{
+      responseReceived=true;responseStatus=res.statusCode;
       let size=0;
       res.on('data',chunk=>{size+=chunk.length;if(size>limit){finish({state:'FAIL',reason:'HEALTH_RESPONSE_TOO_LARGE',status:res.statusCode,http_observed:false});req.destroy();}});
       res.on('end',()=>{
@@ -179,8 +193,8 @@ function httpProbe(url,timeout=2500){
   });
 }
 
-async function serviceStatus(id){const c=loadCatalog();const s=c.services.find(x=>x.id===id);if(!s)return{state:'FAIL',reason:'UNKNOWN_SERVICE',id};const units=serviceRows(s);const probe=s.probe?await httpProbe(s.probe):null;let state='UNKNOWN';if(probe?.http_observed)state='HTTP_OBSERVED_UNQUALIFIED';else if(units.some(x=>x.active==='active'))state='RUNNING_UNPROVEN';else if(units.length)state='STOPPED';else state='NOT_OBSERVED';return{schema:'xiio.cli.service-status/v1',id:s.id,class:s.class,state,units,probe,model_agnostic:s.model_agnostic??null};}
-async function servicesCommand(sub,args,flags){if(['add','grant','remove','discover'].includes(sub)){const r=await servicesLocalCommand(sub,args,flags);if(r)return r;}const c=loadCatalog();if(sub==='list'||!sub)return{schema:'xiio.cli.services/v1',state:'PASS',services:c.services.map(s=>({id:s.id,class:s.class,probe:s.probe||null,model_agnostic:s.model_agnostic??null}))};if(sub==='status'){if(flags.profile&&!c.profiles?.[flags.profile])return{schema:'xiio.cli.services-status/v1',state:'FAIL',reason:'UNKNOWN_SERVICE_PROFILE',profile:flags.profile,rows:[]};const ids=args.length?args:(flags.profile?(c.profiles[flags.profile]?.services||[]):c.services.map(s=>s.id));const rows=[];for(const id of ids)rows.push(await serviceStatus(id));return{schema:'xiio.cli.services-status/v1',state:rows.length&&rows.every(r=>r.state==='PASS')?'PASS':'PARTIAL',profile:flags.profile||null,rows};}if(['start','stop','restart'].includes(sub)){const id=args[0];if(!id)return{state:'FAIL',reason:'SERVICE_ID_REQUIRED'};const s=c.services.find(x=>x.id===id);if(!s)return{state:'FAIL',reason:'UNKNOWN_SERVICE',id};const rows=serviceRows(s);if(!rows.length)return{state:'BLOCKED',reason:'SERVICE_UNIT_NOT_FOUND',id,candidates:s.systemd_candidates||[]};const target=rows.find(x=>x.active==='active')||rows[0];let r=systemctl(target.scope,[sub,target.unit]);if(r.status!==0&&target.scope==='system')r=run('sudo',['-n','systemctl',sub,target.unit]);return{schema:'xiio.cli.service-action/v1',state:r.status===0?'PASS':'BLOCKED',action:sub,id,unit:target,stdout:r.stdout,stderr:r.stderr,effect_authority:'LOCAL_SERVICE_ONLY'};}return{state:'FAIL',reason:'UNKNOWN_SERVICES_COMMAND',subcommand:sub};}
+async function serviceStatus(id){const c=loadCatalog();const s=c.services.find(x=>x.id===id);if(!s)return{state:'FAIL',reason:'UNKNOWN_SERVICE',id};const units=serviceRows(s);const probe=s.probe?await httpProbe(s.probe):null;let state='UNKNOWN';if(probe?.response_received)state='HTTP_OBSERVED_UNQUALIFIED';else if(units.some(x=>x.active==='active'))state='RUNNING_UNPROVEN';else if(units.observation_incomplete)state='OBSERVATION_INCOMPLETE';else if(units.length)state='STOPPED';else state='NOT_OBSERVED';return{schema:'xiio.cli.service-status/v1',id:s.id,class:s.class,state,unit_observation:units.observation_incomplete?'OBSERVATION_INCOMPLETE':'CATALOG_CANDIDATES_CHECKED',observation_scope:'DECLARED_CATALOG_CANDIDATES_ONLY',identity_verified:false,effect_authority:0,units,probe,model_agnostic:s.model_agnostic??null};}
+async function servicesCommand(sub,args,flags){if(['add','grant','remove','discover'].includes(sub)){const r=await servicesLocalCommand(sub,args,flags);if(r)return r;}const c=loadCatalog();if(sub==='list'||!sub)return{schema:'xiio.cli.services/v1',state:'PASS',services:c.services.map(s=>({id:s.id,class:s.class,probe:s.probe||null,model_agnostic:s.model_agnostic??null}))};if(sub==='status'){if(flags.profile&&!c.profiles?.[flags.profile])return{schema:'xiio.cli.services-status/v1',state:'FAIL',reason:'UNKNOWN_SERVICE_PROFILE',profile:flags.profile,rows:[]};const ids=args.length?args:(flags.profile?(c.profiles[flags.profile]?.services||[]):c.services.map(s=>s.id));const rows=[];for(const id of ids)rows.push(await serviceStatus(id));return{schema:'xiio.cli.services-status/v1',state:rows.length&&rows.every(r=>r.state==='PASS')?'PASS':'PARTIAL',profile:flags.profile||null,rows};}if(['start','stop','restart'].includes(sub)){const id=args[0];if(!id)return{state:'FAIL',reason:'SERVICE_ID_REQUIRED'};const s=c.services.find(x=>x.id===id);if(!s)return{state:'FAIL',reason:'UNKNOWN_SERVICE',id};const rows=serviceRows(s,false);if(!rows.length)return{state:'BLOCKED',reason:'SERVICE_UNIT_NOT_FOUND',id,candidates:s.systemd_candidates||[]};const target=rows.find(x=>x.active==='active')||rows[0];let r=systemctl(target.scope,[sub,target.unit]);if(r.status!==0&&target.scope==='system')r=run('sudo',['-n','systemctl',sub,target.unit]);return{schema:'xiio.cli.service-action/v1',state:r.status===0?'PASS':'BLOCKED',action:sub,id,unit:target,stdout:r.stdout,stderr:r.stderr,effect_authority:'LOCAL_SERVICE_ONLY'};}return{state:'FAIL',reason:'UNKNOWN_SERVICES_COMMAND',subcommand:sub};}
 function runnerProcesses(){const r=run('pgrep',['-af','Runner.Listener']);if(r.status!==0||!r.stdout)return[];return r.stdout.split('\n').filter(Boolean).map(line=>{const m=line.match(/^(\d+)\s+(.*)$/);return{pid:m?Number(m[1]):null,command:m?m[2]:line};});}
 function runnerServiceRows(){const fake={systemd_candidates:['xiio-github-actions-runner.service']};const rows=serviceRows(fake);for(const scope of ['system','user']){const l=systemctl(scope,['list-unit-files','actions.runner.*.service','--no-legend','--no-pager']);for(const line of l.stdout.split('\n').map(x=>x.trim()).filter(Boolean)){const unit=line.split(/\s+/)[0];if(rows.some(x=>x.scope===scope&&x.unit===unit))continue;const a=systemctl(scope,['is-active',unit]);const e=systemctl(scope,['is-enabled',unit]);rows.push({scope,unit,active:a.stdout||'unknown',enabled:e.stdout||'unknown'});}}return rows;}
 function runnerRoots(flags){const roots=[];const explicit=String(flags['search-root']||'').trim();if(explicit)for(const x of explicit.split(':'))if(x&&fs.existsSync(x))roots.push(path.resolve(x));else{}else{for(const x of [os.homedir(),'/opt','/srv'])if(fs.existsSync(x))roots.push(x);if(flags.deep){for(const x of [`/media/${process.env.USER}`,'/mnt'])if(fs.existsSync(x))roots.push(x);}}return[...new Set(roots)];}
@@ -297,7 +311,7 @@ function externalToolsStatus(){
     }),hard:['INSTALLED != QUALIFIED','DISCOVERY != WARD_ADMISSION','VERSION != VERIFIED_EFFECT']};
 }
 
-function help(){return{schema:'xiio.cli.help/v1',product:'xi-io: CLI',state:'PASS',usage:['xiio [workspace] [--model NAME] [--execute]','xiio chat [workspace] [--model NAME] [--execute]','xiio menu [workspace] [--model NAME] [--execute]','xi-io-cli login','xi-io-cli whoami','xi-io-cli device sign <challenge>','xiio version','xiio activate [path]','xiio doctor','xiio services list','xi-io-cli services discover','xi-io-cli services add <id> <http://127.0.0.1:PORT/health> [--class NAME]','xi-io-cli services grant <id> health|read|read_write','xi-io-cli services remove <id>','xiio services status [service...] [--profile aries-dev]','xiio services start|stop|restart <service>','xiio engines list','xiio tools status','xiio models list --engine ollama','xiio install ollama [--apply]','xiio install mail-server','xiio registry discover [--owner Vado42-chris] [--prefix xi-io]','xiio runner diagnose [--deep] [--search-root PATH] [--repo owner/repo --run-id N --job-id N]','xiio runner recover [same flags]','xiio glass read'],hard:['ENGINE != MODEL','SERVICE != AUTHORITY','NO AUTOMATIC MODEL PULLS','NO NEW GITHUB RUNNER']};}
+function help(){return{schema:'xiio.cli.help/v1',product:'xi-io: CLI',state:'PASS',usage:['xiio [workspace] [--model NAME] [--execute]','xiio chat [workspace] [--model NAME] [--execute]','xiio menu [workspace] [--model NAME] [--execute]','xi-io-cli login','xi-io-cli whoami','xi-io-cli connect','xi-io-cli device sign <challenge>','xiio version','xiio activate [path]','xiio doctor','xiio services list','xi-io-cli services discover','xi-io-cli services add <id> <http://127.0.0.1:PORT/health> [--class NAME]','xi-io-cli services grant <id> health|read|read_write','xi-io-cli services remove <id>','xiio services status [service...] [--profile aries-dev]','xiio services start|stop|restart <service>','xiio engines list','xiio tools status','xiio models list --engine ollama','xiio install ollama [--apply]','xiio install mail-server','xiio registry discover [--owner Vado42-chris] [--prefix xi-io]','xiio runner diagnose [--deep] [--search-root PATH] [--repo owner/repo --run-id N --job-id N]','xiio runner recover [same flags]','xiio glass read','xiio scan local [--root PATH] --apply','xiio ux triage [--root PATH] [--terms a,b,c]','xiio ibal balance'],hard:['ENGINE != MODEL','SERVICE != AUTHORITY','NO AUTOMATIC MODEL PULLS','NO NEW GITHUB RUNNER']};}
 
 const MENU = [
   ['1','/help','What can you do?'],
@@ -410,6 +424,9 @@ function toolCatalog(){
     {name:'git_status',description:'Read git branch and working-tree status.',write:false},
     {name:'list_registries',description:'Find registry, ACK, current and manifest files.',write:false},
     {name:'resolve_registry',description:'Read one named registry/current/ACK file.',write:false},
+    {name:'local_scan',description:'Run the workspace baseline scanner in the no-network sandbox, after explicit approval. A receipt is not live authority.',write:true},
+    {name:'cross_ux_triage',description:'Read and deduplicate workspace artifact content; never delete duplicates.',write:false},
+    {name:'ibal_balance',description:'Read historical PR5 donor notes, explicitly not a qualified current mathematics contract.',write:false},
     {name:'edit_workspace_file',description:'Change an existing file using copied old_text, new_text and optional expected_sha256. The file is replaced only when its approved bytes still match under a local cooperative lock. To create a file, give path and content. Each change requires explicit approval. Local locking does not replace Ward or BINS authority.',write:true},
     {name:'install_dependencies',description:'Install the exact packages pinned in package-lock.json (npm ci, install scripts blocked) so builds can run. Sandboxed; needs your yes.',write:true},
     {name:'list_services',description:'List configured local service candidates and their declared health endpoints. Listing proves neither installation nor current product identity or permission.',write:false},
@@ -439,6 +456,31 @@ function readText(p){
   if(!Buffer.from(text,'utf8').equals(buf))throw new Error('NOT_UTF8_TEXT_REFUSED');
   return {buf,text};
 }
+// Shared by direct reads and artifact triage: bounded allocation, descriptor
+// readback, regular files only, no path-component symlinks or credential paths.
+function readWorkspaceText(root,relative){
+  const realRoot=fs.realpathSync(root),target=path.resolve(realRoot,relative);
+  if(!within(realRoot,target))throw Error('PATH_OUTSIDE_WORKSPACE');
+  if(credentialPath(target))throw Error('CREDENTIAL_PATH_REFUSED');
+  let cursor=realRoot;
+  for(const part of path.relative(realRoot,target).split(path.sep).filter(Boolean)){
+    cursor=path.join(cursor,part);if(fs.lstatSync(cursor).isSymbolicLink())throw Error('SYMLINK_OUTSIDE_WORKSPACE');
+  }
+  const before=fs.lstatSync(target);if(!before.isFile())throw Error('NOT_A_REGULAR_FILE');
+  const limit=2*1024*1024;if(before.size>limit)throw Error('READ_FILE_TOO_LARGE: maximum 2097152 bytes');
+  const fd=fs.openSync(target,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0)|(fs.constants.O_NONBLOCK||0));
+  try{
+    const opened=fs.fstatSync(fd);if(!opened.isFile()||opened.dev!==before.dev||opened.ino!==before.ino)throw Error('READ_FILE_CHANGED');
+    if(!within(realRoot,fs.realpathSync(target))||credentialPath(fs.realpathSync(target)))throw Error('PATH_OUTSIDE_WORKSPACE');
+    const buffer=Buffer.alloc(limit+1);let size=0;
+    while(size<buffer.length){const n=fs.readSync(fd,buffer,size,buffer.length-size,null);if(!n)break;size+=n;}
+    if(size>limit)throw Error('READ_FILE_TOO_LARGE: maximum 2097152 bytes');
+    const after=fs.fstatSync(fd);if(after.size!==size||after.mtimeMs!==opened.mtimeMs)throw Error('READ_FILE_CHANGED');
+    const buf=buffer.subarray(0,size);if(buf.includes(0))throw Error('BINARY_FILE_REFUSED');
+    const text=buf.toString('utf8');if(!Buffer.from(text,'utf8').equals(buf))throw Error('NOT_UTF8_TEXT_REFUSED');
+    return{buf,text};
+  }finally{fs.closeSync(fd);}
+}
 function lineOf(text,index){return text.slice(0,index).split('\n').length;}
 function showLines(prefix,s){const lines=s.split('\n');if(lines.length>1&&lines.at(-1)==='')lines.pop();return lines.map(l=>prefix+' '+l).join('\n');}
 function describeAction(a){
@@ -448,6 +490,17 @@ function describeAction(a){
   if(a.tool==='call_service')return 'Proposed request to your local service:\n  '+a.method+' '+a.url+(a.body?'\n  body: '+a.body.slice(0,2000):'');
   if(a.tool==='run_workspace_command')return 'Proposed command (sandboxed: project folder writable, no network, rest of the computer hidden or read-only, '+(SANDBOX_TIMEOUT_MS/1000)+'s limit):\n  '+a.command+'\nin '+a.workspace;
   return JSON.stringify(a,null,2);
+}
+
+async function approvedLocalScan(root,approve){
+  const blocked=reason=>({schema:'xiio.cli.local-scan/v1',state:'BLOCKED',reason,effect_authority:0});
+  const command="python3 -I scripts/local_scan.py . (validated SDK source snapshot)";
+  if(typeof approve!=='function'||!await approve({tool:'run_workspace_command',command,workspace:root}))return blocked('HUMAN_APPROVAL_REQUIRED');
+  const sb=sandboxState();if(!sb.ok)return blocked(sb.reason);
+  const broad=sandboxRefusal(root);if(broad)return blocked(broad);
+  const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
+  const runScanner=source=>spawnSync(sb.bwrap,sandboxArgs(root,'python3 -I -c '+quote(source)+' .'),{cwd:root,encoding:'utf8',timeout:SANDBOX_TIMEOUT_MS,maxBuffer:16*1024*1024,env:{PATH:process.env.PATH||'/usr/bin:/bin'}});
+  return localScan(root,{runScanner,readArtifact:rel=>readWorkspaceText(root,rel)});
 }
 
 async function executeTool(name,args,{root,approve}){
@@ -467,6 +520,9 @@ async function executeTool(name,args,{root,approve}){
   const confirm=async(action)=>{
     if(typeof approve!=='function'||!await approve(action))throw new Error('HUMAN_APPROVAL_REQUIRED');
   };
+  if(name==='local_scan')return approvedLocalScan(root,approve);
+  if(name==='cross_ux_triage')return crossUxTriage(root,{terms:args?.terms?args.terms.split(','):undefined,maxFiles:args?.max_files?Number(args.max_files):4000,allowPath:p=>!credentialPath(p),readArtifact:rel=>readWorkspaceText(root,rel)});
+  if(name==='ibal_balance')return ibalBalanceGuide();
   if(name==='list_workspace'){
     const rel=String(args?.path||'.');const dir=safe(rel);
     return {path:rel,entries:fs.readdirSync(dir,{withFileTypes:true}).filter(x=>!credentialPath(path.join(dir,x.name))).slice(0,200).map(x=>({name:x.name,type:x.isDirectory()?'dir':x.isSymbolicLink()?'link':'file'}))};
@@ -484,11 +540,7 @@ async function executeTool(name,args,{root,approve}){
   }
   if(name==='read_workspace_file'||name==='resolve_registry'){
     const rel=String(args?.path||'');if(!rel)throw new Error('PATH_REQUIRED');const p=safe(rel);
-    // A direct read must not block on a FIFO/device or allocate an unbounded file.
-    const st=fs.lstatSync(p);
-    if(!st.isFile())throw new Error('NOT_A_REGULAR_FILE');
-    if(st.size>2*1024*1024)throw new Error('READ_FILE_TOO_LARGE: maximum 2097152 bytes');
-    const {buf,text}=readText(p);
+    const {buf,text}=readWorkspaceText(root,rel);
     return {path:rel,content:text.slice(0,120000),sha256:sha256(buf),byte_length:buf.length,
       full_content_returned:text.length<=120000,bins_version_qualified:false};
   }
@@ -639,6 +691,7 @@ function ollamaTools(){
   const defs={
     list_workspace:{path:{type:'string'}},search_workspace:{query:{type:'string'}},read_workspace_file:{path:{type:'string'}},
     git_status:{},list_registries:{},resolve_registry:{path:{type:'string'}},
+    local_scan:{},cross_ux_triage:{terms:{type:'string'},max_files:{type:'string'}},ibal_balance:{},
     edit_workspace_file:{path:{type:'string'},old_text:{type:'string'},new_text:{type:'string'},content:{type:'string'},expected_sha256:{type:'string'}},
     run_workspace_command:{command:{type:'string'}},install_dependencies:{},
     list_services:{},call_service:{service:{type:'string'},method:{type:'string'},path:{type:'string'},body:{type:'string'}}
@@ -646,7 +699,7 @@ function ollamaTools(){
   return toolCatalog().map(t=>({type:'function',function:{name:t.name,description:t.description,parameters:{type:'object',properties:defs[t.name],additionalProperties:false}}}));
 }
 // Text resembling a call is not a call. Earlier real tool outcomes still count.
-const TOOL_NAMES=['list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','run_xiio_command','runtime_status'];
+const TOOL_NAMES=['local_scan','cross_ux_triage','ibal_balance','list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','run_xiio_command','runtime_status'];
 function looksLikeToolCall(text){
   const t=String(text||'');
   if(TOOL_NAMES.some(n=>new RegExp(n+'\\s*\\(\\s*\\{').test(t)||new RegExp('"(name|function|tool)"\\s*:\\s*"'+n+'"').test(t)))return true;
@@ -689,6 +742,11 @@ function nativeCalls(msg){
 function executionFact(name,args,result){
   let state='SUCCEEDED',reason=null;
   if(!toolCatalog().some(t=>t.name===name)||!isRecord(result)){state='FAILED';reason='TOOL_RESULT_INVALID';}
+  else if(['local_scan','cross_ux_triage','ibal_balance'].includes(name)){
+    const expected={local_scan:['xiio.cli.local-scan/v1','LOCAL_STATIC_OBSERVED'],cross_ux_triage:['xiio.cli.cross-ux-triage/v1','OBSERVED'],ibal_balance:['xiio.cli.ibal-balance/v1','INFORMATIONAL_DONOR']}[name];
+    if(result.schema!==expected[0]||result.state!==expected[1]||result.effect_authority!==0||(name==='local_scan'&&(result.closure_credit!==false||result.live_authority!==false||result.producer?.bytes_verified!==true||result.receipt?.status!==result.status||result.receipt?.local_static_pass!==result.local_static_pass))){state='FAILED';reason=result.reason||'LOCAL_OPERATION_NOT_QUALIFIED';}
+    else if(name==='local_scan'&&result.local_static_pass!==true){state='PARTIAL';reason=result.status;}
+  }
   else if(result.state==='FAIL'){state='FAILED';reason=typeof result.reason==='string'?result.reason:'TOOL_FAILED';}
   else if(result.state==='PARTIAL'){state='PARTIAL';reason='TOOL_REPORTED_PARTIAL';}
   else if(result.state!==undefined&&!(name==='edit_workspace_file'&&result.state==='LOCAL_CAS_COMMITTED')){state='FAILED';reason='TOOL_STATE_UNQUALIFIED';}
@@ -758,8 +816,8 @@ async function providerReply(convo,{model,mode}){
 // that schema; the CLI validates every returned action and field
 // and every edit/command still needs the human's yes. XIIO_TOOL_MODE=native keeps
 // the old provider tool-calling path.
-const STRUCTURED_TOOLS=['list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','install_dependencies','list_services','call_service'];
-const STRUCTURED_FIELDS=['path','query','content','old_text','new_text','expected_sha256','command','service','method','body','text'];
+const STRUCTURED_TOOLS=['local_scan','cross_ux_triage','ibal_balance','list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','install_dependencies','list_services','call_service'];
+const STRUCTURED_FIELDS=['max_files','terms','path','query','content','old_text','new_text','expected_sha256','command','service','method','body','text'];
 function structuredSchema(){
   const properties={tool:{type:'string',enum:[...STRUCTURED_TOOLS,'answer']}};
   for(const f of STRUCTURED_FIELDS)properties[f]={type:'string'};
@@ -769,6 +827,7 @@ const STRUCTURED_GUIDE=['Reply ONLY with one JSON object: {"tool":..., "path":""
   'tool="answer": text = your reply to the person. Use it when the task is done or you need to ask something.',
   'list_workspace: path (folder, "." for top). search_workspace: query. read_workspace_file: path. git_status / list_registries: no fields. resolve_registry: path.',
   'edit_workspace_file NEW file: path + content. EXISTING file: read it first, then path + old_text (copied exactly) + new_text + optional expected_sha256 from the read result. Edits fail closed if source bytes changed. Never rewrite a whole existing file.',
+  'local_scan: no fields. Requires approval, accepted SDK producer bytes and a sandbox; returns local static observations only. cross_ux_triage: optional comma-separated terms and max_files. ibal_balance: no fields.',
   'run_workspace_command: command (runs sandboxed in the project, no network).',
   'install_dependencies: no fields. Use it before building or testing an npm project whose node_modules is missing.',
   'list_services: no fields. call_service: service (name from list_services), method, path (starting with /), body (JSON text or ""). Each service only allows what its access says (health = only GET its health_path). Never guess API paths.',
@@ -777,6 +836,8 @@ const STRUCTURED_GUIDE=['Reply ONLY with one JSON object: {"tool":..., "path":""
 function structuredArgs(d){
   const g=(k)=>typeof d[k]==='string'?d[k]:'';
   switch(d.tool){
+    case 'local_scan':return {};
+    case 'cross_ux_triage':return {...(g('terms')?{terms:g('terms')}:{}),...(g('max_files')?{max_files:g('max_files')}:{})};
     case 'list_workspace':return {path:g('path')||'.'};
     case 'search_workspace':return {query:g('query')};
     case 'read_workspace_file':case 'resolve_registry':return {path:g('path')};
@@ -857,7 +918,7 @@ function humanHelp(model){
     '  “Change the launch date in README.md to 13 November; leave everything else alone.”',
     'I show each edit first and wait for your yes.',
     model?null:'No local model is selected. Use /models, then /model NAME for natural-language work.',
-    '/read README.md reads a file without a model. /tools shows available actions. /menu shows the choices.'
+    '/connect runs one configured native broker cycle; it does not register this computer. /read README.md reads a file without a model. /tools shows available actions. /menu shows the choices.'
   ].filter(Boolean).join('\n');
 }
 function humanTools(){
@@ -899,8 +960,9 @@ function humanDoctor(d,root){
     const p=row.probe;
     if(row.state==='HTTP_OBSERVED_UNQUALIFIED')observation='endpoint responded; product health and identity are not verified';
     else if(row.state==='RUNNING_UNPROVEN')observation='service unit is running; this does not confirm product readiness';
-    else if(row.state==='STOPPED')observation='service units were found, but none was observed running';
-    else if(row.state==='NOT_OBSERVED')observation='I did not observe it; installation and health remain unknown';
+    else if(row.state==='STOPPED')observation='catalog candidate service units were found, but none was observed running';
+    else if(row.state==='OBSERVATION_INCOMPLETE')observation='catalog candidate checks were incomplete; installation and health remain unknown';
+    else if(row.state==='NOT_OBSERVED')observation='no declared catalog candidate was observed; installation and health remain unknown';
     else if(row.state==='PASS')observation='reported checks passed';
     else observation='unverified ('+humanText(row.reason||row.state)+')';
     if(p&&!p.http_observed){
@@ -915,7 +977,7 @@ function humanDoctor(d,root){
 }
 function humanToolTurn(answer){
   const r=answer.receipt,lines=[];
-  const labels={list_workspace:'List files',search_workspace:'Search text',read_workspace_file:'Read file',resolve_registry:'Read project record',list_registries:'Find project records',git_status:'Inspect Git',edit_workspace_file:'Change file',run_workspace_command:'Run command',install_dependencies:'Install pinned dependencies',list_services:'List configured services',call_service:'Check service endpoint'};
+  const labels={local_scan:'Local baseline',cross_ux_triage:'Artifact deduplication',ibal_balance:'Opposite-seat witness guide',list_workspace:'List files',search_workspace:'Search text',read_workspace_file:'Read file',resolve_registry:'Read project record',list_registries:'Find project records',git_status:'Inspect Git',edit_workspace_file:'Change file',run_workspace_command:'Run command',install_dependencies:'Install pinned dependencies',list_services:'List configured services',call_service:'Check service endpoint'};
   const preview=(text)=>{const s=humanText(text);return s.length>4000?s.slice(0,4000)+'\n[Display shortened; /details retains the full returned value.]':s;};
   const reasons={HUMAN_APPROVAL_REQUIRED:'No approval was given, so this action was not performed.',CREDENTIAL_PATH_REFUSED:'Credential files are not accessible.',PATH_OUTSIDE_WORKSPACE:'That path is outside this workspace.',SYMLINK_OUTSIDE_WORKSPACE:'That link leaves the workspace.',BINARY_FILE_REFUSED:'This is not a text file.',NOT_UTF8_TEXT_REFUSED:'This file is not valid UTF-8 text.',NOT_A_REGULAR_FILE:'That path is not a regular file.',MODEL_ANSWER_EMPTY_OR_NULL:'The model did not return a usable answer.',MODEL_TEXT_IS_NOT_A_TOOL_CALL:'The model printed a tool-shaped reply instead of a valid action.',TOOL_LOOP_LIMIT:'The model reached the action limit without a final answer.'};
   for(const fact of r.tool_results){
@@ -932,6 +994,7 @@ function humanToolTurn(answer){
     else if(fact.name==='list_registries')lines.push(humanRegistry(v));
     else if(fact.name==='list_services')lines.push('Configured service candidates: '+humanText(v.services.map(x=>x.service).join(', ')||'none')+'. Listing is not product health or permission. Only declared health endpoints are available.');
     else if(fact.name==='call_service')lines.push(humanText(v.service)+': endpoint returned HTTP '+v.status+'. Product health, identity and broader permission are not verified.\n'+preview(v.body));
+    else if(['local_scan','cross_ux_triage','ibal_balance'].includes(fact.name))lines.push(label+' — '+humanText(v.state)+'. Local observation only; no live, closure or effect authority.\n'+preview(JSON.stringify(v)));
     else if(['run_workspace_command','install_dependencies'].includes(fact.name))lines.push(label+' — process exited with code '+v.status+'.');
     else lines.push(label+' — '+humanText(fact.state)+'.');
     if(['run_workspace_command','install_dependencies'].includes(fact.name)){
@@ -1000,6 +1063,7 @@ async function interactive(flags,args=[]){
       if(cmd==='/exit'){process.stdout.write('See you next time.\n');break;}
       if(cmd==='/clear'){messages=messages.slice(0,1);lastTurn=null;process.stdout.write('Conversation cleared. Workspace stays '+root+'.\n');continue;}
       if(cmd==='/menu'){printMenu();continue;}
+      if(cmd==='/connect'){process.stdout.write(JSON.stringify(connectCommand(),null,2)+'\n');continue;}
       if(cmd==='/help'){process.stdout.write(humanHelp(model)+'\n');continue;}
       if(cmd==='/details'){process.stdout.write(lastTurn?lastTurn.text+'\n':'No execution receipt yet. Ask for work or use /read PATH first.\n');continue;}
       if(cmd==='/workspace'){process.stdout.write('You are working in '+root+'.\n');continue;}
@@ -1193,6 +1257,60 @@ function rollback(flags={}){
   }catch(error){return{schema:'xiio.cli.rollback/v1',state:'FAIL',reason:String(error.message),next:'xi-io-cli version'};}
 }
 
+// Explicit finite connection invocation. No enrollment, service, login, retries,
+// broker implementation or authority is supplied by this client.
+const CONNECTION_REF='ffbcd216d4c673de826242662271add63112c49a';
+const CONNECTION_FILES=Object.freeze({
+  "scripts/device-native-consumer.mjs": "418b840eb2a4f18ff3dd743aa14e082c3ef1d07bb507edc01a40352200531351",
+  "lib/device-broker.mjs": "142f291535e21c5d238351d09e36ab09398da96e9530efba8bde34b845dac6aa",
+  "lib/device-execute-pull-worker.mjs": "a6192a2e1695a48ddb727b7742482fa74526da3224d65f34a882f96321234aa8",
+  "lib/device-execute.mjs": "3bb24e7702e421c7f1ce9f61f13453df496e93d8c61030a08e20c7dfe282ca23",
+  "lib/operational-job.ts": "a4a97ba764ebd79b7678ccc3feae76f28b6b141912b1ed0e7764b4725087f3fe"
+});
+function connectCommand(args=[]){
+  const base={schema:'xiio.cli.connection/v1',connected:false,returnCertified:false,execution_verified:false,job_execution_state:'NOT_REPORTED_BY_NATIVE_CONSUMER',source_ref:CONNECTION_REF};
+  const blocked=reason=>({...base,state:'BLOCKED',firstRed:reason});
+  const unknown=reason=>({...base,state:'OUTCOME_UNKNOWN',firstRed:reason,retry_safe:false,note:'Do not automatically retry: reconcile the existing broker job/result first.'});
+  if(args.length)return blocked('CONNECTION_ARGUMENTS_NOT_SUPPORTED');
+  const required=['XIIO_DEVICE_REF','XIIO_DEVICE_BROKER_URL','XIIO_DEVICE_PORTS_MODULE'];
+  if(required.some(k=>!process.env[k]))return {...base,state:'CONFIGURATION_REQUIRED',firstRed:'EXISTING_DEVICE_BROKER_AND_WARD_PORTS_REQUIRED',required_bindings:required};
+  try{const url=new URL(process.env.XIIO_DEVICE_BROKER_URL);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw Error();}
+  catch{return blocked('NATIVE_BROKER_HTTPS_REQUIRED');}
+  // These values select existing backend bindings; they do not grant authority.
+  // Local CLI login identity is deliberately not substituted for Ward enrollment.
+  const layout=installLayout();
+  if(!layout)return blocked('CONNECTION_INSTALLED_LAYOUT_REQUIRED');
+  try{
+    verifyGeneration(layout.prefix,layout.generation);
+    if(pointerTransactionPending(layout.prefix))throw Error('POINTER_TRANSACTION_PENDING');
+    if(readGenerationPointer(layout.prefix,'current')!==layout.generation)throw Error('GENERATION_NOT_CURRENT');
+  }catch(e){return blocked(/^[A-Z0-9_]+$/.test(e.message)?e.message:'CONNECTION_GENERATION_UNVERIFIED');}
+  const root=path.join(layout.prefix,'connection','switchboard',CONNECTION_REF);
+  try{
+    for(const [rel,expected] of Object.entries(CONNECTION_FILES)){
+      const file=path.join(root,rel),st=fs.lstatSync(file);
+      if(!st.isFile()||st.nlink!==1||fs.realpathSync(file)!==file||(st.mode&0o022))throw Error('CONNECTION_SOURCE_CUSTODY_INVALID');
+      if(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==expected)throw Error('CONNECTION_SOURCE_CHANGED');
+    }
+  }catch(e){return blocked(['CONNECTION_SOURCE_CHANGED','CONNECTION_SOURCE_CUSTODY_INVALID'].includes(e.message)?e.message:'CONNECTION_RUNTIME_UNAVAILABLE');}
+  const env={...process.env};delete env.NODE_OPTIONS;delete env.NODE_PATH;
+  const child=spawnSync(process.execPath,['--experimental-strip-types',path.join(root,'scripts/device-native-consumer.mjs'),'--once'],{env,encoding:'utf8',timeout:70000,killSignal:'SIGKILL',maxBuffer:65536});
+  if(child.error||child.signal)return unknown('CONNECTION_PROCESS_INTERRUPTED');
+  try{
+    const output=(child.status===0?child.stdout:(child.stdout||child.stderr)).trim();
+    const value=JSON.parse(output);
+    const allowed=['EMPTY','BLOCKED','WAIT_TRANSPORT','RESULT_UNRETURNED','RESULT_RETURNED_TO_BROKER'];
+    const success=['EMPTY','RESULT_RETURNED_TO_BROKER'].includes(value?.state);
+    if(!allowed.includes(value?.state)||child.status!==(success?0:3)
+      ||(value.deviceRef!==undefined&&value.deviceRef!==process.env.XIIO_DEVICE_REF)
+      ||(value.state!=='BLOCKED'&&value.deviceRef!==process.env.XIIO_DEVICE_REF)
+      ||(value.state==='RESULT_RETURNED_TO_BROKER'&&value.brokerReturned!==true)
+      ||(value.state!=='RESULT_RETURNED_TO_BROKER'&&value.brokerReturned===true))throw Error('INVALID');
+    // Preserve native loss/return distinctions. Process success is not live proof.
+    return {...base,state:value.state,firstRed:value.firstRed||null,deviceRef:value.deviceRef||null,jobRef:value.jobRef||null,brokerReturned:value.brokerReturned===true,native_exit:child.status};
+  }catch{return unknown('CONNECTION_NATIVE_RESULT_INVALID');}
+}
+
 const rawArgv=process.argv.slice(2);
 let pre;try{pre=parse(rawArgv);}catch(e){emit({state:'FAIL',reason:String(e.message||e)},2);process.exit(2);}
 const explicitHelp=Boolean(pre.flags.help)||['help','-h'].includes(pre.command)&&pre.positionals.length>0;
@@ -1213,6 +1331,7 @@ else if(explicitHelp||['help','--help','-h'].includes(p.command)) result=help();
 else if(p.command==='rollback') result=rollback(p.flags);
 else if(p.command==='login') result=login();
 else if(p.command==='whoami') result=whoami();
+else if(p.command==='connect') result=connectCommand(rawArgv.slice(1));
 else if(p.command==='device'&&p.subcommand==='sign') result=deviceSign(p.args);
 else if(p.command==='activate') result=activate(p.positionals.slice(1),p.flags);
 else if(p.command==='doctor') result=await doctor();
@@ -1224,5 +1343,8 @@ else if(p.command==='install') result=installCommand(p.subcommand||p.args[0],p.f
 else if(p.command==='registry') result=registryCommand(p.subcommand,p.args,p.flags);
 else if(p.command==='runner') result=p.subcommand==='recover'?runnerRecover(p.flags):runnerDiagnose(p.flags);
 else if(p.command==='glass') result=await glassRead(p.flags);
+else if(p.command==='scan'&&p.subcommand==='local') result=await approvedLocalScan(workspaceRoot(p.flags.root||null),async()=>p.flags.apply===true);
+else if(p.command==='ux'&&['walk','triage'].includes(p.subcommand)){const root=workspaceRoot(p.flags.root||null);result=crossUxTriage(root,{terms:String(p.flags.terms||'local_scan,RCP,ibal').split(','),maxFiles:Number(p.flags['max-files']||4000),allowPath:p=>!credentialPath(p),readArtifact:rel=>readWorkspaceText(root,rel)});}
+else if(p.command==='ibal'&&p.subcommand==='balance') result=ibalBalanceGuide();
 else result={schema:'xiio.cli.error/v1',state:'FAIL',reason:'UNKNOWN_COMMAND',command:p.command,usage:help().usage};
-emit(result,result?.state==='FAIL'?2:0);
+emit(result,p.command==='scan'?(result?.state==='LOCAL_STATIC_OBSERVED'?result.process_status:2):p.command==='connect'&&!['EMPTY','RESULT_RETURNED_TO_BROKER'].includes(result?.state)?3:result?.state==='FAIL'?2:0);
