@@ -125,3 +125,44 @@ jobs:
           echo "RUNNING_SERVICES=NOT_TESTED"
           echo "FIRST_PARTY_SESSION_AND_WARD=UNBOUND"
           echo "CUSTOMER_TWO_WAY_CONNECTION=NOT_PROVEN"
+
+  native-core-package-candidate:
+    needs: [source-contract, child-bundle-kernel, native-source-checks]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Use pinned Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Prepare Linux Tauri package dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix native/hex/carrier --no-audit --no-fund
+      - name: Build exact-source native Debian candidate
+        run: npm run native:build
+      - name: Verify and label immutable candidate bytes
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(find native/hex/carrier/src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort)
+          test "${#packages[@]}" -eq 1
+          mkdir -p native-candidate
+          cp "${packages[0]}" native-candidate/
+          (cd native-candidate && sha256sum -- *.deb > SHA256SUMS)
+          printf 'SOURCE_SHA=%s\nSTATE=UNRELEASED_BUILD_CANDIDATE\nCORE_RELEASE_LOCK=NOT_PUBLISHED\nAUTHORITY_AND_DEVICE_RETURN=NOT_VERIFIED\n' "$GITHUB_SHA" > native-candidate/QUALIFICATION.txt
+          dpkg-deb -I "${packages[0]}" > native-candidate/DEBIAN-METADATA.txt
+          echo "Native Debian candidate built and hashed. Not a production release."
+      - name: Retain downloadable candidate for independent Linux review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hex-native-core-source-candidate
+          path: native-candidate/
+          if-no-files-found: error
+          retention-days: 7
