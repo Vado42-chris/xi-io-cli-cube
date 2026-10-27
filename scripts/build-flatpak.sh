@@ -7,6 +7,13 @@ BUILD_DIR="$ROOT_DIR/build/flatpak-build"
 REPO_DIR="$ROOT_DIR/dist/flatpak/repo"
 BUNDLE_OUT="$ROOT_DIR/dist/flatpak/com.xiio.hex.flatpak"
 
+# This must run BEFORE the frontend build or any staging effect. Missing
+# packaging capability is a typed failure, not a successful release.
+if ! command -v flatpak-builder >/dev/null 2>&1 || ! command -v flatpak >/dev/null 2>&1; then
+    echo "FLATPAK_BUILD_BLOCKED: flatpak-builder and flatpak CLI required; no release artifact created" >&2
+    exit 69
+fi
+
 echo "=== [1/4] Building root frontend distribution ==="
 cd "$ROOT_DIR"
 npm run build
@@ -29,14 +36,7 @@ fi
 chmod +x "$PACKAGING_DIR/xi-io-hex-dev"
 
 echo "=== [3/4] Verifying Flatpak prerequisites ==="
-if ! command -v flatpak-builder >/dev/null 2>&1; then
-    echo "Notice: 'flatpak-builder' not found in current environment."
-    echo "To build Flatpak on Pop!_OS, install prerequisites with:"
-    echo "    sudo apt update && sudo apt install -y flatpak flatpak-builder"
-    echo "    flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo"
-    echo "    flatpak install --user -y flathub org.gnome.Platform//46 org.gnome.Sdk//46"
-    exit 0
-fi
+# Host prerequisites were checked before any staging or frontend work.
 
 echo "=== [4/5] Building Flatpak package into OSTree repository ==="
 mkdir -p "$BUILD_DIR" "$REPO_DIR" "$(dirname "$BUNDLE_OUT")"
@@ -51,6 +51,10 @@ flatpak-builder \
 
 echo "=== [5/5] Creating standalone single-file bundle ==="
 flatpak build-bundle "$REPO_DIR" "$BUNDLE_OUT" com.xiio.hex stable
+if [ ! -s "$BUNDLE_OUT" ]; then
+    echo "FLATPAK_BUILD_BLOCKED: bundle output missing or empty" >&2
+    exit 70
+fi
 
 echo "=== Flatpak Build Complete ==="
 echo "OSTree Repository: $REPO_DIR"
