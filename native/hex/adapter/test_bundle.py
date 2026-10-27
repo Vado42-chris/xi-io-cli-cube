@@ -520,5 +520,26 @@ class BundleTests(unittest.TestCase):
         self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
 
 
+    def test_search_only_xdg_ancestor_remains_installable_without_listing_rights(self):
+        # A root/user-managed ancestor can be searchable (x) but not readable;
+        # O_PATH must work without relaxing the anti-symlink protections.
+        f = self.fixture()
+        f.child("cli")
+        outer = f.root / "search-only-parent"
+        inner = outer / "state"
+        inner.mkdir(parents=True, mode=0o700)
+        outer.chmod(0o111)
+        f.env["XDG_STATE_HOME"] = str(inner)
+        lock, digest = f.lock()
+        try:
+            result = install_bundle(lock, approved_lock_sha256=digest,
+                                    env=f.env, fetch=f.fetch)
+            self.assertEqual(result["state"], "INSTALLED_BYTES_VERIFIED")
+            state = inner / "xi-io/installer/bundles/core-test"
+            self.assertTrue(state.is_dir())
+            self.assertEqual(state.stat().st_mode & 0o777, 0o700)
+        finally:
+            outer.chmod(0o700)
+
 if __name__ == "__main__":
     unittest.main()

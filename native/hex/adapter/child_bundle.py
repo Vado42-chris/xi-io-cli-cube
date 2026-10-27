@@ -53,8 +53,11 @@ def _walk_nofollow(root: Path, *, create: bool) -> int:
              "BUNDLE_STATE_ROOT_NOT_ABSOLUTE")
     _require(hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
              "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
-    flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-             | getattr(os, "O_CLOEXEC", 0))
+    # O_PATH permits legitimate execute-only ancestors without requiring
+    # directory listing privilege. Every step remains descriptor-relative,
+    # checked by fstat/stat and refuses symlinks with O_NOFOLLOW.
+    flags = (getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY
+             | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
     fd = os.open("/", flags)
     try:
         for component in root.parts[1:]:
