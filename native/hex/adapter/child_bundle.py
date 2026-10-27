@@ -12,7 +12,9 @@ import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
+from contextlib import contextmanager
 import urllib.request
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
@@ -40,6 +42,132 @@ class BundleError(ValueError):
 def _require(condition: bool, reason: str) -> None:
     if not condition:
         raise BundleError(reason)
+
+
+# All bundle state writes run against the directory inode opened through the
+# caller's XDG path. Never create through a symlink or use an unanchored path
+# after checking it. This is Linux-only, as is the existing fcntl kernel.
+def _walk_nofollow(root: Path, *, create: bool) -> int:
+    root = Path(root)
+    _require(root.is_absolute() and root.parts[0] == "/",
+             "BUNDLE_STATE_ROOT_NOT_ABSOLUTE")
+    _require(hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
+             "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
+    flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+             | getattr(os, "O_CLOEXEC", 0))
+    fd = os.open("/", flags)
+    try:
+        for component in root.parts[1:]:
+            _require(component not in ("", ".", "..", "/"),
+                     "BUNDLE_STATE_ROOT_INVALID")
+            try:
+                child = os.open(component, flags, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=fd)
+                except FileExistsError:
+                    # A concurrent creator must still survive O_NOFOLLOW.
+                    pass
+                child = os.open(component, flags, dir_fd=fd)
+            try:
+                actual = os.fstat(child)
+                observed = os.stat(component, dir_fd=fd, follow_symlinks=False)
+                _require(stat.S_ISDIR(actual.st_mode)
+                         and (actual.st_dev, actual.st_ino)
+                         == (observed.st_dev, observed.st_ino),
+                         "BUNDLE_STATE_ROOT_RACED")
+            except BaseException:
+                os.close(child)
+                raise
+            os.close(fd)
+            fd = child
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _assert_state_root_current(original: Path, directory_fd: int) -> None:
+    """Deny path swaps before installation, including an ABA symlink race."""
+    try:
+        observed_fd = _walk_nofollow(original, create=False)
+    except (OSError, BundleError) as exc:
+        raise BundleError("BUNDLE_STATE_ROOT_CHANGED") from exc
+    try:
+        actual, observed = os.fstat(directory_fd), os.fstat(observed_fd)
+        _require((actual.st_dev, actual.st_ino)
+                 == (observed.st_dev, observed.st_ino),
+                 "BUNDLE_STATE_ROOT_CHANGED")
+    finally:
+        os.close(observed_fd)
+
+
+@contextmanager
+def _secured_bundle_state_root(root: Path):
+    # /proc/self/fd is the Linux inode-anchored pathname bridge needed by the
+    # unchanged pathlib/tempfile/kernel APIs; no new storage or installer.
+    _require(Path("/proc/self/fd").is_dir(),
+             "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
+    try:
+        directory_fd = _walk_nofollow(root, create=True)
+    except (OSError, BundleError) as exc:
+        raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+    try:
+        metadata = os.fstat(directory_fd)
+        _require(metadata.st_uid == os.getuid()
+                 and not (metadata.st_mode & 0o022),
+                 "BUNDLE_STATE_ROOT_PERMISSIONS")
+        anchored = Path("/proc/self/fd") / str(directory_fd)
+        _require(anchored.is_dir(), "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
+        _assert_state_root_current(root, directory_fd)
+        yield anchored, directory_fd
+    finally:
+        os.close(directory_fd)
+
+
+@contextmanager
+def _locked_bundle_state_file(directory_fd: int):
+    # An attacker-controlled apply.lock symlink cannot escape via Path.open().
+    try:
+        fd = os.open("apply.lock",
+                     os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW
+                     | getattr(os, "O_CLOEXEC", 0),
+                     0o600, dir_fd=directory_fd)
+    except OSError as exc:
+        raise BundleError("BUNDLE_APPLY_LOCK_UNTRUSTED") from exc
+    with os.fdopen(fd, "a+b") as lock:
+        metadata = os.fstat(lock.fileno())
+        _require(stat.S_ISREG(metadata.st_mode)
+                 and metadata.st_nlink == 1
+                 and metadata.st_uid == os.getuid()
+                 and not (metadata.st_mode & 0o022),
+                 "BUNDLE_APPLY_LOCK_UNTRUSTED")
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise BundleError("BUNDLE_APPLY_LOCK_BUSY") from exc
+        try:
+            yield lock
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _reject_existing_destination_symlinks(profile: dict, roots: dict) -> None:
+    """Preflight static XDG escapes before staging or installed-file effects.
+
+    The existing xiio_installer transaction still owns destination writes.
+    This is not a substitute for that kernel's concurrent-writer safeguards.
+    """
+    scopes = {entry.destination_scope
+              for role in profile["ordered_roles"]
+              for entry in profile["products"][role][0].entries}
+    for scope in sorted(scopes):
+        root = Path(roots[scope])
+        _require(root.is_absolute(), "BUNDLE_XDG_DESTINATION_NOT_ABSOLUTE")
+        _require(not any(path.is_symlink() for path in (root, *root.parents)),
+                 "BUNDLE_XDG_DESTINATION_SYMLINK_FORBIDDEN")
 
 
 def _sha(data: bytes) -> str:
@@ -237,10 +365,18 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
     roots = xdg_roots(env)
-    state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
-    state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    _require(not any(p.is_symlink() for p in (state_root, *state_root.parents)),
-             "BUNDLE_STATE_ROOT_UNTRUSTED")
+    _reject_existing_destination_symlinks(profile, roots)
+    original_state_root = (roots["xdg_state"] / "xi-io" / "installer"
+                           / "bundles" / profile["profile_id"])
+    with _secured_bundle_state_root(original_state_root) as (state_root, state_fd):
+        return _install_staged_bundle(
+            lock, profile, approved_lock_sha256, env, allowed_hosts, fetch,
+            fail_after_product, roots, state_root, state_fd, original_state_root)
+
+
+def _install_staged_bundle(lock, profile, approved_lock_sha256, env, allowed_hosts,
+                           fetch, fail_after_product, roots, state_root,
+                           state_fd, original_state_root):
     fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
     _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
     with tempfile.TemporaryDirectory(prefix="xiio-stage-", dir=state_root) as tmp:
@@ -265,15 +401,17 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
         _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
                  == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
 
-        lockfile = state_root / "apply.lock"
-        with lockfile.open("a+b") as lock_fd:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _assert_state_root_current(original_state_root, state_fd)
+        _reject_existing_destination_symlinks(profile, roots)
+        with _locked_bundle_state_file(state_fd):
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
                 plan_install(manifest, staged[role], env)
             applied = []
             try:
                 for role in profile["ordered_roles"]:
+                    _assert_state_root_current(original_state_root, state_fd)
+                    _reject_existing_destination_symlinks(profile, roots)
                     manifest = profile["products"][role][0]
                     receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
                                             + "-" + approved_lock_sha256[:12] + ".receipt.json")
@@ -283,6 +421,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                     applied.append(receipt)
                     if fail_after_product is not None and len(applied) == fail_after_product:
                         raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
+                _assert_state_root_current(original_state_root, state_fd)
             except Exception as cause:
                 failures = []
                 for receipt in reversed(applied):
@@ -293,8 +432,6 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 if failures:
                     raise BundleError("BUNDLE_PARTIAL_ROLLBACK_UNVERIFIED_DO_NOT_RETRY") from cause
                 raise BundleError("BUNDLE_APPLY_FAILED_ROLLED_BACK") from cause
-            finally:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
             return {
                 "schema_version": "xiio-installer-bundle-result-v1",
                 "state": "INSTALLED_BYTES_VERIFIED",
