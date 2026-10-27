@@ -370,11 +370,11 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                            / "bundles" / profile["profile_id"])
     with _secured_bundle_state_root(original_state_root) as (state_root, state_fd):
         return _install_staged_bundle(
-            profile, approved_lock_sha256, env, allowed_hosts, fetch,
+            lock, profile, approved_lock_sha256, env, allowed_hosts, fetch,
             fail_after_product, roots, state_root, state_fd, original_state_root)
 
 
-def _install_staged_bundle(profile, approved_lock_sha256, env, allowed_hosts,
+def _install_staged_bundle(lock, profile, approved_lock_sha256, env, allowed_hosts,
                            fetch, fail_after_product, roots, state_root,
                            state_fd, original_state_root):
     fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
