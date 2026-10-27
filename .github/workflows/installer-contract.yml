@@ -164,6 +164,28 @@ jobs:
           printf 'SOURCE_SHA=%s\nSTATE=UNRELEASED_BUILD_CANDIDATE\nCORE_RELEASE_LOCK=NOT_PUBLISHED\nAUTHORITY_AND_DEVICE_RETURN=NOT_VERIFIED\n' "$GITHUB_SHA" > native-candidate/QUALIFICATION.txt
           dpkg-deb -I "${packages[0]}" > native-candidate/DEBIAN-METADATA.txt
           echo "Native Debian candidate built and hashed. Not a production release."
+      - name: Install, independently inspect and remove freshly built Debian candidate
+        run: |
+          set -euo pipefail
+          test "${GITHUB_ACTIONS:-}" = true
+          mapfile -t packages < <(find native-candidate -maxdepth 1 -type f -name '*.deb' | sort)
+          test "${#packages[@]}" -eq 1
+          deb="${packages[0]}"
+          test "$(dpkg-deb -f "$deb" Package)" = "xi-io-hex-dev"
+          test "$(dpkg-deb -f "$deb" Architecture)" = "amd64"
+          test ! -e "/usr/lib/XI-IO HEX DEV/adapter/child_bundle.py"
+          sudo apt-get --simulate --no-remove install "$deb" > native-candidate/apt-plan.txt
+          ! grep -q '^Remv ' native-candidate/apt-plan.txt
+          sudo apt-get -y --no-remove install "$deb"
+          dpkg-query -W -f='${Status}\n' xi-io-hex-dev | grep -Fx 'install ok installed'
+          test -f "/usr/lib/XI-IO HEX DEV/adapter/child_bundle.py"
+          test -f "/usr/lib/XI-IO HEX DEV/adapter/test_core_bundle_native.py"
+          test -f "/usr/lib/XI-IO HEX DEV/adapter/installer_adapter.py"
+          test -z "$(sudo dpkg --verify xi-io-hex-dev)"
+          sudo apt-get -y remove xi-io-hex-dev
+          ! dpkg-query -W -f='${db:Status-Abbrev}' xi-io-hex-dev 2>/dev/null | grep -q '^ii'
+          test ! -e "/usr/lib/XI-IO HEX DEV/adapter/child_bundle.py"
+          echo "NATIVE_NEW_CORE_CANDIDATE_INSTALL_READBACK_REMOVE_PASS"
       - name: Retain downloadable candidate for independent Linux review
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
