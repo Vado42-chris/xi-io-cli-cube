@@ -357,5 +357,22 @@ class BundleTests(unittest.TestCase):
         self.assertTrue((Path(f.env["XDG_DATA_HOME"]) /
                          "xi-io/cli/cli.bin").is_file())
 
+    def test_search_only_xdg_ancestor_remains_installable_without_listing_rights(self):
+        f = self.fixture()
+        f.child("cli")
+        outer = f.root / "search-only-parent"
+        inner = outer / "state"
+        inner.mkdir(parents=True, mode=0o700)
+        outer.chmod(0o111)
+        f.env["XDG_STATE_HOME"] = str(inner)
+        lock, digest = f.lock()
+        try:
+            result = install_bundle(lock, approved_lock_sha256=digest,
+                                    env=f.env, fetch=f.fetch)
+            self.assertEqual(result["state"], "INSTALLED_BYTES_VERIFIED")
+            self.assertTrue((inner / "xi-io/installer/bundles/core-test").is_dir())
+        finally:
+            outer.chmod(0o700)
+
 if __name__ == "__main__":
     unittest.main()

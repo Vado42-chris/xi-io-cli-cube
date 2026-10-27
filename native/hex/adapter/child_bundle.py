@@ -53,8 +53,10 @@ def _walk_nofollow(root: Path, *, create: bool) -> int:
              "BUNDLE_STATE_ROOT_NOT_ABSOLUTE")
     _require(hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY"),
              "BUNDLE_SECURE_DIRFD_UNAVAILABLE")
-    flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-             | getattr(os, "O_CLOEXEC", 0))
+    # O_PATH preserves execute-only directory traversal while O_NOFOLLOW
+    # and inode comparisons keep the original anti-symlink boundary.
+    flags = (getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY
+             | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
     fd = os.open("/", flags)
     try:
         for component in root.parts[1:]:
