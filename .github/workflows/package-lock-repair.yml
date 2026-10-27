@@ -1,0 +1,39 @@
+name: Repair package lock
+
+on:
+  push:
+    branches:
+      - fix/package-lock-sync-20261027
+
+permissions:
+  contents: write
+
+jobs:
+  repair-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Regenerate lockfile from accepted manifest
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Prove clean install from regenerated lock
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Commit regenerated lock when changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json already synchronized"
+            exit 0
+          fi
+          git config user.name "xi-io lockfile repair"
+          git config user.email "actions@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "fix(ci): resync package lock with accepted manifest"
+          git push origin HEAD:fix/package-lock-sync-20261027
