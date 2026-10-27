@@ -17,7 +17,7 @@ permissions:
   contents: read
 jobs:
   flatpak-native-candidate:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - name: Checkout exact product carrier and build manifests
@@ -35,6 +35,10 @@ jobs:
           sudo apt-get install -y flatpak flatpak-builder imagemagick xvfb xdotool dbus-x11 build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf
           flatpak --version
           flatpak-builder --version
+          # Ubuntu 22.04 builder 1.2.x attempts removed appstream-compose
+          # inside GNOME50. Builder >=1.4 uses appstreamcli and preserves
+          # metadata validation; never bypass appstream-compose.
+          python3 -c 'import subprocess; v=subprocess.check_output(["flatpak-builder","--version"],text=True).strip().split()[-1].split("."); assert tuple(map(int,v[:2])) >= (1,4), "FLATPAK_BUILDER_1_4_REQUIRED"'
       - name: Pin current Rust compiler for exact Cargo.lock native build
         run: |
           set -euo pipefail
