@@ -16,7 +16,7 @@ fi
 
 # The canonical logo remains untouched. Export a disposable sized derivative
 # for Flatpak's strict 512x512 app-icon slot, then restore a clean workspace.
-BUILDER_VERSION="$(flatpak-builder --version | awk '{print $NF}')"
+BUILDER_VERSION="$(flatpak-builder --version | grep -Eo '[0-9]+\\.[0-9]+(\\.[0-9]+)?' | head -n 1)"
 if [[ ! "$BUILDER_VERSION" =~ ^([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]]; then
     echo "FLATPAK_BUILD_BLOCKED: builder version unreadable" >&2
     exit 69
