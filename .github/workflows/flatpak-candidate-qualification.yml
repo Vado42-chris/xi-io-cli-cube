@@ -1,0 +1,56 @@
+name: HEX Flatpak candidate native build and install
+on:
+  pull_request:
+    paths:
+      - 'packaging/flatpak/**'
+      - 'scripts/build-flatpak.sh'
+      - 'tests/flatpak-builder-admission.test.mjs'
+      - '.github/workflows/flatpak-candidate-qualification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  flatpak-native-candidate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact product carrier and build manifests
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Use pinned Node 24.22.1
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Verify exact npm package-lock custody
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install actual Flatpak Linux build prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak --version
+          flatpak-builder --version
+      - name: Materialize referenced GNOME 46 SDK and runtime
+        run: |
+          set -euo pipefail
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.gnome.Platform//46 org.gnome.Sdk//46
+      - name: Build the existing native Flatpak candidate, without fallback
+        run: |
+          set -euo pipefail
+          bash scripts/build-flatpak.sh
+          test -s dist/flatpak/com.xiio.hex.flatpak
+          stat -c 'FLATPAK_ACTUAL_BYTES=%s' dist/flatpak/com.xiio.hex.flatpak
+          sha256sum dist/flatpak/com.xiio.hex.flatpak
+      - name: Install the actual built bundle, then independently inspect it
+        run: |
+          set -euo pipefail
+          flatpak install --user -y --noninteractive dist/flatpak/com.xiio.hex.flatpak
+          flatpak info --user com.xiio.hex
+          flatpak run --user --command=sh com.xiio.hex -c 'test -x /app/bin/xi-io-hex-dev && test -f "/app/lib/xi-io-hex/adapter/installer_adapter.py"'
+          echo "INSTALLED_FLATPAK_ELF_AND_ADAPTER_READBACK_PASS_NOT_PHYSICAL_POP_OS"
+      - name: Publish inspectable exact candidate artifact, never claim an approved release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hex-flatpak-native-candidate-${{ github.sha }}
+          path: dist/flatpak/com.xiio.hex.flatpak
+          if-no-files-found: error
