@@ -108,7 +108,7 @@ jobs:
           test "${GITHUB_ACTIONS:-}" = true
           mapfile -t packages < <(find native-candidate -maxdepth 1 -type f -name '*.deb' | sort)
           test "${#packages[@]}" -eq 1
-          deb="${packages[0]}"
+          deb="$(realpath -- "${packages[0]}")"
           test "$(dpkg-deb -f "$deb" Package)" = "xi-io-hex-dev"
           test "$(dpkg-deb -f "$deb" Architecture)" = "amd64"
           test ! -e "/usr/lib/XI-IO HEX DEV/adapter/child_bundle.py"
