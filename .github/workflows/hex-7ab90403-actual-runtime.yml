@@ -1,0 +1,162 @@
+name: XI-IO HEX 7ab90403 independent native runtime
+on:
+  pull_request:
+    paths: [".github/workflows/hex-7ab90403-actual-runtime.yml"]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  immutable-deb-window-and-ipc:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact pinned product source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 7ab90403678bcaaef73b2bf465915aa25b8acffd
+      - name: Install supported Node for disposable CLI
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Retrieve exact release candidate and independently verify source bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 7ab90403678bcaaef73b2bf465915aa25b8acffd
+          mkdir -p "$RUNNER_TEMP/hex-candidate" "$RUNNER_TEMP/hex-proof"
+          gh run download 40573821258 --repo Vado42-chris/xi-io-cli-cube --name hex-native-core-source-candidate --dir "$RUNNER_TEMP/hex-candidate"
+          cd "$RUNNER_TEMP/hex-candidate"
+          sha256sum -c SHA256SUMS
+          deb="$(find . -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          test -n "$deb"
+          test "$(stat -c %s "$deb")" = 6698412
+          test "$(sha256sum "$deb" | cut -d' ' -f1)" = f9351779d73c34f13e6f1d70a24f33c887a2b1277dae5c79556a8c93b14f185c
+          test "$(dpkg-deb -f "$deb" Package)" = xi-io-hex-dev
+          test "$(dpkg-deb -f "$deb" Architecture)" = amd64
+          test "$(grep '^SOURCE_SHA=' QUALIFICATION.txt)" = SOURCE_SHA=14c66013b311f2a878f9ad5c76dd37d044be18f6
+          mkdir -p "$RUNNER_TEMP/hex-payload"
+          dpkg-deb -x "$deb" "$RUNNER_TEMP/hex-payload"
+          for p in child_bundle.py test_bundle.py installer_adapter.py test_core_bundle_native.py; do
+            test "$(git -C "$GITHUB_WORKSPACE" rev-parse "HEAD:native/hex/adapter/$p")" = "$(git hash-object "$RUNNER_TEMP/hex-payload/usr/lib/XI-IO HEX DEV/adapter/$p")"
+          done
+          test "$(sha256sum "$RUNNER_TEMP/hex-payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = 05ea58005b9f3ecbf249d1a82a2cde9cac5ad37efdb5346c0ab2b68e1ba774b8
+          printf 'SOURCE_REF=7ab90403678bcaaef73b2bf465915aa25b8acffd\nDEB_SHA256=f9351779d73c34f13e6f1d70a24f33c887a2b1277dae5c79556a8c93b14f185c\nDEB_BYTES=6698412\nPAYLOAD_SOURCE_MATCH=PASS\n' > "$RUNNER_TEMP/hex-proof/artifact-identity.txt"
+      - name: Install exact package and GUI test dependencies on disposable Linux
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xdotool scrot dbus-x11
+          deb="$(find "$RUNNER_TEMP/hex-candidate" -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          test -n "$deb"
+          sudo apt-get -y --no-remove install "$deb"
+          dpkg-query -W -f='${Status}\n' xi-io-hex-dev | grep -Fx 'install ok installed'
+          test -z "$(sudo dpkg --verify xi-io-hex-dev)"
+      - name: Verify installed native adapter IPC contract and real CLI rollback
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, tempfile, shutil
+          root=pathlib.Path(tempfile.mkdtemp(prefix='hex-7ab-qa-',dir=os.environ['RUNNER_TEMP']))
+          for name in ('home','config','state','data','cache','prefix','tmp'):
+              (root/name).mkdir(mode=0o700)
+          sentinel=root/'home'/'owned-by-user.txt'
+          sentinel.write_bytes(b'USER BYTES UNCHANGED\n')
+          env={k:v for k,v in os.environ.items() if k in ('PATH','LANG','LC_ALL')}
+          env.update({'HOME':str(root/'home'),'XDG_STATE_HOME':str(root/'state'),
+                      'XDG_DATA_HOME':str(root/'data'),'XDG_CONFIG_HOME':str(root/'config'),
+                      'XDG_CACHE_HOME':str(root/'cache'),'TMPDIR':str(root/'tmp'),
+                      'PYTHONDONTWRITEBYTECODE':'1'})
+          adapter='/usr/lib/XI-IO HEX DEV/adapter/installer_adapter.py'
+          receipts=[]
+          def call(name,req,ok=True,phase=None):
+              p=subprocess.run(['/usr/bin/python3','-I','-B',adapter],
+                  input=json.dumps(req),text=True,capture_output=True,timeout=100,
+                  cwd='/usr/lib/XI-IO HEX DEV/adapter',env=env)
+              assert p.returncode==0,(name,p.stderr[-300:])
+              response=json.loads(p.stdout)
+              assert response.get('ok') is ok,(name,response)
+              result=response.get('result',{})
+              if phase:
+                  assert result.get('phase')==phase,(name,result.get('phase'))
+              assert sentinel.read_bytes()==b'USER BYTES UNCHANGED\n'
+              receipts.append({'case':name,'ok':response.get('ok'),'phase':result.get('phase'),
+                               'denial':response.get('error')})
+              return result
+          call('bundle_unpublished',{'action':'bundle_inspect'},phase='BLOCKED_RELEASE_PROFILE_UNPUBLISHED')
+          call('apply_unpublished',{'action':'bundle_apply','approved':True,'lock_sha256':'a'*64},False)
+          call('invalid_request',{'action':'remote_shell'},False)
+          node=shutil.which('node')
+          assert node and os.path.isabs(node)
+          first=call('prepare_first',{'action':'prepare','prefix':str(root/'prefix'),'node':node,'components':['cli']},phase='PREPARED_NOT_INSTALLED')
+          one,approval=first['plan_id'],first['approval_digest']
+          call('bad_approval',{'action':'apply','plan_id':one,'approval_digest':'0'*64,'approved':True},False)
+          installed=call('apply_first',{'action':'apply','plan_id':one,'approval_digest':approval,'approved':True},phase='INSTALLED_READBACK_VERIFIED')
+          assert installed.get('connected') is False and installed.get('connection_state')=='CONFIGURATION_REQUIRED'
+          original=(root/'prefix/current').read_text().strip()
+          call('restart_readback',{'action':'readback','plan_id':one},phase='INSTALLED_READBACK_VERIFIED')
+          v=subprocess.run([str(root/'prefix/bin/xi-io-cli'),'version'],
+              capture_output=True,text=True,env=env,timeout=20)
+          assert v.returncode==0 and json.loads(v.stdout)['integrity_verified'] is True
+          c=subprocess.run([str(root/'prefix/bin/xi-io-connect')],
+              capture_output=True,text=True,env=env,timeout=20)
+          assert c.returncode != 0 and json.loads(c.stdout).get('state')=='CONFIGURATION_REQUIRED'
+          call('duplicate_apply',{'action':'apply','plan_id':one,'approval_digest':approval,'approved':True},False)
+          call('first_rollback_refused',{'action':'rollback','plan_id':one,'approval_digest':approval,'approved':True},False)
+          second=call('prepare_second',{'action':'prepare','prefix':str(root/'prefix'),'node':node,'components':['cli']},phase='PREPARED_NOT_INSTALLED')
+          two,approval2=second['plan_id'],second['approval_digest']
+          call('apply_second',{'action':'apply','plan_id':two,'approval_digest':approval2,'approved':True},phase='INSTALLED_READBACK_VERIFIED')
+          assert (root/'prefix/current').read_text().strip()!=original
+          call('second_readback',{'action':'readback','plan_id':two},phase='INSTALLED_READBACK_VERIFIED')
+          call('rollback',{'action':'rollback','plan_id':two,'approval_digest':approval2,'approved':True},phase='ROLLED_BACK')
+          assert (root/'prefix/current').read_text().strip()==original
+          call('rollback_readback',{'action':'readback','plan_id':two},phase='ROLLED_BACK')
+          proof={'state':'PASS','cases':receipts,'sentinel_preserved':True,
+                 'backend_adapter_installed':True,'browser_to_tauri_ipc_qualified':False,
+                 'remote_connected':False}
+          (pathlib.Path(os.environ['RUNNER_TEMP'])/'hex-proof'/'native-adapter-proof.json').write_text(json.dumps(proof,indent=2)+'\n')
+          print('PACKAGED_ADAPTER_INSTALL_UPDATE_RESTART_ROLLBACK_PASS',len(receipts))
+          PY
+      - name: Start actual installed Tauri window twice in disposable Xvfb
+        run: |
+          set -euo pipefail
+          for pass in 1 2; do
+            out="$RUNNER_TEMP/hex-proof/window-$pass"
+            mkdir -p "$out" "$out/home" "$out/state" "$out/config" "$out/data" "$out/cache"
+            chmod 0700 "$out/home" "$out/state" "$out/config" "$out/data" "$out/cache"
+            QA="$out" xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash -euo pipefail -c '
+              export HOME="$QA/home" XDG_CONFIG_HOME="$QA/config" XDG_DATA_HOME="$QA/data" XDG_STATE_HOME="$QA/state" XDG_CACHE_HOME="$QA/cache"
+              export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1
+              /usr/bin/xi-io-hex-dev >"$QA/window-stdout.log" 2>"$QA/window-stderr.log" & app=$!
+              trap "kill $app 2>/dev/null || true; wait $app 2>/dev/null || true" EXIT
+              wid=""
+              for i in $(seq 1 100); do
+                if ! kill -0 "$app" 2>/dev/null; then echo NATIVE_ELF_EXITED; head -50 "$QA/window-stderr.log"; exit 1; fi
+                wid="$(xdotool search --onlyvisible --name "XI-IO HEX" 2>/dev/null | head -1 || true)"
+                test -z "$wid" || break
+                sleep 0.3
+              done
+              test -n "$wid" || { echo NATIVE_WINDOW_MISSING; head -50 "$QA/window-stderr.log"; exit 1; }
+              test "$(xdotool getwindowname "$wid")" = "XI-IO HEX"
+              xdotool getwindowgeometry --shell "$wid" > "$QA/geometry.env"
+              scrot -z "$QA/native-window.png"
+              test -s "$QA/native-window.png"
+              sleep 2
+              kill -0 "$app"
+              echo NATIVE_WINDOW_VISIBLE_PASS > "$QA/result.txt"
+            '
+          done
+      - name: Remove exact installed package
+        if: always()
+        run: |
+          sudo apt-get -y remove xi-io-hex-dev || true
+          test ! -e /usr/bin/xi-io-hex-dev
+      - name: Retain independent runtime receipts without advertising release
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hex-7ab90403-native-runtime-proof
+          path: ${{ runner.temp }}/hex-proof/
+          if-no-files-found: warn
+          retention-days: 7
