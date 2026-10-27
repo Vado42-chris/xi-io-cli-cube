@@ -93,3 +93,12 @@ test('current seven-file payload and historical repair verifier keep separate ex
  assert.equal(createHash('sha256').update(read(base+repair.verification_resource.path)).digest('hex'),repair.verification_resource.sha256);
  assert.notEqual(repair.verification_resource.sha256,payload.files['src/runtime-integrity.mjs'].sha256);
 });
+
+
+test('uncertain core bundle blocks apply but keeps read-only reconciliation reachable',()=>{
+ const panel=read('src/components/NativeInstallerPanel.tsx');
+ assert.match(panel,/busyRef\.current \|\| \(coreUnknown && request\.action === 'bundle_apply'\)/);
+ assert.match(panel,/action:'bundle_inspect'/);
+ assert.doesNotMatch(panel,/disabled=\{busy \|\| coreUnknown\}[\s\S]{0,180}bundle_inspect/);
+ assert.match(panel,/setCoreUnknown\(result\?\.do_not_retry === true/);
+});
