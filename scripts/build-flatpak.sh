@@ -11,31 +11,25 @@ echo "=== [1/4] Building root frontend distribution ==="
 cd "$ROOT_DIR"
 npm run build
 
-echo "=== [2/4] Ensuring native carrier binary is staged ==="
-if [ ! -f "$PACKAGING_DIR/xi-io-hex-dev" ]; then
-    if [ -f "$ROOT_DIR/deliveries/hex-dev/0.1.0-dev.9/xi-io-hex-dev_0.1.0-dev.9_amd64.deb" ]; then
-        echo "Staging qualified native xi-io-hex-dev binary from debian delivery..."
-        TMP_EXTRACT=$(mktemp -d)
-        dpkg-deb -x "$ROOT_DIR/deliveries/hex-dev/0.1.0-dev.9/xi-io-hex-dev_0.1.0-dev.9_amd64.deb" "$TMP_EXTRACT"
-        cp "$TMP_EXTRACT/usr/bin/xi-io-hex-dev" "$PACKAGING_DIR/xi-io-hex-dev"
-        rm -rf "$TMP_EXTRACT"
-    elif [ -f "$ROOT_DIR/native/hex/carrier/src-tauri/target/release/xi-io-hex-dev" ]; then
-        cp "$ROOT_DIR/native/hex/carrier/src-tauri/target/release/xi-io-hex-dev" "$PACKAGING_DIR/xi-io-hex-dev"
-    else
-        echo "Error: Native carrier binary xi-io-hex-dev not found." >&2
-        exit 1
-    fi
+echo "=== [2/5] Verifying fresh native carrier build binary ==="
+CARRIER_RELEASE_BIN="$ROOT_DIR/native/hex/carrier/src-tauri/target/release/xi-io-hex-dev"
+if [ ! -f "$CARRIER_RELEASE_BIN" ]; then
+    echo "Error: Fresh native carrier binary not found at $CARRIER_RELEASE_BIN." >&2
+    echo "The native carrier must be built from the current source revision in CI." >&2
+    echo "DEV9 in deliveries/ is historical evidence and cannot substitute for the current build." >&2
+    exit 1
 fi
-chmod +x "$PACKAGING_DIR/xi-io-hex-dev"
+cp "$CARRIER_RELEASE_BIN" "$PACKAGING_DIR/xi-io-hex-dev"
+chmod 755 "$PACKAGING_DIR/xi-io-hex-dev"
 
-echo "=== [3/4] Verifying Flatpak prerequisites ==="
+echo "=== [3/5] Verifying Flatpak prerequisites ==="
 if ! command -v flatpak-builder >/dev/null 2>&1; then
-    echo "Notice: 'flatpak-builder' not found in current environment."
-    echo "To build Flatpak on Pop!_OS, install prerequisites with:"
-    echo "    sudo apt update && sudo apt install -y flatpak flatpak-builder"
-    echo "    flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo"
-    echo "    flatpak install --user -y flathub org.gnome.Platform//46 org.gnome.Sdk//46"
-    exit 0
+    echo "Error: 'flatpak-builder' not found in current environment." >&2
+    echo "To build Flatpak on Pop!_OS, install prerequisites with:" >&2
+    echo "    sudo apt update && sudo apt install -y flatpak flatpak-builder" >&2
+    echo "    flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo" >&2
+    echo "    flatpak install --user -y flathub org.gnome.Platform//46 org.gnome.Sdk//46" >&2
+    exit 1
 fi
 
 echo "=== [4/5] Building Flatpak package into OSTree repository ==="
@@ -44,6 +38,7 @@ mkdir -p "$BUILD_DIR" "$REPO_DIR" "$(dirname "$BUNDLE_OUT")"
 cd "$PACKAGING_DIR"
 flatpak-builder \
     --force-clean \
+    --default-branch=stable \
     --repo="$REPO_DIR" \
     --state-dir="$BUILD_DIR/.flatpak-builder" \
     "$BUILD_DIR/app" \

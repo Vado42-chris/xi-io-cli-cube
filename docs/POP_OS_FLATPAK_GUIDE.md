@@ -88,7 +88,7 @@ Broad `--filesystem=home` is explicitly avoided. Sandboxed permissions are stric
 | Permission | Purpose |
 | :--- | :--- |
 | `--filesystem=xdg-data/xi-io:create` | Dedicated local product storage (`~/.local/share/xi-io/`) |
-| `--filesystem=xdg-state/xi-io:create` | Pinned state and receipt storage (`~/.local/state/xi-io/`) |
+| `--filesystem=~/.local/state/xi-io:create` | Pinned state and receipt storage (`~/.local/state/xi-io/`) |
 | `--filesystem=xdg-config/xi-io:create` | Device identity and non-secret config (`~/.config/xi-io/`) |
 | `--filesystem=xdg-cache/xi-io:create` | Temporary download cache (`~/.cache/xi-io/`) |
 | `--filesystem=~/.local/bin:create` | Installation target for CLI symlink launchers |
