@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
 import urllib.request
 from pathlib import Path, PurePosixPath
@@ -222,6 +223,128 @@ def load_bundle_profile(lock: Path, *,
     }
 
 
+MAX_RECEIPT_BYTES = 2 * 1024 * 1024
+
+
+def _bundle_receipt_path(state_root: Path, role: str, manifest: ProductManifest,
+                         lock_sha256: str) -> Path:
+    return state_root / (role + "-" + manifest.version.replace("/", "-")
+                         + "-" + lock_sha256[:12] + ".receipt.json")
+
+
+def _destination_path(entry, roots: dict[str, Path]) -> Path:
+    root = roots[entry.destination_scope].resolve()
+    candidate = root / entry.destination
+    parent = candidate.parent.resolve(strict=False)
+    _require(parent == root or root in parent.parents,
+             "BUNDLE_DESTINATION_ESCAPES_SCOPE")
+    return candidate
+
+
+def _receipt_and_bytes_match(receipt: Path, manifest: ProductManifest,
+                             roots: dict[str, Path]) -> None:
+    raw = _safe_existing_file(receipt, MAX_RECEIPT_BYTES)
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise BundleError("BUNDLE_RECEIPT_JSON_INVALID") from exc
+    _require(isinstance(data, dict)
+             and data.get("schema_version") == "xiio-installer-receipt-v1"
+             and data.get("product_id") == manifest.product_id
+             and data.get("profile_id") == manifest.profile_id
+             and data.get("version") == manifest.version
+             and data.get("channel") == manifest.channel
+             and data.get("fixture") == manifest.fixture,
+             "BUNDLE_RECEIPT_IDENTITY_MISMATCH")
+    rows = data.get("entries")
+    _require(isinstance(rows, list) and len(rows) == len(manifest.entries),
+             "BUNDLE_RECEIPT_DENOMINATOR_MISMATCH")
+    keyed = {}
+    for row in rows:
+        _require(isinstance(row, dict), "BUNDLE_RECEIPT_ENTRY_INVALID")
+        key = (row.get("source"), row.get("destination_scope"), row.get("destination"))
+        _require(key not in keyed, "BUNDLE_RECEIPT_ENTRY_DUPLICATE")
+        keyed[key] = row
+    for entry in manifest.entries:
+        key = (entry.source, entry.destination_scope, entry.destination)
+        row = keyed.get(key)
+        _require(row is not None
+                 and row.get("expected_sha256") == entry.sha256
+                 and row.get("installed_sha256") == entry.sha256
+                 and row.get("expected_mode") == entry.mode
+                 and row.get("installed_mode") == entry.mode,
+                 "BUNDLE_RECEIPT_ENTRY_MISMATCH")
+        dest = _destination_path(entry, roots)
+        _require(not dest.is_symlink() and dest.is_file(),
+                 "BUNDLE_INSTALLED_FILE_MISSING_OR_UNTRUSTED")
+        _require(sha256_file(dest) == entry.sha256
+                 and stat.S_IMODE(dest.stat().st_mode) == entry.mode,
+                 "BUNDLE_INSTALLED_BYTES_DRIFT")
+
+
+def inspect_bundle_install(lock: Path, *, approved_lock_sha256: str,
+                           env: dict[str, str] | None = None,
+                           allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS):
+    """Reconcile exact receipts and destination bytes without changing anything."""
+    _require(isinstance(approved_lock_sha256, str)
+             and SHA256.fullmatch(approved_lock_sha256), "BUNDLE_APPROVAL_INVALID")
+    profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
+    _require(profile["lock_sha256"] == approved_lock_sha256,
+             "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    roots = xdg_roots(env)
+    state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
+    _require(not any(p.is_symlink() for p in (state_root, *state_root.parents)),
+             "BUNDLE_STATE_ROOT_UNTRUSTED")
+    role_states = {}
+    receipt_count = 0
+    try:
+        for role in profile["ordered_roles"]:
+            manifest = profile["products"][role][0]
+            receipt = _bundle_receipt_path(state_root, role, manifest, approved_lock_sha256)
+            if receipt.is_symlink():
+                raise BundleError("BUNDLE_RECEIPT_SYMLINK_FORBIDDEN")
+            if receipt.exists():
+                _receipt_and_bytes_match(receipt, manifest, roots)
+                role_states[role] = "INSTALLED_RECEIPT_VERIFIED"
+                receipt_count += 1
+                continue
+            # A destination without its transaction receipt is precisely the
+            # crash seam this readback exists to preserve. Matching bytes are
+            # still uncertain because their original creation custody is gone.
+            present = False
+            for entry in manifest.entries:
+                dest = _destination_path(entry, roots)
+                if dest.is_symlink() or dest.exists():
+                    present = True
+                    break
+            role_states[role] = "UNRECEIPTED_DESTINATION_PRESENT" if present else "ABSENT"
+        states = set(role_states.values())
+        if states == {"ABSENT"}:
+            state = "NOT_INSTALLED"
+            first_red = None
+        elif states == {"INSTALLED_RECEIPT_VERIFIED"}:
+            state = "INSTALLED_BYTES_VERIFIED"
+            first_red = None
+        else:
+            state = "OUTCOME_UNCERTAIN"
+            first_red = "BUNDLE_MIXED_OR_UNRECEIPTED_STATE"
+    except (BundleError, OSError, ValueError, TypeError, KeyError) as exc:
+        state = "OUTCOME_UNCERTAIN"
+        first_red = str(exc)[:256] or "BUNDLE_READBACK_FAILED"
+    return {
+        "schema_version": "xiio-installer-bundle-inspection-v1",
+        "state": state,
+        "profile_id": profile["profile_id"],
+        "lock_sha256": approved_lock_sha256,
+        "roles": role_states,
+        "receipt_count": receipt_count,
+        "first_red": first_red,
+        "effects_authorized": False,
+        "runtime_qualified": False,
+        "device_connected": False,
+    }
+
+
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
                    env: dict[str, str] | None = None,
                    allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS,
@@ -275,8 +398,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             try:
                 for role in profile["ordered_roles"]:
                     manifest = profile["products"][role][0]
-                    receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
-                                            + "-" + approved_lock_sha256[:12] + ".receipt.json")
+                    receipt = _bundle_receipt_path(state_root, role, manifest, approved_lock_sha256)
                     _require(not receipt.exists() and not receipt.is_symlink(),
                              "BUNDLE_RECEIPT_ALREADY_EXISTS")
                     apply_install(manifest, staged[role], receipt, env)
