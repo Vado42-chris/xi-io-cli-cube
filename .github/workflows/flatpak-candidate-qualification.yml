@@ -73,7 +73,7 @@ jobs:
           flatpak run --user --command=sh com.xiio.hex -c 'test -s /app/share/xi-io-hex/source-provenance.json && test -x /app/bin/xi-io-hex-dev'
           export EXPECTED_SOURCE_COMMIT="$(git rev-parse --verify HEAD)"
           export EXPECTED_CARGO_LOCK_SHA="$(sha256sum native/hex/carrier/src-tauri/Cargo.lock | cut -d' ' -f1)"
-          flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B -c 'import json,pathlib,os; p=json.loads(pathlib.Path("/app/share/xi-io-hex/source-provenance.json").read_text()); assert p["schema"]=="xiio.flatpak.native-source-provenance/v1"; assert p["historical_dev9_elf_used"] is False; assert p["source_commit"]==os.environ["EXPECTED_SOURCE_COMMIT"]; assert p["cargo_lock_sha256"]==os.environ["EXPECTED_CARGO_LOCK_SHA"]; assert len(p["native_elf_sha256"])==64 and len(p["native_elf_build_id"])>=32; print("FRESH_NATIVE_ELF_PROVENANCE_SOURCE_BINDING_PASS")'
+          flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B -c 'import json,pathlib,sys; p=json.loads(pathlib.Path("/app/share/xi-io-hex/source-provenance.json").read_text()); assert p["schema"]=="xiio.flatpak.native-source-provenance/v1"; assert p["historical_dev9_elf_used"] is False; assert p["source_commit"]==sys.argv[1]; assert p["cargo_lock_sha256"]==sys.argv[2]; assert len(p["native_elf_sha256"])==64 and len(p["native_elf_build_id"])>=32; print("FRESH_NATIVE_ELF_PROVENANCE_SOURCE_BINDING_PASS")' "$EXPECTED_SOURCE_COMMIT" "$EXPECTED_CARGO_LOCK_SHA"
           INSTALL_LOCATION="$(flatpak info --user --show-location com.xiio.hex)"
           test -f "$INSTALL_LOCATION/files/bin/xi-io-hex-dev"
           INSTALLED_BUILD_ID="$(readelf -n "$INSTALL_LOCATION/files/bin/xi-io-hex-dev" | awk '/Build ID:/{print $3; exit}')"
