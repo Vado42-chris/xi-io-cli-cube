@@ -61,6 +61,7 @@ mkdir -p "$BUILD_DIR" "$REPO_DIR" "$(dirname "$BUNDLE_OUT")"
 
 cd "$PACKAGING_DIR"
 flatpak-builder \
+    --default-branch=stable \
     --force-clean \
     --repo="$REPO_DIR" \
     --state-dir="$BUILD_DIR/.flatpak-builder" \
