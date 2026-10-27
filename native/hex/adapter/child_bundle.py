@@ -15,6 +15,7 @@ import re
 import stat
 import tempfile
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
@@ -287,11 +288,375 @@ def _secure_ensure_state_root(state_root: Path) -> Path:
 
     return state_root
 
+def _secure_observe_state_root(state_root: Path) -> Path:
+    """Traverse an existing state path with O_NOFOLLOW without creating it."""
+    _require(isinstance(state_root, Path), "BUNDLE_STATE_ROOT_UNTRUSTED")
+    _require(state_root.is_absolute(), "BUNDLE_STATE_ROOT_UNTRUSTED")
+    parts = state_root.parts
+    _require(len(parts) > 1 and parts[0] == "/", "BUNDLE_STATE_ROOT_UNTRUSTED")
+    open_flags = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
+    nofollow_flags = open_flags | os.O_NOFOLLOW
+    try:
+        current_fd = os.open("/", open_flags)
+    except OSError as exc:
+        raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+    try:
+        for part in parts[1:]:
+            _require(bool(part) and part not in (".", "..") and "\x00" not in part and "/" not in part,
+                     "BUNDLE_STATE_ROOT_UNTRUSTED")
+            try:
+                st = os.lstat(part, dir_fd=current_fd)
+            except FileNotFoundError:
+                return state_root
+            except OSError as exc:
+                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED")
+            try:
+                next_fd = os.open(part, nofollow_flags, dir_fd=current_fd)
+            except OSError as exc:
+                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+            fst = os.fstat(next_fd)
+            if stat.S_ISLNK(fst.st_mode) or not stat.S_ISDIR(fst.st_mode):
+                os.close(next_fd)
+                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED")
+            os.close(current_fd)
+            current_fd = next_fd
+    finally:
+        try:
+            os.close(current_fd)
+        except OSError:
+            pass
+    return state_root
+
+
+MAX_RECEIPT_BYTES = 2 * 1024 * 1024
+
+
+def _bundle_receipt_path(state_root: Path, role: str, manifest: ProductManifest,
+                         lock_sha256: str) -> Path:
+    return state_root / (role + "-" + manifest.version.replace("/", "-")
+                         + "-" + lock_sha256[:12] + ".receipt.json")
+
+
+def _destination_path(entry, roots: dict[str, Path]) -> Path:
+    root = roots[entry.destination_scope].resolve()
+    candidate = root / entry.destination
+    parent = candidate.parent.resolve(strict=False)
+    _require(parent == root or root in parent.parents,
+             "BUNDLE_DESTINATION_ESCAPES_SCOPE")
+    return candidate
+
+
+def _receipt_and_bytes_match(receipt: Path, manifest: ProductManifest,
+                             roots: dict[str, Path]) -> None:
+    raw = _safe_existing_file(receipt, MAX_RECEIPT_BYTES)
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise BundleError("BUNDLE_RECEIPT_JSON_INVALID") from exc
+    _require(isinstance(data, dict)
+             and data.get("schema_version") == "xiio-installer-receipt-v1"
+             and data.get("product_id") == manifest.product_id
+             and data.get("profile_id") == manifest.profile_id
+             and data.get("version") == manifest.version
+             and data.get("channel") == manifest.channel
+             and data.get("fixture") == manifest.fixture,
+             "BUNDLE_RECEIPT_IDENTITY_MISMATCH")
+    rows = data.get("entries")
+    _require(isinstance(rows, list) and len(rows) == len(manifest.entries),
+             "BUNDLE_RECEIPT_DENOMINATOR_MISMATCH")
+    keyed = {}
+    for row in rows:
+        _require(isinstance(row, dict), "BUNDLE_RECEIPT_ENTRY_INVALID")
+        key = (row.get("source"), row.get("destination_scope"), row.get("destination"))
+        _require(key not in keyed, "BUNDLE_RECEIPT_ENTRY_DUPLICATE")
+        keyed[key] = row
+    for entry in manifest.entries:
+        key = (entry.source, entry.destination_scope, entry.destination)
+        row = keyed.get(key)
+        _require(row is not None
+                 and row.get("expected_sha256") == entry.sha256
+                 and row.get("installed_sha256") == entry.sha256
+                 and row.get("expected_mode") == entry.mode
+                 and row.get("installed_mode") == entry.mode,
+                 "BUNDLE_RECEIPT_ENTRY_MISMATCH")
+        dest = _destination_path(entry, roots)
+        _require(not dest.is_symlink() and dest.is_file(),
+                 "BUNDLE_INSTALLED_FILE_MISSING_OR_UNTRUSTED")
+        _require(sha256_file(dest) == entry.sha256
+                 and stat.S_IMODE(dest.stat().st_mode) == entry.mode,
+                 "BUNDLE_INSTALLED_BYTES_DRIFT")
+
+
+def _archive_rolled_back_receipt(state_root: Path, receipt: Path) -> str:
+    """Move a verified rollback receipt out of the active-install namespace."""
+    _require(not receipt.is_symlink() and receipt.is_file(),
+             "BUNDLE_ROLLBACK_RECEIPT_UNTRUSTED")
+    archive = state_root / "rolled-back"
+    _secure_ensure_state_root(archive)
+    source_bytes = _safe_existing_file(receipt, MAX_RECEIPT_BYTES)
+    for attempt in range(1, 65):
+        target = archive / f"{receipt.stem}.rollback-{attempt:02d}.json"
+        if target.exists() or target.is_symlink():
+            continue
+        try:
+            os.link(receipt, target, follow_symlinks=False)
+        except FileExistsError:
+            continue
+        _require(not target.is_symlink() and target.is_file(),
+                 "BUNDLE_ROLLBACK_ARCHIVE_READBACK_FAILED")
+        _require(_safe_existing_file(target, MAX_RECEIPT_BYTES) == source_bytes,
+                 "BUNDLE_ROLLBACK_ARCHIVE_READBACK_FAILED")
+        receipt.unlink()
+        _require(not receipt.exists() and not receipt.is_symlink(),
+                 "BUNDLE_ROLLBACK_ACTIVE_RECEIPT_RETIRE_FAILED")
+        fd = os.open(archive, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        return target.name
+    raise BundleError("BUNDLE_ROLLBACK_ARCHIVE_EXHAUSTED")
+
+
+class _BundleApplyCustody:
+    __slots__ = ("profile_id", "lock_sha256", "state_root", "fd")
+
+    def __init__(self, profile_id: str, lock_sha256: str, state_root: Path, fd: int):
+        self.profile_id = profile_id
+        self.lock_sha256 = lock_sha256
+        self.state_root = state_root
+        self.fd = fd
+
+
+class _BundleInspectionCustody:
+    __slots__ = ("profile_id", "lock_sha256", "state_root", "fd")
+
+    def __init__(self, profile_id: str, lock_sha256: str, state_root: Path, fd: int):
+        self.profile_id = profile_id
+        self.lock_sha256 = lock_sha256
+        self.state_root = state_root
+        self.fd = fd
+
+
+def _bundle_state_root(profile, env: dict[str, str] | None, *, create: bool):
+    roots = xdg_roots(env)
+    state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
+    if create:
+        _secure_ensure_state_root(state_root)
+    else:
+        _secure_observe_state_root(state_root)
+    return roots, state_root
+
+
+def _open_bundle_apply_lock(state_root: Path) -> int:
+    _require(not state_root.is_symlink() and state_root.is_dir(),
+             "BUNDLE_STATE_ROOT_UNTRUSTED")
+    lockfile = state_root / "apply.lock"
+    _require(not lockfile.is_symlink(), "BUNDLE_APPLY_LOCK_SYMLINK_FORBIDDEN")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(lockfile, flags, 0o600)
+    try:
+        _require(stat.S_ISREG(os.fstat(fd).st_mode), "BUNDLE_APPLY_LOCK_INVALID")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise BundleError("BUNDLE_APPLY_ALREADY_IN_PROGRESS") from exc
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _custody_identity_matches(custody, profile, state_root: Path) -> bool:
+    if (custody.profile_id != profile["profile_id"]
+            or custody.lock_sha256 != profile["lock_sha256"]
+            or custody.state_root != state_root
+            or not isinstance(custody.fd, int)
+            or custody.fd < 0):
+        return False
+    try:
+        return stat.S_ISREG(os.fstat(custody.fd).st_mode)
+    except OSError:
+        return False
+
+
+def _apply_custody_matches(custody, profile, state_root: Path) -> bool:
+    return isinstance(custody, _BundleApplyCustody) and _custody_identity_matches(
+        custody, profile, state_root
+    )
+
+
+def _inspection_custody_matches(custody, profile, state_root: Path) -> bool:
+    return isinstance(custody, (_BundleApplyCustody, _BundleInspectionCustody)) and _custody_identity_matches(
+        custody, profile, state_root
+    )
+
+
+@contextmanager
+def bundle_apply_custody(lock: Path, *, approved_lock_sha256: str,
+                         env: dict[str, str] | None = None,
+                         allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS):
+    """Hold cross-process custody before retry classification through final readback."""
+    _require(isinstance(approved_lock_sha256, str)
+             and SHA256.fullmatch(approved_lock_sha256), "BUNDLE_APPROVAL_INVALID")
+    profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
+    _require(profile["lock_sha256"] == approved_lock_sha256,
+             "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    _roots, state_root = _bundle_state_root(profile, env, create=True)
+    fd = _open_bundle_apply_lock(state_root)
+    custody = _BundleApplyCustody(profile["profile_id"], approved_lock_sha256, state_root, fd)
+    try:
+        yield custody
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def _open_bundle_inspection_lock(state_root: Path) -> int:
+    _require(not state_root.is_symlink() and state_root.is_dir(),
+             "BUNDLE_STATE_ROOT_UNTRUSTED")
+    lockfile = state_root / "apply.lock"
+    _require(not lockfile.is_symlink(), "BUNDLE_APPLY_LOCK_SYMLINK_FORBIDDEN")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(lockfile, flags, 0o600)
+    try:
+        _require(stat.S_ISREG(os.fstat(fd).st_mode), "BUNDLE_APPLY_LOCK_INVALID")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise BundleError("BUNDLE_APPLY_IN_PROGRESS") from exc
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+@contextmanager
+def bundle_inspection_custody(lock: Path, *, approved_lock_sha256: str,
+                              env: dict[str, str] | None = None,
+                              allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS):
+    """Hold a shared snapshot lock across receipts, destinations and journal reads."""
+    _require(isinstance(approved_lock_sha256, str)
+             and SHA256.fullmatch(approved_lock_sha256), "BUNDLE_APPROVAL_INVALID")
+    profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
+    _require(profile["lock_sha256"] == approved_lock_sha256,
+             "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    # Creating private custody metadata is allowed; no product destination,
+    # receipt, journal or provider state is modified by inspection.
+    _roots, state_root = _bundle_state_root(profile, env, create=True)
+    fd = _open_bundle_inspection_lock(state_root)
+    custody = _BundleInspectionCustody(profile["profile_id"], approved_lock_sha256, state_root, fd)
+    try:
+        yield custody
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def inspect_bundle_install(lock: Path, *, approved_lock_sha256: str,
+                           env: dict[str, str] | None = None,
+                           allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS,
+                           custody=None):
+    """Reconcile exact receipts and destination bytes under stable custody."""
+    _require(isinstance(approved_lock_sha256, str)
+             and SHA256.fullmatch(approved_lock_sha256), "BUNDLE_APPROVAL_INVALID")
+    profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
+    _require(profile["lock_sha256"] == approved_lock_sha256,
+             "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    if custody is None:
+        try:
+            with bundle_inspection_custody(
+                lock,
+                approved_lock_sha256=approved_lock_sha256,
+                env=env,
+                allowed_hosts=allowed_hosts,
+            ) as observed:
+                return inspect_bundle_install(
+                    lock,
+                    approved_lock_sha256=approved_lock_sha256,
+                    env=env,
+                    allowed_hosts=allowed_hosts,
+                    custody=observed,
+                )
+        except BundleError as exc:
+            if str(exc) == "BUNDLE_APPLY_IN_PROGRESS":
+                return {
+                    "schema_version": "xiio-installer-bundle-inspection-v1",
+                    "state": "APPLY_IN_PROGRESS",
+                    "profile_id": profile["profile_id"],
+                    "lock_sha256": approved_lock_sha256,
+                    "roles": {},
+                    "receipt_count": 0,
+                    "first_red": "BUNDLE_APPLY_IN_PROGRESS",
+                    "effects_authorized": False,
+                    "runtime_qualified": False,
+                    "device_connected": False,
+                }
+            raise
+    roots, state_root = _bundle_state_root(profile, env, create=False)
+    _require(_inspection_custody_matches(custody, profile, state_root),
+             "BUNDLE_INSPECTION_CUSTODY_INVALID")
+    role_states = {}
+    receipt_count = 0
+    try:
+        for role in profile["ordered_roles"]:
+            manifest = profile["products"][role][0]
+            receipt = _bundle_receipt_path(state_root, role, manifest, approved_lock_sha256)
+            if receipt.is_symlink():
+                raise BundleError("BUNDLE_RECEIPT_SYMLINK_FORBIDDEN")
+            if receipt.exists():
+                _receipt_and_bytes_match(receipt, manifest, roots)
+                role_states[role] = "INSTALLED_RECEIPT_VERIFIED"
+                receipt_count += 1
+                continue
+            # A destination without its transaction receipt is precisely the
+            # crash seam this readback exists to preserve. Matching bytes are
+            # still uncertain because their original creation custody is gone.
+            present = False
+            for entry in manifest.entries:
+                dest = _destination_path(entry, roots)
+                if dest.is_symlink() or dest.exists():
+                    present = True
+                    break
+            role_states[role] = "UNRECEIPTED_DESTINATION_PRESENT" if present else "ABSENT"
+        states = set(role_states.values())
+        if states == {"ABSENT"}:
+            state = "NOT_INSTALLED"
+            first_red = None
+        elif states == {"INSTALLED_RECEIPT_VERIFIED"}:
+            state = "INSTALLED_BYTES_VERIFIED"
+            first_red = None
+        else:
+            state = "OUTCOME_UNCERTAIN"
+            first_red = "BUNDLE_MIXED_OR_UNRECEIPTED_STATE"
+    except (BundleError, OSError, ValueError, TypeError, KeyError) as exc:
+        state = "OUTCOME_UNCERTAIN"
+        first_red = str(exc)[:256] or "BUNDLE_READBACK_FAILED"
+    return {
+        "schema_version": "xiio-installer-bundle-inspection-v1",
+        "state": state,
+        "profile_id": profile["profile_id"],
+        "lock_sha256": approved_lock_sha256,
+        "roles": role_states,
+        "receipt_count": receipt_count,
+        "first_red": first_red,
+        "effects_authorized": False,
+        "runtime_qualified": False,
+        "device_connected": False,
+    }
+
 
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
                    env: dict[str, str] | None = None,
                    allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS,
-                   fetch=None, fail_after_product: int | None = None):
+                   fetch=None, fail_after_product: int | None = None,
+                   custody=None):
     """Acquire all children, verify all bytes, then apply existing transactions.
 
     Effects are explicitly approved by the caller's exact bundled profile SHA.
@@ -302,9 +667,25 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
-    roots = xdg_roots(env)
-    state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
-    _secure_ensure_state_root(state_root)
+    if custody is None:
+        with bundle_apply_custody(
+            lock,
+            approved_lock_sha256=approved_lock_sha256,
+            env=env,
+            allowed_hosts=allowed_hosts,
+        ) as owned:
+            return install_bundle(
+                lock,
+                approved_lock_sha256=approved_lock_sha256,
+                env=env,
+                allowed_hosts=allowed_hosts,
+                fetch=fetch,
+                fail_after_product=fail_after_product,
+                custody=owned,
+            )
+    roots, state_root = _bundle_state_root(profile, env, create=True)
+    _require(_apply_custody_matches(custody, profile, state_root),
+             "BUNDLE_APPLY_CUSTODY_INVALID")
     fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
     _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
     with tempfile.TemporaryDirectory(prefix="xiio-stage-", dir=state_root) as tmp:
@@ -329,49 +710,43 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
         _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
                  == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
 
-        lockfile = state_root / "apply.lock"
-        _require(not lockfile.is_symlink(), "BUNDLE_STATE_ROOT_UNTRUSTED")
-        lock_fd_raw = os.open(
-            str(lockfile),
-            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
-            0o600
-        )
-        with open(lock_fd_raw, "a+b", closefd=True) as lock_fd:
-            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for role in profile["ordered_roles"]:
+            manifest = profile["products"][role][0]
+            plan_install(manifest, staged[role], env)
+        applied = []
+        try:
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
-                plan_install(manifest, staged[role], env)
-            applied = []
-            try:
-                for role in profile["ordered_roles"]:
-                    manifest = profile["products"][role][0]
-                    receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
-                                            + "-" + approved_lock_sha256[:12] + ".receipt.json")
-                    _require(not receipt.exists() and not receipt.is_symlink(),
-                             "BUNDLE_RECEIPT_ALREADY_EXISTS")
-                    apply_install(manifest, staged[role], receipt, env)
-                    applied.append(receipt)
-                    if fail_after_product is not None and len(applied) == fail_after_product:
-                        raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
-            except Exception as cause:
-                failures = []
-                for receipt in reversed(applied):
-                    try:
-                        rollback(receipt, env)
-                    except Exception:
-                        failures.append(receipt.name)
-                if failures:
-                    raise BundleError("BUNDLE_PARTIAL_ROLLBACK_UNVERIFIED_DO_NOT_RETRY") from cause
-                raise BundleError("BUNDLE_APPLY_FAILED_ROLLED_BACK") from cause
-            finally:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            return {
-                "schema_version": "xiio-installer-bundle-result-v1",
-                "state": "INSTALLED_BYTES_VERIFIED",
-                "profile_id": profile["profile_id"],
-                "lock_sha256": approved_lock_sha256,
-                "roles": list(profile["ordered_roles"]),
-                "receipt_count": len(applied),
-                "runtime_qualified": False, "authority_granted": False,
-                "device_connected": False, "child_services_started": False
-            }
+                receipt = _bundle_receipt_path(state_root, role, manifest, approved_lock_sha256)
+                _require(not receipt.exists() and not receipt.is_symlink(),
+                         "BUNDLE_RECEIPT_ALREADY_EXISTS")
+                apply_install(manifest, staged[role], receipt, env)
+                applied.append(receipt)
+                if fail_after_product is not None and len(applied) == fail_after_product:
+                    raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
+        except Exception as cause:
+            failures = []
+            archived = []
+            for receipt in reversed(applied):
+                try:
+                    rollback(receipt, env)
+                    archived.append(_archive_rolled_back_receipt(state_root, receipt))
+                except Exception:
+                    failures.append(receipt.name)
+            if failures:
+                raise BundleError("BUNDLE_PARTIAL_ROLLBACK_UNVERIFIED_DO_NOT_RETRY") from cause
+            # Active receipt names are now free only after the kernel proved
+            # rollback and the exact receipt bytes were durably archived.
+            _require(len(archived) == len(applied),
+                     "BUNDLE_ROLLBACK_ARCHIVE_INCOMPLETE")
+            raise BundleError("BUNDLE_APPLY_FAILED_ROLLED_BACK") from cause
+        return {
+            "schema_version": "xiio-installer-bundle-result-v1",
+            "state": "INSTALLED_BYTES_VERIFIED",
+            "profile_id": profile["profile_id"],
+            "lock_sha256": approved_lock_sha256,
+            "roles": list(profile["ordered_roles"]),
+            "receipt_count": len(applied),
+            "runtime_qualified": False, "authority_granted": False,
+            "device_connected": False, "child_services_started": False
+        }
