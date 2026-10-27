@@ -16,6 +16,15 @@ fi
 
 # The canonical logo remains untouched. Export a disposable sized derivative
 # for Flatpak's strict 512x512 app-icon slot, then restore a clean workspace.
+BUILDER_VERSION="$(flatpak-builder --version | awk '{print $NF}')"
+if [[ ! "$BUILDER_VERSION" =~ ^([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]]; then
+    echo "FLATPAK_BUILD_BLOCKED: builder version unreadable" >&2
+    exit 69
+fi
+if (( ${BASH_REMATCH[1]} < 1 || (${BASH_REMATCH[1]} == 1 && ${BASH_REMATCH[2]} < 4) )); then
+    echo "FLATPAK_BUILD_BLOCKED: builder >=1.4 required for supported GNOME50 AppStream" >&2
+    exit 69
+fi
 for tool in cargo rustc sha256sum git file python3 readelf find sort xargs; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "FLATPAK_BUILD_BLOCKED: fresh native source build requires $tool" >&2
