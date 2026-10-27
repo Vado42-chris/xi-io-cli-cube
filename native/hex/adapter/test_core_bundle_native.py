@@ -164,6 +164,26 @@ class CoreBundleNative(unittest.TestCase):
                             "action": "bundle_apply", "lock_sha256": digest, "approved": True
                         })
 
+    def test_inspection_snapshot_holds_shared_custody_against_writer_start(self):
+        with tempfile.TemporaryDirectory(prefix="xiio-native-core-") as d:
+            root = Path(d)
+            digest = self.valid_profile(root)
+            env = self.runtime_env(root)
+            lock = root / "core-release.lock.json"
+            with patch.dict(os.environ, env, clear=False), patch.object(installer_adapter, "HERE", root):
+                with installer_adapter.child_bundle.bundle_inspection_custody(
+                    lock, approved_lock_sha256=digest, env=env
+                ) as custody:
+                    observed = installer_adapter.child_bundle.inspect_bundle_install(
+                        lock, approved_lock_sha256=digest, env=env, custody=custody
+                    )
+                    self.assertEqual(observed["state"], "NOT_INSTALLED")
+                    with self.assertRaisesRegex(Exception, "BUNDLE_APPLY_ALREADY_IN_PROGRESS"):
+                        with installer_adapter.child_bundle.bundle_apply_custody(
+                            lock, approved_lock_sha256=digest, env=env
+                        ):
+                            pass
+
     def test_fixture_lock_never_becomes_native_prod_release(self):
         with tempfile.TemporaryDirectory(prefix="xiio-native-core-") as d:
             root = Path(d)
