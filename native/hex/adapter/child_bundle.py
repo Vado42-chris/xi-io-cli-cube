@@ -223,18 +223,19 @@ def load_bundle_profile(lock: Path, *,
     }
 
 
-def _secure_ensure_state_root(state_root: Path) -> Path:
+def _secure_ensure_state_root(state_root: Path) -> int:
     """Traverse and create state_root stepwise using race-resistant O_NOFOLLOW / dir_fd.
 
     Refuses immediately if any existing ancestor or target component is a symlink or non-directory.
     Creates missing directories stepwise with mode 0o700, pinning each with O_NOFOLLOW.
+    Returns the open directory file descriptor pinned to the verified state_root.
     """
     _require(isinstance(state_root, Path), "BUNDLE_STATE_ROOT_UNTRUSTED")
     _require(state_root.is_absolute(), "BUNDLE_STATE_ROOT_UNTRUSTED")
     parts = state_root.parts
     _require(len(parts) > 1 and parts[0] == "/", "BUNDLE_STATE_ROOT_UNTRUSTED")
 
-    open_flags = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
+    open_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
     nofollow_flags = open_flags | os.O_NOFOLLOW
 
     try:
@@ -282,10 +283,8 @@ def _secure_ensure_state_root(state_root: Path) -> Path:
             except OSError:
                 pass
         raise
-    else:
-        os.close(current_fd)
 
-    return state_root
+    return current_fd
 
 
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
@@ -304,40 +303,58 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
     roots = xdg_roots(env)
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
-    _secure_ensure_state_root(state_root)
-    fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
-    _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
-    with tempfile.TemporaryDirectory(prefix="xiio-stage-", dir=state_root) as tmp:
-        staged = {}
-        # Do not install a single product until EVERY product payload is pinned.
-        for role in profile["ordered_roles"]:
-            manifest, urls, _deps = profile["products"][role]
-            root = Path(tmp) / role
-            root.mkdir(mode=0o700)
-            for entry in manifest.entries:
-                output = root / entry.source
-                output.parent.mkdir(parents=True, exist_ok=True)
-                fetcher(urls[entry.source], output, entry.size)
-                _require(not output.is_symlink() and output.is_file(),
-                         "BUNDLE_DOWNLOADED_FILE_UNTRUSTED")
-                _require(output.stat().st_size == entry.size,
-                         "BUNDLE_DOWNLOADED_SIZE_MISMATCH")
-                _require(sha256_file(output) == entry.sha256,
-                         "BUNDLE_DOWNLOADED_DIGEST_MISMATCH")
-            verify_payload(manifest, root)
-            staged[role] = root
-        _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
-                 == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
 
-        lockfile = state_root / "apply.lock"
-        _require(not lockfile.is_symlink(), "BUNDLE_STATE_ROOT_UNTRUSTED")
-        lock_fd_raw = os.open(
-            str(lockfile),
-            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
-            0o600
-        )
-        with open(lock_fd_raw, "a+b", closefd=True) as lock_fd:
+    state_fd = _secure_ensure_state_root(state_root)
+    lock_fd = None
+    try:
+        # Cross-process lock acquired via descriptor anchor BEFORE any artifact acquisition
+        try:
+            lock_raw = os.open(
+                "apply.lock",
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+                dir_fd=state_fd
+            )
+        except OSError as exc:
+            raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+
+        lock_fd = open(lock_raw, "a+b", closefd=True)
+        try:
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError) as exc:
+            raise BundleError("BUNDLE_INSTALLATION_IN_PROGRESS") from exc
+
+        # Verify descriptor anchor matches state_root path under lock
+        st_desc = os.fstat(state_fd)
+        st_path = state_root.stat()
+        _require(st_desc.st_ino == st_path.st_ino and st_desc.st_dev == st_path.st_dev,
+                 "BUNDLE_STATE_ROOT_UNTRUSTED")
+
+        fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
+        _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
+
+        with tempfile.TemporaryDirectory(prefix="xiio-stage-", dir=state_root) as tmp:
+            staged = {}
+            # Do not install a single product until EVERY product payload is pinned.
+            for role in profile["ordered_roles"]:
+                manifest, urls, _deps = profile["products"][role]
+                root = Path(tmp) / role
+                root.mkdir(mode=0o700)
+                for entry in manifest.entries:
+                    output = root / entry.source
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    fetcher(urls[entry.source], output, entry.size)
+                    _require(not output.is_symlink() and output.is_file(),
+                             "BUNDLE_DOWNLOADED_FILE_UNTRUSTED")
+                    _require(output.stat().st_size == entry.size,
+                             "BUNDLE_DOWNLOADED_SIZE_MISMATCH")
+                    _require(sha256_file(output) == entry.sha256,
+                             "BUNDLE_DOWNLOADED_DIGEST_MISMATCH")
+                verify_payload(manifest, root)
+                staged[role] = root
+            _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
+                     == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
+
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
                 plan_install(manifest, staged[role], env)
@@ -363,8 +380,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 if failures:
                     raise BundleError("BUNDLE_PARTIAL_ROLLBACK_UNVERIFIED_DO_NOT_RETRY") from cause
                 raise BundleError("BUNDLE_APPLY_FAILED_ROLLED_BACK") from cause
-            finally:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
             return {
                 "schema_version": "xiio-installer-bundle-result-v1",
                 "state": "INSTALLED_BYTES_VERIFIED",
@@ -375,3 +391,17 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 "runtime_qualified": False, "authority_granted": False,
                 "device_connected": False, "child_services_started": False
             }
+    finally:
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                lock_fd.close()
+            except OSError:
+                pass
+        try:
+            os.close(state_fd)
+        except OSError:
+            pass

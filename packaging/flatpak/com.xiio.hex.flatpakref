@@ -1,0 +1,12 @@
+[Flatpak Ref]
+Name=com.xiio.hex
+Branch=stable
+Title=XI-IO HEX
+Comment=White-label, local-first software ecosystem
+Description=Self-contained, subscription-free software distribution for Linux (Pop!_OS)
+Url=https://vado42-chris.github.io/xi-io-cli-cube/repo
+IsRuntime=false
+RuntimeRepo=https://flathub.org/repo/flathub.flatpakrepo
+SuggestRemoteName=xi-io
+Icon=https://raw.githubusercontent.com/Vado42-chris/xi-io-cli-cube/main/native/hex/carrier/src-tauri/icons/icon.png
+Homepage=https://xi-io.ca

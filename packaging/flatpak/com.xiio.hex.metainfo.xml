@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.xiio.hex</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>XI-IO HEX</name>
+  <summary>White-label, local-first, subscription-free software distribution suite</summary>
+  <description>
+    <p>
+      XI-IO HEX provides a clean, local-first installer kernel, transactional child-product
+      custody verification, and bidirectional Switchboard connectivity without recurring subscriptions.
+    </p>
+    <p>
+      Features:
+    </p>
+    <ul>
+      <li>Local-first zero-account installation baseline</li>
+      <li>Cryptographic SHA-256 byte verification before disk application</li>
+      <li>Descriptor-anchored filesystem traversal with symlink escape prevention</li>
+      <li>Automatic reverse-order transactional rollback on mid-stream failure</li>
+      <li>Integrated Switchboard runtime connection adapter</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.xiio.hex.desktop</launchable>
+  <url type="homepage">https://xi-io.ca</url>
+  <url type="bugtracker">https://github.com/Vado42-chris/xi-io-cli-cube/issues</url>
+  <developer_name>XI-IO</developer_name>
+  <provides>
+    <binary>xi-io-hex</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-10-27">
+      <description>
+        <p>Flatpak release candidate featuring descriptor-anchored custody verification, pre-acquisition cross-process locking, and six-product baseline support.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1" />
+</component>

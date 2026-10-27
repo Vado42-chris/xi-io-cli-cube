@@ -27,11 +27,7 @@ if(mode!=='stage'){
  if(process.platform!=='linux')throw Error('Native candidate checks are Linux-qualified only');
  run('/usr/bin/python3',['-B','-m','unittest','discover','-s',adapter,'-p','test_*.py']);
  run('/usr/bin/python3',['-I','-B',join(carrier,'tests/check_contract.py')]);
- if(spawnSync('which',['cargo']).status===0){
-  run('cargo',['test','--locked','--manifest-path',join(carrier,'src-tauri/Cargo.toml')],carrier);
- }else{
-  console.log('[native:check] Cargo toolchain absent in environment; skipped carrier unit test');
- }
+ run('cargo',['test','--locked','--manifest-path',join(carrier,'src-tauri/Cargo.toml')],carrier);
  // Isolated adapter subprocesses can ignore PYTHONDONTWRITEBYTECODE; caches are not payloads.
  pruneBytecode(adapter);
 }

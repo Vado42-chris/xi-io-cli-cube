@@ -1,6 +1,7 @@
 """Actual existing-kernel child bundle tests, disposable paths, zero network/host effects."""
 import hashlib
 import json
+import multiprocessing as mp
 import os
 import sys
 import tempfile
@@ -350,6 +351,35 @@ class BundleTests(unittest.TestCase):
         # All products must have been rolled back cleanly
         for role in ("cli", "ibal", "switchboard", "bins", "ward", "inbox"):
             self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / f"xi-io/{role}/{role}.bin").exists())
+
+    def test_two_process_overlapping_install_refused_via_cross_process_lock(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        barrier = mp.Queue()
+        done = mp.Queue()
+        p1 = mp.Process(target=_concurrency_worker, args=(lock, digest, f.env, barrier, done))
+        p1.start()
+        try:
+            status = barrier.get(timeout=5)
+            self.assertEqual(status, "LOCKED_AND_FETCHING")
+            # Process 2 attempts concurrent install while Process 1 is in acquisition stage
+            with self.assertRaisesRegex(BundleError, "BUNDLE_INSTALLATION_IN_PROGRESS"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        finally:
+            done.put("RELEASE")
+            p1.join(timeout=5)
+
+
+def _concurrency_worker(lock, digest, env, barrier, done):
+    def slow_fetch(url, output, limit):
+        barrier.put("LOCKED_AND_FETCHING")
+        done.get(timeout=10)
+        output.write_bytes(b"cli delivered\n")
+    try:
+        install_bundle(lock, approved_lock_sha256=digest, env=env, fetch=slow_fetch)
+    except Exception as exc:
+        barrier.put(f"ERROR: {exc}")
 
 
 if __name__ == "__main__":

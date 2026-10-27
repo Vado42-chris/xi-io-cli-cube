@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=XI-IO HEX
+GenericName=Software Installer & Suite
+Comment=White-label, local-first, subscription-free software distribution
+Exec=xi-io-hex %u
+Icon=com.xiio.hex
+Terminal=false
+Type=Application
+Categories=Utility;Development;
+StartupNotify=true
+MimeType=x-scheme-handler/xiio;
+Keywords=XI-IO;HEX;Cube;Installer;Local;

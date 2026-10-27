@@ -16,7 +16,8 @@
     "test:source-adoption": "node --test tests/native-source-adoption.test.mjs",
     "native:stage": "node scripts/native-package.mjs stage",
     "native:check": "node scripts/native-package.mjs check",
-    "native:build": "node scripts/native-package.mjs build"
+    "native:build": "node scripts/native-package.mjs build",
+    "flatpak:build": "bash scripts/build-flatpak.sh"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
