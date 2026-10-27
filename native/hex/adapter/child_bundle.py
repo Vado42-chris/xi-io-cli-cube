@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
 import urllib.request
 from pathlib import Path, PurePosixPath
@@ -222,6 +223,71 @@ def load_bundle_profile(lock: Path, *,
     }
 
 
+def _secure_ensure_state_root(state_root: Path) -> Path:
+    """Traverse and create state_root stepwise using race-resistant O_NOFOLLOW / dir_fd.
+
+    Refuses immediately if any existing ancestor or target component is a symlink or non-directory.
+    Creates missing directories stepwise with mode 0o700, pinning each with O_NOFOLLOW.
+    """
+    _require(isinstance(state_root, Path), "BUNDLE_STATE_ROOT_UNTRUSTED")
+    _require(state_root.is_absolute(), "BUNDLE_STATE_ROOT_UNTRUSTED")
+    parts = state_root.parts
+    _require(len(parts) > 1 and parts[0] == "/", "BUNDLE_STATE_ROOT_UNTRUSTED")
+
+    open_flags = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
+    nofollow_flags = open_flags | os.O_NOFOLLOW
+
+    try:
+        current_fd = os.open("/", open_flags)
+    except OSError as exc:
+        raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+
+    try:
+        for part in parts[1:]:
+            _require(bool(part) and part not in (".", "..") and "\x00" not in part and "/" not in part,
+                     "BUNDLE_STATE_ROOT_UNTRUSTED")
+            try:
+                st = os.lstat(part, dir_fd=current_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                except OSError as exc:
+                    raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+                try:
+                    st = os.lstat(part, dir_fd=current_fd)
+                except OSError as exc:
+                    raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+            except OSError as exc:
+                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED")
+
+            try:
+                next_fd = os.open(part, nofollow_flags, dir_fd=current_fd)
+            except OSError as exc:
+                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
+
+            fst = os.fstat(next_fd)
+            if stat.S_ISLNK(fst.st_mode) or not stat.S_ISDIR(fst.st_mode):
+                os.close(next_fd)
+                raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED")
+
+            os.close(current_fd)
+            current_fd = next_fd
+    except Exception:
+        if current_fd >= 0:
+            try:
+                os.close(current_fd)
+            except OSError:
+                pass
+        raise
+    else:
+        os.close(current_fd)
+
+    return state_root
+
+
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
                    env: dict[str, str] | None = None,
                    allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS,
@@ -238,9 +304,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
     roots = xdg_roots(env)
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
-    state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    _require(not any(p.is_symlink() for p in (state_root, *state_root.parents)),
-             "BUNDLE_STATE_ROOT_UNTRUSTED")
+    _secure_ensure_state_root(state_root)
     fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
     _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
     with tempfile.TemporaryDirectory(prefix="xiio-stage-", dir=state_root) as tmp:
@@ -266,8 +330,14 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                  == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
 
         lockfile = state_root / "apply.lock"
-        with lockfile.open("a+b") as lock_fd:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _require(not lockfile.is_symlink(), "BUNDLE_STATE_ROOT_UNTRUSTED")
+        lock_fd_raw = os.open(
+            str(lockfile),
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600
+        )
+        with open(lock_fd_raw, "a+b", closefd=True) as lock_fd:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
                 plan_install(manifest, staged[role], env)

@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -222,6 +223,133 @@ class BundleTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "destination|already exists|overwrite|BUNDLE"):
             install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
         self.assertEqual(original.read_bytes(), b"PRESERVE USER BYTES\n")
+
+    def test_cube9_symlinked_xdg_state_root_refused_without_side_effects(self):
+        f = self.fixture()
+        outside = f.root / "outside"
+        outside.mkdir()
+        state_link = f.root / "symlinked_state"
+        state_link.symlink_to(outside, target_is_directory=True)
+        f.env["XDG_STATE_HOME"] = str(state_link)
+        f.child("cli")
+        lock, digest = f.lock()
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertFalse((outside / "xi-io").exists())
+
+    def test_cube9_symlinked_intermediate_parent_refused_without_side_effects(self):
+        f = self.fixture()
+        outside = f.root / "outside"
+        outside.mkdir()
+        state_dir = Path(f.env["XDG_STATE_HOME"])
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "xi-io").symlink_to(outside, target_is_directory=True)
+        f.child("cli")
+        lock, digest = f.lock()
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertFalse((outside / "installer").exists())
+
+    def test_cube9_symlinked_leaf_refused(self):
+        f = self.fixture()
+        outside = f.root / "outside"
+        outside.mkdir()
+        bundles_dir = Path(f.env["XDG_STATE_HOME"]) / "xi-io" / "installer" / "bundles"
+        bundles_dir.mkdir(parents=True, exist_ok=True)
+        (bundles_dir / "core-test").symlink_to(outside, target_is_directory=True)
+        f.child("cli")
+        lock, digest = f.lock()
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(len(list(outside.iterdir())), 0)
+
+    def test_cube9_readonly_ancestor_refused(self):
+        f = self.fixture()
+        state_dir = Path(f.env["XDG_STATE_HOME"])
+        state_dir.mkdir(parents=True, exist_ok=True)
+        xiio_dir = state_dir / "xi-io"
+        xiio_dir.mkdir(mode=0o500)
+        f.child("cli")
+        lock, digest = f.lock()
+        # When non-root or when permissions fail at the OS level:
+        with patch("os.mkdir", side_effect=PermissionError(13, "Permission denied")):
+            with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+
+    def test_cube9_file_ancestor_refused(self):
+        f = self.fixture()
+        state_dir = Path(f.env["XDG_STATE_HOME"])
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "xi-io").write_text("regular file")
+        f.child("cli")
+        lock, digest = f.lock()
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+
+    def test_cube9_concurrent_symlink_swap_refused(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        real_open = os.open
+        def hostile_open(path, flags, *args, **kwargs):
+            if flags & os.O_NOFOLLOW and "installer" in str(path):
+                raise OSError(40, "Too many levels of symbolic links")
+            return real_open(path, flags, *args, **kwargs)
+        with patch("os.open", side_effect=hostile_open):
+            with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+
+    def test_cube9_normal_clean_path_creates_strict_state_root(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        r = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(r["state"], "INSTALLED_BYTES_VERIFIED")
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io" / "installer" / "bundles" / "core-test"
+        self.assertTrue(state_root.is_dir())
+        self.assertFalse(state_root.is_symlink())
+        self.assertEqual(state_root.stat().st_mode & 0o777, 0o700)
+
+    def test_six_product_baseline_transaction_and_rollback(self):
+        f = self.fixture()
+        f.child("cli", fixture=False)
+        f.child("ibal", depends_on=("cli",), fixture=False)
+        f.child("switchboard", depends_on=("cli",), fixture=False)
+        f.child("bins", depends_on=("cli",), fixture=False)
+        f.child("ward", depends_on=("cli",), fixture=False)
+        f.child("inbox", depends_on=("cli", "ward"), fixture=False)
+        lock, digest = f.lock(fixture=False)
+        p = load_bundle_profile(lock)
+        self.assertEqual(len(p["ordered_roles"]), 6)
+        self.assertEqual(p["ordered_roles"][0], "cli")
+        self.assertGreater(p["ordered_roles"].index("inbox"), p["ordered_roles"].index("ward"))
+        self.assertGreater(p["ordered_roles"].index("inbox"), p["ordered_roles"].index("cli"))
+        res = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(res["state"], "INSTALLED_BYTES_VERIFIED")
+        self.assertEqual(res["receipt_count"], 6)
+        for role in ("cli", "ibal", "switchboard", "bins", "ward", "inbox"):
+            self.assertTrue((Path(f.env["XDG_DATA_HOME"]) / f"xi-io/{role}/{role}.bin").exists())
+        receipts = sorted((Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test").glob("*.receipt.json"))
+        self.assertEqual(len(receipts), 6)
+        for item in reversed(receipts):
+            rollback(item, f.env)
+        for role in ("cli", "ibal", "switchboard", "bins", "ward", "inbox"):
+            self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / f"xi-io/{role}/{role}.bin").exists())
+
+    def test_six_product_baseline_mid_transaction_rollback_cleans_prior_applied(self):
+        f = self.fixture()
+        f.child("cli", fixture=False)
+        f.child("ibal", depends_on=("cli",), fixture=False)
+        f.child("switchboard", depends_on=("cli",), fixture=False)
+        f.child("bins", depends_on=("cli",), fixture=False)
+        f.child("ward", depends_on=("cli",), fixture=False)
+        f.child("inbox", depends_on=("cli", "ward"), fixture=False)
+        lock, digest = f.lock(fixture=False)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_FAILED_ROLLED_BACK"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch, fail_after_product=3)
+        # All products must have been rolled back cleanly
+        for role in ("cli", "ibal", "switchboard", "bins", "ward", "inbox"):
+            self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / f"xi-io/{role}/{role}.bin").exists())
 
 
 if __name__ == "__main__":

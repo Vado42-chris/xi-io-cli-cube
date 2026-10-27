@@ -1,9 +1,0 @@
-test_actual_built_package_metadata_and_guard_digest (__main__.Binding.test_actual_built_package_metadata_and_guard_digest) ... ok
-test_embedded_guard_is_standalone_and_logic_unchanged (__main__.Binding.test_embedded_guard_is_standalone_and_logic_unchanged) ... ok
-test_immutable_artifact_commit_is_bound (__main__.Binding.test_immutable_artifact_commit_is_bound) ... ok
-test_only_declared_identity_replacements (__main__.Binding.test_only_declared_identity_replacements) ... ok
-
-----------------------------------------------------------------------
-Ran 4 tests in 0.094s
-
-OK
