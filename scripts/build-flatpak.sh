@@ -16,7 +16,7 @@ fi
 
 # The canonical logo remains untouched. Export a disposable sized derivative
 # for Flatpak's strict 512x512 app-icon slot, then restore a clean workspace.
-for tool in cargo rustc sha256sum git file python3; do
+for tool in cargo rustc sha256sum git file python3 readelf find sort xargs; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "FLATPAK_BUILD_BLOCKED: fresh native source build requires $tool" >&2
         exit 69
@@ -75,11 +75,17 @@ file "$BUILT_ELF" | grep -Fq 'ELF 64-bit' || {
 cp -- "$BUILT_ELF" "$FRESH_CARRIER"
 chmod 0755 "$FRESH_CARRIER"
 BUILT_SHA="$(sha256sum "$FRESH_CARRIER" | cut -d' ' -f1)"
+BUILT_ID="$(readelf -n "$FRESH_CARRIER" | awk '/Build ID:/{print $3; exit}')"
+if [[ ! "$BUILT_ID" =~ ^[0-9a-f]{32,128}$ ]]; then
+    echo "FLATPAK_BUILD_BLOCKED: fresh ELF build ID not verifiable" >&2
+    exit 76
+fi
 FRONTEND_SHA="$(find "$ROOT_DIR/native/hex/carrier/frontend" -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
 CARGO_LOCK_SHA="$(sha256sum "$ROOT_DIR/native/hex/carrier/src-tauri/Cargo.lock" | cut -d' ' -f1)"
-SOURCE_SHA="$SOURCE_SHA" BUILT_SHA="$BUILT_SHA" FRONTEND_SHA="$FRONTEND_SHA" CARGO_LOCK_SHA="$CARGO_LOCK_SHA" python3 -I -B -c 'import json,os,sys; json.dump({"schema":"xiio.flatpak.native-source-provenance/v1","source_commit":os.environ["SOURCE_SHA"],"native_elf_sha256":os.environ["BUILT_SHA"],"frontend_tree_sha256":os.environ["FRONTEND_SHA"],"cargo_lock_sha256":os.environ["CARGO_LOCK_SHA"],"historical_dev9_elf_used":False},sys.stdout,sort_keys=True);print()' > "$PROVENANCE"
+SOURCE_SHA="$SOURCE_SHA" BUILT_SHA="$BUILT_SHA" BUILT_ID="$BUILT_ID" FRONTEND_SHA="$FRONTEND_SHA" CARGO_LOCK_SHA="$CARGO_LOCK_SHA" python3 -I -B -c 'import json,os,sys; json.dump({"schema":"xiio.flatpak.native-source-provenance/v1","source_commit":os.environ["SOURCE_SHA"],"native_elf_sha256":os.environ["BUILT_SHA"],"native_elf_build_id":os.environ["BUILT_ID"],"frontend_tree_sha256":os.environ["FRONTEND_SHA"],"cargo_lock_sha256":os.environ["CARGO_LOCK_SHA"],"historical_dev9_elf_used":False},sys.stdout,sort_keys=True);print()' > "$PROVENANCE"
 echo "FRESH_CARRIER_BUILT_FROM_SOURCE_SHA=$SOURCE_SHA"
 echo "FRESH_CARRIER_SHA256=$BUILT_SHA"
+echo "FRESH_CARRIER_BUILD_ID=$BUILT_ID"
 echo "FRESH_FRONTEND_TREE_SHA256=$FRONTEND_SHA"
 echo "CARGO_LOCK_SHA256=$CARGO_LOCK_SHA"
 
