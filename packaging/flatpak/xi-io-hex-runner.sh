@@ -13,10 +13,8 @@ APP_DIR="/app/lib/xi-io-hex"
 
 # The native Tauri carrier binary is mandatory.
 # Never substitute a browser, Vite server, Node fallback, or static preview.
-if [ -x "/app/bin/xi-io-hex-dev" ]; then
+if [ -x "/app/bin/xi-io-hex-dev" ] && [ ! -L "/app/bin/xi-io-hex-dev" ]; then
     exec /app/bin/xi-io-hex-dev "$@"
-elif [ -x "/app/bin/xi-io-hex-carrier" ]; then
-    exec /app/bin/xi-io-hex-carrier "$@"
 fi
 
 echo "Error: Native XI-IO HEX carrier executable missing at /app/bin/xi-io-hex-dev. Refusing fallback." >&2
