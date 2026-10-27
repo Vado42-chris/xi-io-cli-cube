@@ -15,7 +15,7 @@ if [[ ! "$EXPECTED_ELF_SHA256" =~ ^[a-f0-9]{64}$ ]]; then
     echo "FLATPAK_ACCEPTED_ELF_DIGEST_REQUIRED: set XIIO_EXPECTED_FLATPAK_ELF_SHA256 from the accepted release manifest." >&2
     exit 2
 fi
-for tool in npm flatpak-builder flatpak sha256sum; do
+for tool in npm flatpak-builder flatpak sha256sum dpkg-deb; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "FLATPAK_BUILD_TOOL_MISSING:$tool" >&2
         exit 127
@@ -44,7 +44,7 @@ fi
 chmod +x "$PACKAGING_DIR/xi-io-hex-dev"
 
 echo "=== [3/5] Verifying exact staged ELF bytes ==="
-printf '%s  %s\\n' "$EXPECTED_ELF_SHA256" "$PACKAGING_DIR/xi-io-hex-dev" | sha256sum --check --status || {
+printf '%s  %s\n' "$EXPECTED_ELF_SHA256" "$PACKAGING_DIR/xi-io-hex-dev" | sha256sum --check --status || {
     echo "FLATPAK_STAGED_ELF_DIGEST_MISMATCH" >&2
     exit 1
 }
