@@ -3,6 +3,12 @@ on:
   pull_request:
     paths:
       - 'packaging/flatpak/**'
+      - 'native/hex/carrier/**'
+      - 'native/hex/adapter/**'
+      - 'native/hex/cli-source/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/native-package.mjs'
       - 'scripts/build-flatpak.sh'
       - 'tests/flatpak-builder-admission.test.mjs'
       - '.github/workflows/flatpak-candidate-qualification.yml'
@@ -26,19 +32,29 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder imagemagick
+          sudo apt-get install -y flatpak flatpak-builder imagemagick xvfb xdotool dbus-x11 build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf
           flatpak --version
           flatpak-builder --version
-      - name: Materialize referenced GNOME 46 SDK and runtime
+      - name: Pin current Rust compiler for exact Cargo.lock native build
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+          rustc --version
+          cargo --version
+      - name: Materialize referenced GNOME 50 SDK and runtime
         run: |
           set -euo pipefail
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user -y --noninteractive flathub org.gnome.Platform//46 org.gnome.Sdk//46
+          flatpak install --user -y --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
       - name: Build the existing native Flatpak candidate, without fallback
         run: |
           set -euo pipefail
           bash scripts/build-flatpak.sh
           test -s dist/flatpak/com.xiio.hex.flatpak
+          test ! -e packaging/flatpak/.xiio-hex-fresh-carrier
+          test ! -e packaging/flatpak/.xiio-hex-source-provenance.json
+          test ! -e packaging/flatpak/.xiio-hex-icon-512.png
           stat -c 'FLATPAK_ACTUAL_BYTES=%s' dist/flatpak/com.xiio.hex.flatpak
           sha256sum dist/flatpak/com.xiio.hex.flatpak
       - name: Install the actual built bundle, then independently inspect it
@@ -51,6 +67,44 @@ jobs:
           # A missing WebKit/GTK/JSCore dependency is a typed first red, not a built app.
           flatpak run --user --command=sh com.xiio.hex -c 'ldd /app/bin/xi-io-hex-dev > /tmp/xiio-hex-ldd.txt; cat /tmp/xiio-hex-ldd.txt; if grep -q "not found" /tmp/xiio-hex-ldd.txt; then echo "FLATPAK_ELF_DEPENDENCY_UNRESOLVED"; exit 72; fi'
           echo "INSTALLED_FLATPAK_ELF_AND_ADAPTER_READBACK_PASS_NOT_PHYSICAL_POP_OS"
+      - name: Validate fresh source proof in installed carrier and bounded Python adapter
+        run: |
+          set -euo pipefail
+          flatpak run --user --command=sh com.xiio.hex -c 'test -s /app/share/xi-io-hex/source-provenance.json && test -x /app/bin/xi-io-hex-dev'
+          flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B -c 'import json,pathlib,hashlib; p=json.loads(pathlib.Path("/app/share/xi-io-hex/source-provenance.json").read_text()); assert p["schema"]=="xiio.flatpak.native-source-provenance/v1"; assert p["historical_dev9_elf_used"] is False; assert len(p["source_commit"])==40 and len(p["native_elf_sha256"])==64; print("FRESH_NATIVE_ELF_PROVENANCE_STRUCTURE_PASS")'
+          echo '{"action":"inspect"}' | flatpak run --user --command=/usr/bin/python3 com.xiio.hex -I -B /app/lib/xi-io-hex/adapter/installer_adapter.py > sandbox-inspect.json
+          python3 -c 'import json; r=json.load(open("sandbox-inspect.json")); assert isinstance(r.get("ok"),bool); assert "result" in r or "error" in r; print("NATIVE_PYTHON_IPC_ADAPTER_EXECUTED", "RESULT" if r["ok"] else "TYPED_REFUSAL")'
+          flatpak run --user --command=sh com.xiio.hex -c 'test -d "$XDG_DATA_HOME" && test -d "$XDG_CONFIG_HOME" && test -d "$XDG_CACHE_HOME" && test -d "$XDG_STATE_HOME"'
+      - name: Launch actual installed HEX native window under disposable Xvfb
+        run: |
+          set -euo pipefail
+          dbus-run-session -- xvfb-run -a bash -c '
+            set -euo pipefail
+            flatpak run --user com.xiio.hex > hex-window.log 2>&1 &
+            app_pid=$!
+            trap "kill $app_pid 2>/dev/null || true; wait $app_pid 2>/dev/null || true" EXIT
+            found=0
+            for attempt in $(seq 1 30); do
+              if xdotool search --onlyvisible --name "XI-IO HEX" >/dev/null 2>&1; then
+                found=1
+                break
+              fi
+              if ! kill -0 "$app_pid" 2>/dev/null; then
+                cat hex-window.log
+                echo HEX_NATIVE_WINDOW_EXITED_BEFORE_VISIBLE
+                exit 81
+              fi
+              sleep 1
+            done
+            if [ "$found" != 1 ]; then
+              cat hex-window.log
+              echo HEX_NATIVE_WINDOW_NOT_OBSERVED
+              exit 82
+            fi
+            echo HEX_INSTALLED_WINDOW_VISIBLE_ON_DISPOSABLE_LINUX
+          '
+          echo "NATIVE_GUI_WINDOW_PASS_DOES_NOT_PROVE_TAURI_IPC"
+
       - name: Publish inspectable exact candidate artifact, never claim an approved release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
