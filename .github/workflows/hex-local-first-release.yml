@@ -1,8 +1,8 @@
 name: XI-IO HEX local-first GitHub prerelease
 on:
-  push:
-    branches: [release/local-first-7ab90403-20261027]
-    paths: [.github/workflows/hex-local-first-release.yml]
+  # The first guarded push already published the immutable prerelease.
+  # Future release qualification must be explicitly invoked, not silently rerun.
+  workflow_dispatch:
 permissions:
   contents: write
   actions: read
@@ -46,6 +46,11 @@ jobs:
           tag=xiio-hex-local-7ab90403-20261027
           out="$RUNNER_TEMP/xiio-local-first/publish"
           (cd "$out" && sha256sum -c SHA256SUMS)
+          # A preexisting lightweight/annotated tag can have no GitHub release.
+          # gh release create --target does not retarget existing Git refs.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "GIT_TAG_EXISTS_REFUSE_OVERWRITE"; exit 1
+          fi
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "RELEASE_EXISTS_REFUSE_OVERWRITE"; exit 1
           fi
