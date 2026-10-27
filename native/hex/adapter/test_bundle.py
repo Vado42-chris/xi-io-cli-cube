@@ -10,7 +10,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "kernel"))
 
-from xiio_installer.bundle import (BundleError, load_bundle_profile,
+from child_bundle import (BundleError, load_bundle_profile,
                                    install_bundle)
 from xiio_installer.transaction import rollback
 
@@ -123,7 +123,8 @@ class BundleTests(unittest.TestCase):
         f = self.fixture()
         f.child("cli").child("ward")
         lock, digest = f.lock()
-        f.payloads["https://github.com/xiio-test/releases/ward.bin"] = b"NOT THE REVIEWED BYTES"
+        url = "https://github.com/xiio-test/releases/ward.bin"
+        f.payloads[url] = b"X" * len(f.payloads[url])
         with self.assertRaisesRegex(BundleError, "BUNDLE_DOWNLOADED_SIZE_MISMATCH|BUNDLE_DOWNLOADED_DIGEST_MISMATCH"):
             install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
