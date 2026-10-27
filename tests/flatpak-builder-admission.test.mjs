@@ -65,3 +65,14 @@ test('Flatpak launcher chooses app-private state without host-wide permission',(
   const check=spawnSync('/bin/sh',['-n',new URL('../packaging/flatpak/xi-io-hex-runner.sh',import.meta.url).pathname],{encoding:'utf8'});
   assert.equal(check.status,0,check.stderr);
 });
+
+test('Flatpak icon packaging preserves original logo and requires transient 512 derivative',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../packaging/flatpak/com.xiio.hex.json',import.meta.url),'utf8'));
+  assert.ok(manifest.modules[0]['build-commands'].some(x=>x.includes('install -Dm644 .xiio-hex-icon-512.png /app/share/icons/hicolor/512x512/apps/com.xiio.hex.png')));
+  assert.ok(manifest.modules[0].sources.some(x=>x.path==='.xiio-hex-icon-512.png'));
+  const builder=readFileSync(script,'utf8');
+  assert.match(builder,/ICON_STAGE=.*\\.xiio-hex-icon-512\\.png/);
+  assert.match(builder,/trap 'rm -f -- "\$ICON_STAGE"' EXIT/);
+  assert.match(builder,/convert "\$PACKAGING_DIR\\/com\\.xiio\\.hex\\.png" -resize 512x512/);
+  assert.doesNotMatch(builder,/convert[^\\n]*-resize[^\\n]*"\\$PACKAGING_DIR\\/com\\.xiio\\.hex\\.png"\\s*$/m);
+});
