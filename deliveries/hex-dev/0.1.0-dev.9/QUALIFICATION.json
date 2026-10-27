@@ -1,0 +1,79 @@
+{
+  "state": "ISOLATED_DEV9_SOURCE_AND_PACKAGE_QUALIFIED_NOT_PUBLISHED_OR_INSTALLED",
+  "base_hex_commit": "3304b7e833b41e9185a2ac974cc5f7c887a9ce9a",
+  "base_provider_tree": "5c33bfccd389a07378e9f594f927066854bb1920",
+  "baseline_source_files_exact": 150,
+  "package_version": "0.1.0-dev.9",
+  "package_file": "xi-io-hex-dev_0.1.0-dev.9_amd64.deb",
+  "package_sha256": "87d367490c02c9627216156441d832ea6f39840979dae51cc08a23b2684fdf11",
+  "package_bytes": 6672978,
+  "cli_payload_commit": "31d6a6f3ca595f3295d65bb2eb6bb85ec8e50a68",
+  "cli_consumer_sha256": "284fc73f855550ddb51c3c1042fa2efaddab923cbde084b409479b165698746e",
+  "offline_producer_sha256": "b817d87049e68d5db5dc55aa19a02ec28e8ff43156259807f77709e0b8cb96fd",
+  "unchanged_launcher_repair_ref": "0f2b444abbe8f7a99c5f4520b1222c568eba6dd1",
+  "unchanged_launcher_repair_sha256": "61fd09c0d0de09fb2b3aec4e94b34d013cd35ddc60eb44f86443a5d2b5812a4d",
+  "unchanged_adapter_sha256": "4d200d42f653706d138af3a4eba587dff28c98e9f7a7285cf90a2c34efd32794",
+  "payload_manifest_sha256": "e187e39924adec9576d91a9b514af3a0be9478625f990a935a87dea7171fee7b",
+  "actual_package_resources": {
+    "files": 39,
+    "all_exact_source_matches": true,
+    "pyc_files_in_package": 0
+  },
+  "checks": {
+    "npm_test": {
+      "tests": 81,
+      "pass": 80,
+      "skip": 1,
+      "fail": 0
+    },
+    "bindings": 26,
+    "interaction": 27,
+    "source_adoption": 7,
+    "contract": 15,
+    "typecheck": "PASS",
+    "frontend_build": "PASS",
+    "adapter_source": 36,
+    "carrier_contract": 5,
+    "rust": 11,
+    "actual_extracted_package_adapter": 36,
+    "actual_package_update_under_002_022": 2,
+    "source_patch_exact_apply_files": 13
+  },
+  "counts_note": "Suites overlap; no summed unique coverage or product acceptance asserted. Original tests unchanged except two exact stale canonical source/hash expectations corrected with their original failure preserved; two additive real-FS custody cases fail against the original6311 producer and pass againstb817. One original npm case remains skipped.",
+  "actual_update": {
+    "historical_generations": 4,
+    "historical_sources": [
+      "16d0fb4101d0674f8bd57858ac04d7fabf02aed2",
+      "385c85d53f99ac2f9e6c4fecb6d3c76ee772590d",
+      "aff03d8181afce44602e3a35d732736bdef6f5d2",
+      "8dff7cd8e05e44031b4eec46ddcb03c9e3ce354f"
+    ],
+    "historical_bytes_modes_uid_gid_inode_nlink_mtime_preserved": true,
+    "historical_0664_unchanged": true,
+    "new_generation_files": "0600",
+    "new_generation_directories": "0700",
+    "frozen_original_observer_catalog_custody": "PASS",
+    "tampered_payload_refused_before_effect": true,
+    "node_and_launcher_unchanged": true,
+    "actual_launcher_version": "PASS",
+    "actual_local_read": "PASS",
+    "actual_cli_rollback": "PASS",
+    "device_identity_created": false,
+    "model_requests": 0
+  },
+  "build_warning": "Inherited Tauri __TAURI_BUNDLE_TYPE marker warning; package bundling succeeded. No updater-plugin qualification claimed.",
+  "network_qualification": "Cargo locked/offline. Additional bwrap network namespace unavailable. Actual offline update tests used inherited Node preload to deny every network attempt; expected loopback model discovery was attempted and denied. No uninstrumented network-isolation claim.",
+  "unchanged": [
+    "frontend",
+    "adapter",
+    "kernel",
+    "connection",
+    "runtime-integrity verifier",
+    "canonical launcher-only repair",
+    "shared DEV8 source tree"
+  ],
+  "owner_host_installation": "NOT_PERFORMED",
+  "identity_creation_or_registration": "NOT_PERFORMED",
+  "remote_connection": "NOT_VERIFIED",
+  "delivery_status": "No new bootstrap generated. Root owns current8dff-to31d6 approval/receipt-chain delivery integration and publication. Package-only installation does not repair the active catalog."
+}

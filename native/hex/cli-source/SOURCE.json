@@ -1,1 +1,106 @@
-{"repository":"Vado42-chris/xi-io-cli","ref":"d53a1d0219f5b1707c6c1bbedfb262082179ceab","files":[{"path":"config/service-catalog.json","mode":"100644","type":"blob","sha":"9653ad3e12e644906607261004510ee149d33224","size":3970,"url":"https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/9653ad3e12e644906607261004510ee149d33224"},{"path":"install.mjs","mode":"100644","type":"blob","sha":"bd222710f775c209813def3c201d191a6348c8b8","size":24279,"url":"https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/bd222710f775c209813def3c201d191a6348c8b8"},{"path":"scripts/reconcile-service-inventory.mjs","mode":"100644","type":"blob","sha":"93f9fa19d9689daafd72e15566db5b28e500d9fa","size":3960,"url":"https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/93f9fa19d9689daafd72e15566db5b28e500d9fa"},{"path":"scripts/service-inventory.mjs","mode":"100644","type":"blob","sha":"52ccb0bb569149f60247d5ba44adc25f31655816","size":7287,"url":"https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/52ccb0bb569149f60247d5ba44adc25f31655816"},{"path":"src/file-edit-cas.mjs","mode":"100644","type":"blob","sha":"e8d2c740e779689f9b77aff7d16e369f17e70a08","size":3788,"url":"https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/e8d2c740e779689f9b77aff7d16e369f17e70a08"},{"path":"src/runtime-integrity.mjs","mode":"100644","type":"blob","sha":"d0427f95dc6d6170197b6f492f6daef535024471","size":10728,"url":"https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/d0427f95dc6d6170197b6f492f6daef535024471"},{"path":"src/xiio.mjs","mode":"100644","type":"blob","sha":"14c0fe6420f27e987b89512fce7d23d2c24ca31e","size":79672,"url":"https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/14c0fe6420f27e987b89512fce7d23d2c24ca31e"}],"modifications":{"install.mjs":"Local review-only offline verified packaged-source transport; upstream generation/launcher/pointer machinery preserved."}}
+{
+  "repository": "Vado42-chris/xi-io-cli",
+  "ref": "d53a1d0219f5b1707c6c1bbedfb262082179ceab",
+  "files": [
+    {
+      "path": "config/service-catalog.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9653ad3e12e644906607261004510ee149d33224",
+      "size": 3970,
+      "url": "https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/9653ad3e12e644906607261004510ee149d33224"
+    },
+    {
+      "path": "install.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bd222710f775c209813def3c201d191a6348c8b8",
+      "size": 24279,
+      "url": "https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/bd222710f775c209813def3c201d191a6348c8b8"
+    },
+    {
+      "path": "scripts/reconcile-service-inventory.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "93f9fa19d9689daafd72e15566db5b28e500d9fa",
+      "size": 3960,
+      "url": "https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/93f9fa19d9689daafd72e15566db5b28e500d9fa"
+    },
+    {
+      "path": "scripts/service-inventory.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "52ccb0bb569149f60247d5ba44adc25f31655816",
+      "size": 7287,
+      "url": "https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/52ccb0bb569149f60247d5ba44adc25f31655816"
+    },
+    {
+      "path": "src/file-edit-cas.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e8d2c740e779689f9b77aff7d16e369f17e70a08",
+      "size": 3788,
+      "url": "https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/e8d2c740e779689f9b77aff7d16e369f17e70a08"
+    },
+    {
+      "path": "src/runtime-integrity.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d0427f95dc6d6170197b6f492f6daef535024471",
+      "size": 10728,
+      "url": "https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/d0427f95dc6d6170197b6f492f6daef535024471"
+    },
+    {
+      "path": "src/xiio.mjs",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "14c0fe6420f27e987b89512fce7d23d2c24ca31e",
+      "size": 79672,
+      "url": "https://api.github.com/repos/Vado42-chris/xi-io-cli/git/blobs/14c0fe6420f27e987b89512fce7d23d2c24ca31e"
+    }
+  ],
+  "modifications": {
+    "install.mjs": "Existing offline verified packaged-source transport plus bounded fresh-generation custody correction; upstream generation/launcher/pointer machinery preserved. Canonical launcher-only repair remains separate and unchanged."
+  },
+  "ref_role": "Historical initial adoption base; current six-file payload authority is current_packaged_payload and packaged-source.json, not the historical blob list.",
+  "current_packaged_payload": {
+    "repository": "Vado42-chris/xi-io-cli",
+    "ref": "31d6a6f3ca595f3295d65bb2eb6bb85ec8e50a68",
+    "manifest": "packaged-source.json",
+    "files": {
+      "src/xiio.mjs": {
+        "sha256": "284fc73f855550ddb51c3c1042fa2efaddab923cbde084b409479b165698746e",
+        "size": 103283
+      },
+      "src/file-edit-cas.mjs": {
+        "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
+        "size": 3788
+      },
+      "src/runtime-integrity.mjs": {
+        "sha256": "de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912",
+        "size": 10728
+      },
+      "config/service-catalog.json": {
+        "sha256": "8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88",
+        "size": 3970
+      },
+      "scripts/service-inventory.mjs": {
+        "sha256": "4711d6603f759607e79cadc1031f8668ef27b393f25b408b9ecd5516ebc18204",
+        "size": 7287
+      },
+      "scripts/reconcile-service-inventory.mjs": {
+        "sha256": "eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e",
+        "size": 3960
+      }
+    },
+    "local_payload_modifications": false
+  },
+  "offline_installer_successor": {
+    "repository": "Vado42-chris/xi-io-cli-cube",
+    "base_ref": "f1bca1245436167fc7767bc31925486643e5d2e7",
+    "path": "native/hex/cli-source/install.mjs",
+    "base_sha256": "6311b606049f07d35bc31e78f73218a95a114d3723c9f8b97bcb8f3262d8d5a6",
+    "sha256": "b817d87049e68d5db5dc55aa19a02ec28e8ff43156259807f77709e0b8cb96fd",
+    "scope": "Existing offline installer, fresh-generation files/receipt 0600 and nested directories 0700 only; historical bytes, modes and identities preserved. No new installer or runtime."
+  }
+}

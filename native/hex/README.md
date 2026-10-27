@@ -70,6 +70,20 @@ any successor delivery needs a distinct version, hash receipt and native QA.
 Legacy source ZIPs at the repository root/public are not this integration's build
 inputs and must not be treated as evidence of the current native closure.
 
+### DEV9 bounded custody successor
+
+DEV9 keeps the same frontend, finite adapter/kernel, connection resources and
+canonical launcher-only repair. The existing offline producer gives only new
+generation payload/receipt files mode0600 and new nested directories mode0700.
+It does not chmod, overwrite or discard historical generations. Its original
+pointer transaction and rollback machinery remains the owner of those effects.
+The current CLI payload and producer provenance are explicit in
+`cli-source/SOURCE.json`; the initial adoption record remains historical.
+Installing the HEX package alone does not update an already-installed CLI
+generation. That requires a separate, freshly approved existing offline update.
+Neither local catalog custody nor local identity diagnostics proves remote
+connectivity, authenticated enrollment, Ward admission or service readiness.
+
 ## Inherited portability debt
 
 The exact pinned CLI/connection donor includes historical Aries/Loki profile and

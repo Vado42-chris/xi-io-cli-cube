@@ -215,18 +215,29 @@ const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '') 
 const dir = fs.mkdtempSync(path.join(versions, sha.slice(0, 12) + '-' + stamp + '-'));
 const generation = path.basename(dir);
 const hashes = {};
+// Only newly created files in this fresh generation acquire these permissions.
+// An ambient group-writable umask must not make the installed catalog fail the
+// existing Ward/Switchboard custody check. Never chmod a historical generation.
+function writeNewGenerationFile(filename, bytes) {
+  const fd = fs.openSync(filename, 'wx', 0o600);
+  try {
+    fs.fchmodSync(fd, 0o600);
+    fs.writeFileSync(fd, bytes);
+    fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
+}
 for (const f of FILES) {
   const bytes = packagedBytes ? packagedBytes[f] : gh(['api', '-H', 'Accept: application/vnd.github.raw', `repos/${REPO}/contents/${f}?ref=${sha}`]);
   if (!bytes.length) fail('FETCH_EMPTY', { file: f });
   const out = path.join(dir, ...f.split('/'));
-  fs.mkdirSync(path.dirname(out), { recursive: true });
-  fs.writeFileSync(out, bytes, { flag: 'wx' });
+  fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
+  writeNewGenerationFile(out, bytes);
   hashes[f] = sha256(bytes);
 }
-fs.writeFileSync(path.join(dir, 'install-receipt.json'), JSON.stringify({
+writeNewGenerationFile(path.join(dir, 'install-receipt.json'), JSON.stringify({
   schema: 'xiio.cli.install-receipt/v2', installed_at: new Date().toISOString(), repo: REPO, ref: REF, source_sha: sha,
   generation, prefix: PREFIX, platform: process.platform, node: process.versions.node, files: hashes, models_installed: 0,
-}, null, 2) + '\n', { flag: 'wx' });
+}, null, 2) + '\n');
 
 // 3. Verify the staged generation before it becomes current. The smoke test
 //    uses a throwaway config dir so it cannot change the person's settings.

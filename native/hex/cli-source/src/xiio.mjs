@@ -202,7 +202,25 @@ async function modelsCommand(sub,args,flags){
     return{schema:'xiio.cli.models/v1',state:'PASS',engine,models:body.models.filter(m=>m&&typeof(m.name||m.model)==='string').map(m=>({name:m.name||m.model,size:m.size??null,modified_at:m.modified_at||null})),rule:'ENGINE != MODEL; no model is installed or selected by listing.'};
   }catch(e){return{schema:'xiio.cli.models/v1',state:'TRUE_WAIT',engine,models:[],reason:String(e.message||e)};}
 }
-function installCommand(target,flags){if(target==='ollama'){if(run('ollama',['--version']).status===0)return{schema:'xiio.cli.install/v1',state:'PASS_ALREADY_INSTALLED',target:'ollama',models_installed:0};if(!flags.apply)return{schema:'xiio.cli.install-plan/v1',state:'PLAN',target:'ollama',provider:'official_ollama_linux_installer',command:'curl -fsSL https://ollama.com/install.sh | sh',models_installed:0,hard:['INSTALL_ENGINE != INSTALL_MODEL','--apply REQUIRED']};const curl=run('curl',['-fsSL','https://ollama.com/install.sh']);if(curl.status!==0)return{state:'BLOCKED',reason:'OLLAMA_INSTALLER_DOWNLOAD_FAILED',stderr:curl.stderr};const sh=spawnSync('sh',[],{input:curl.stdout,encoding:'utf8',timeout:180000,env:controlledChildEnv()});return{schema:'xiio.cli.install/v1',state:sh.status===0?'PASS':'BLOCKED',target:'ollama',status:sh.status,stdout:(sh.stdout||'').slice(-2000),stderr:(sh.stderr||'').slice(-2000),models_installed:0,hard:['ENGINE_INSTALLED != MODEL_SELECTED']};}if(target==='mail-server')return{schema:'xiio.cli.install-plan/v1',state:'PROFILE_REQUIRED',target,reason:'Mail transport needs explicit provider/security profile before package mutation.',examples:['postfix+dovecot','existing external IMAP/SMTP'],apply:false};return{state:'FAIL',reason:'UNKNOWN_INSTALL_TARGET',target};}
+function installCommand(target,flags){
+  if(target==='ollama'){
+    if(run('ollama',['--version']).status===0)return{schema:'xiio.cli.install/v1',state:'PASS_ALREADY_INSTALLED',target:'ollama',models_installed:0};
+    if(!flags.apply)return{schema:'xiio.cli.install-plan/v1',state:'PLAN',target:'ollama',provider:'official_ollama_linux_installer',command:'curl -fsSL https://ollama.com/install.sh | sh',models_installed:0,hard:['INSTALL_ENGINE != INSTALL_MODEL','--apply REQUIRED']};
+    const curl=run('curl',['-fsSL','https://ollama.com/install.sh']);
+    if(curl.status!==0)return{state:'BLOCKED',reason:'OLLAMA_INSTALLER_DOWNLOAD_FAILED',stderr:curl.stderr};
+    const sh=spawnSync('sh',[],{input:curl.stdout,encoding:'utf8',timeout:180000,env:controlledChildEnv()});
+    const result={schema:'xiio.cli.install/v1',state:'BLOCKED',target:'ollama',status:sh.status,stdout:(sh.stdout||'').slice(-2000),stderr:(sh.stderr||'').slice(-2000),models_installed:0,hard:['ENGINE_INSTALLED != MODEL_SELECTED']};
+    if(sh.status!==0)return result;
+    // Installer exit zero is not evidence that the engine can now be invoked.
+    // Reuse the existing installed-engine observation, not a service-health claim.
+    const version=run('ollama',['--version']);
+    return{...result,state:version.status===0?'PASS':'BLOCKED',reason:version.status===0?null:'OLLAMA_INSTALLATION_UNVERIFIED',
+      installation_observation:{state:version.status===0?'VERSION_COMMAND_SUCCEEDED':'VERSION_COMMAND_FAILED',status:version.status,stdout:version.stdout.slice(0,2000),stderr:version.stderr.slice(0,2000),error:version.error},
+      service_health:'NOT_CHECKED',model_inference:'NOT_CHECKED'};
+  }
+  if(target==='mail-server')return{schema:'xiio.cli.install-plan/v1',state:'PROFILE_REQUIRED',target,reason:'Mail transport needs explicit provider/security profile before package mutation.',examples:['postfix+dovecot','existing external IMAP/SMTP'],apply:false};
+  return{state:'FAIL',reason:'UNKNOWN_INSTALL_TARGET',target};
+}
 function ghJson(args){
   const r=run('gh',args,{timeout:30000});
   if(r.status!==0)return{state:'TRUE_WAIT',reason:'GITHUB_UNREADABLE',stderr:r.stderr};
@@ -394,8 +412,8 @@ function toolCatalog(){
     {name:'resolve_registry',description:'Read one named registry/current/ACK file.',write:false},
     {name:'edit_workspace_file',description:'Change an existing file using copied old_text, new_text and optional expected_sha256. The file is replaced only when its approved bytes still match under a local cooperative lock. To create a file, give path and content. Each change requires explicit approval. Local locking does not replace Ward or BINS authority.',write:true},
     {name:'install_dependencies',description:'Install the exact packages pinned in package-lock.json (npm ci, install scripts blocked) so builds can run. Sandboxed; needs your yes.',write:true},
-    {name:'list_services',description:'List your local XI-IO services (CRM, HEX, Inbox, Glass Box, Studio...) this CLI can call.',write:false},
-    {name:'call_service',description:'Call one of your local XI-IO services by name. GET reads; POST/PUT/PATCH/DELETE show the exact request and need your yes. Loopback only, no shell routes.',write:true},
+    {name:'list_services',description:'List configured local service candidates and their declared health endpoints. Listing proves neither installation nor current product identity or permission.',write:false},
+    {name:'call_service',description:'Read only the exact declared health endpoint of a configured loopback service. Broader APIs and writes are unavailable without independently bound current service identity. An HTTP response is not product-health or authority proof.',write:false},
     {name:'run_workspace_command',description:'Run a command inside a sandbox: the project folder is writable, the rest of the computer is hidden or read-only, and there is no network. The human approves each command.',write:true}
   ];
 }
@@ -823,10 +841,118 @@ async function ollamaChatNative(messages,{model,root,approve}){
   }
   return finishToolTurn(messages,results,{error:'TOOL_LOOP_LIMIT'});
 }
+// Human-facing views consume existing observations; they do not grant access,
+// infer task completion, or change the machine-readable execution receipt.
+function humanText(value){return String(value??'').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));}
+function humanCommands(){
+  const sb=sandboxState();
+  if(sb.ok)return 'Commands and pinned npm dependencies: available in the sandbox, only after your approval.';
+  const why={SANDBOX_DISABLED_BY_ENVIRONMENT:'disabled for this session',SANDBOX_UNAVAILABLE_NO_BWRAP:'the required sandbox is not installed',SANDBOX_UNAVAILABLE_NAMESPACES_BLOCKED:'the sandbox could not start'};
+  return 'Commands and dependency installs are unavailable here: '+(why[sb.reason]||'this computer has no working supported sandbox')+'. Local file reads and approved edits do not require it.';
+}
+function humanHelp(model){
+  return ['I can read, explain, search, and edit files in this workspace. Try:',
+    '  “Read README.md and explain how to use this project.”',
+    '  “Find where the launch date is mentioned.”',
+    '  “Change the launch date in README.md to 13 November; leave everything else alone.”',
+    'I show each edit first and wait for your yes.',
+    model?null:'No local model is selected. Use /models, then /model NAME for natural-language work.',
+    '/read README.md reads a file without a model. /tools shows available actions. /menu shows the choices.'
+  ].filter(Boolean).join('\n');
+}
+function humanTools(){
+  return ['Available actions in this workspace:',
+    '  • Browse folders, search text, and read text files (credential files stay closed).',
+    '  • Inspect the Git branch and changed files; locate and read possible project-rule/current-work files.',
+    '  • Create a text file or replace an exact piece of text after you approve the displayed change.',
+    '  • Check a configured local health endpoint only; a response does not prove the product is ready. Broader service access is unavailable.',
+    humanCommands(),
+    '/tools details shows the technical tool names and full descriptions.'].join('\n');
+}
+function humanExamples(){
+  return ['Tell me what you need, for example:',
+    '  “Read README.md and explain how to use this project.”',
+    '  “Find every mention of the launch date.”',
+    '  “Which files have changed in Git?”',
+    '  “Change the launch date in README.md to 13 November; leave everything else alone.”',
+    'File names and dates above are examples, not work already done. I read before proposing an edit; it waits for your yes.',
+    humanCommands(),
+    'For an exact text read without a model: /read PATH. For the last turn’s full evidence: /details.'].join('\n');
+}
+function humanRegistry(rows,{details=false}={}){
+  if(!rows.files.length)return 'I did not find files named like ACK, current, registry or manifest in this workspace. That does not prove there are no project rules. Tell me your task or a known rules file to read.';
+  const files=details?rows.files:rows.files.slice(0,10);
+  return ['These files may describe project rules or current work. They were found by filename, not read or verified; no binding or permission is established by this search.',
+    ...files.map(p=>'  '+humanText(p)),
+    ...(files.length<rows.files.length?[String(rows.files.length-files.length)+' more candidates; /ack details lists all discovered paths.']:[]),
+    rows.files.length===200?'The search reached its 200-candidate limit; this is not a complete inventory.':null,
+    'Tell me what you are working on and I can read the relevant file, or use /read PATH to inspect one directly.'].filter(Boolean).join('\n');
+}
+function humanDoctor(d,root){
+  const lines=['Local setup: '+(d.state==='PASS'?'the reported checks passed':d.state==='PARTIAL'?'not fully verified (PARTIAL)':'readiness unknown ('+humanText(d.state)+')')+'.',
+    'Local file work is separate from these service checks. Workspace: '+humanText(root)+'.'];
+  const reasons={HOST_PROFILE_UNRESOLVED:'There is no service profile for this computer, so no services were checked.',HOST_PROFILE_AMBIGUOUS:'More than one service profile matches this computer; I did not choose one.',LOCAL_SERVICES_HOST_MISMATCH:'The local service list belongs to another computer and was not accepted.',LOCAL_SERVICES_SCHEMA_INVALID:'The local service list has an unsupported format.',LOCAL_SERVICES_CUSTODY_UNVERIFIED:'The local service list did not pass file type or permission checks.',LOCAL_SERVICES_RECORD_INVALID:'The local service list contains an invalid entry.',LOCAL_SERVICES_UNREADABLE:'The local service list could not be read safely.'};
+  if(d.first_red)lines.push(reasons[d.first_red]||'A setup check is unresolved ('+humanText(d.first_red)+').');
+  if(!d.services.length&&!d.first_red)lines.push('No services were checked; this is not an all-clear.');
+  for(const row of d.services){
+    let observation;
+    const p=row.probe;
+    if(row.state==='HTTP_OBSERVED_UNQUALIFIED')observation='endpoint responded; product health and identity are not verified';
+    else if(row.state==='RUNNING_UNPROVEN')observation='service unit is running; this does not confirm product readiness';
+    else if(row.state==='STOPPED')observation='service units were found, but none was observed running';
+    else if(row.state==='NOT_OBSERVED')observation='I did not observe it; installation and health remain unknown';
+    else if(row.state==='PASS')observation='reported checks passed';
+    else observation='unverified ('+humanText(row.reason||row.state)+')';
+    if(p&&!p.http_observed){
+      const why=p.reason==='HEALTH_REDIRECT_REFUSED'?'endpoint redirected; redirect was not followed':p.status?'endpoint returned HTTP '+p.status:p.reason==='HEALTH_TIMEOUT'?'endpoint check timed out':p.reason==='HEALTH_TRANSPORT_UNVERIFIED'?'could not reach the declared endpoint':'endpoint check unverified ('+humanText(p.reason||p.state)+')';
+      observation=row.state==='NOT_OBSERVED'?why+'; health unknown':observation+'; '+why;
+    }
+    lines.push('  • '+humanText(row.id)+': '+observation+'.');
+  }
+  if(d.unprofiled_candidates.length)lines.push(d.unprofiled_candidates.length+' other catalog entries were not checked.');
+  lines.push(humanCommands(),'Nothing was changed. /status details shows the full doctor findings.');
+  return lines.join('\n');
+}
+function humanToolTurn(answer){
+  const r=answer.receipt,lines=[];
+  const labels={list_workspace:'List files',search_workspace:'Search text',read_workspace_file:'Read file',resolve_registry:'Read project record',list_registries:'Find project records',git_status:'Inspect Git',edit_workspace_file:'Change file',run_workspace_command:'Run command',install_dependencies:'Install pinned dependencies',list_services:'List configured services',call_service:'Check service endpoint'};
+  const preview=(text)=>{const s=humanText(text);return s.length>4000?s.slice(0,4000)+'\n[Display shortened; /details retains the full returned value.]':s;};
+  const reasons={HUMAN_APPROVAL_REQUIRED:'No approval was given, so this action was not performed.',CREDENTIAL_PATH_REFUSED:'Credential files are not accessible.',PATH_OUTSIDE_WORKSPACE:'That path is outside this workspace.',SYMLINK_OUTSIDE_WORKSPACE:'That link leaves the workspace.',BINARY_FILE_REFUSED:'This is not a text file.',NOT_UTF8_TEXT_REFUSED:'This file is not valid UTF-8 text.',NOT_A_REGULAR_FILE:'That path is not a regular file.',MODEL_ANSWER_EMPTY_OR_NULL:'The model did not return a usable answer.',MODEL_TEXT_IS_NOT_A_TOOL_CALL:'The model printed a tool-shaped reply instead of a valid action.',TOOL_LOOP_LIMIT:'The model reached the action limit without a final answer.'};
+  for(const fact of r.tool_results){
+    const v=fact.result||{},label=labels[fact.name]||'Action',where=v.path||fact.arguments?.path;
+    if(fact.state==='FAILED'){
+      const reason=String(fact.reason||'UNKNOWN');
+      lines.push(label+(where?' '+humanText(where):'')+' — failed. '+(reasons[reason]||(reason.startsWith('ENOENT')?'The file was not found.':'The action could not be verified.'))+' ('+humanText(reason)+')');
+    }else if(['read_workspace_file','resolve_registry'].includes(fact.name)){
+      lines.push('Read '+humanText(v.path)+' ('+v.byte_length+' bytes)'+(fact.state==='PARTIAL'?' — only part of the file was returned.':' — file content returned.')+'\n'+(v.content===''?'[Empty file: 0 bytes.]':preview(v.content)));
+    }else if(fact.name==='edit_workspace_file')lines.push((v.created?'Created ':'Changed ')+humanText(v.path)+' — written bytes match the readback.'+(v.bytes_outside_change_preserved===true?' Other bytes were preserved.':''));
+    else if(fact.name==='list_workspace')lines.push('Files in '+humanText(v.path)+':\n'+preview(v.entries.map(x=>x.name+(x.type==='dir'?'/':'')).join('\n')||'[No entries returned.]'));
+    else if(fact.name==='search_workspace')lines.push('Matches for '+humanText(v.query)+':\n'+preview(v.matches.join('\n')||'[No matches returned.]'));
+    else if(fact.name==='git_status')lines.push('Git branch: '+humanText(v.branch||'(detached HEAD)')+'\n'+preview(v.status||'No working-tree changes reported.')+'\nSubmodule contents were not inspected.');
+    else if(fact.name==='list_registries')lines.push(humanRegistry(v));
+    else if(fact.name==='list_services')lines.push('Configured service candidates: '+humanText(v.services.map(x=>x.service).join(', ')||'none')+'. Listing is not product health or permission. Only declared health endpoints are available.');
+    else if(fact.name==='call_service')lines.push(humanText(v.service)+': endpoint returned HTTP '+v.status+'. Product health, identity and broader permission are not verified.\n'+preview(v.body));
+    else if(['run_workspace_command','install_dependencies'].includes(fact.name))lines.push(label+' — process exited with code '+v.status+'.');
+    else lines.push(label+' — '+humanText(fact.state)+'.');
+    if(['run_workspace_command','install_dependencies'].includes(fact.name)){
+      if(typeof v.stdout==='string'&&v.stdout)lines.push('Command output:\n'+preview(v.stdout));
+      if(typeof v.stderr==='string'&&v.stderr)lines.push('Command error output:\n'+preview(v.stderr));
+    }
+  }
+  if(!r.tool_results.length)lines.push('No tools were executed.');
+  if(r.provider_error&&!r.tool_results.some(f=>f.reason===r.provider_error))lines.push((r.source==='direct_read'?'The direct read did not complete: ':'The local model turn did not complete: ')+(reasons[r.provider_error]||humanText(r.provider_error))+(reasons[r.provider_error]?'':'.')+(r.tool_results.length?' Earlier tool results above still stand.':''));
+  if(r.state==='FAILED'||r.state==='PARTIAL')lines.push('This request did not finish successfully.');
+  const marker='\nModel reply (unverified narrative; not an execution receipt):\n';
+  const at=answer.text.indexOf(marker);
+  if(at>=0&&r.state!=='FAILED'&&r.state!=='PARTIAL')lines.push('Model explanation (unverified):\n'+humanText(answer.text.slice(at+marker.length)));
+  lines.push('/details shows the full execution receipt and model reply.');
+  return lines.join('\n');
+}
+
 function printMenu(){
   process.stdout.write('\nxi-io: CLI\nWhat would you like to do?\n\n');
   for(const [n,,label] of MENU)process.stdout.write('  '+n+'. '+label+'\n');
-  process.stdout.write('\nOr just tell me what you need in plain language.\n/read PATH — deterministic workspace text read; no model required (consumer hotpatch).\n\n');
+  process.stdout.write('\nOr just tell me what you need in plain language.\n/read PATH reads a text file without a model. /menu returns to these choices.\n\n');
 }
 const MODEL_FILE=path.join(CONFIG_DIR,'model');
 function savedModel(){try{return fs.readFileSync(MODEL_FILE,'utf8').trim()||null;}catch{return null;}}
@@ -844,6 +970,8 @@ async function interactive(flags,args=[]){
   const remembered=savedModel();
   let model=requestedModel||(remembered&&names.includes(remembered)?remembered:null)||names[0]||null;
   const rl=readline.createInterface({input:process.stdin,output:process.stdout,terminal:Boolean(process.stdin.isTTY&&process.stdout.isTTY)});
+  let lastTurn=null;
+  const showTurn=answer=>{lastTurn=answer;process.stdout.write((process.stdin.isTTY&&process.stdout.isTTY?humanToolTurn(answer):answer.text)+'\n');};
   let messages=[{role:'system',content:[
     'You are @ibal inside xi-io: CLI. Be conversational, concise, and practical.',
     'The user is the Pilot; you are the Navigator/Engineer.',
@@ -870,11 +998,14 @@ async function interactive(flags,args=[]){
       if(choice.invalid){process.stdout.write('Unknown menu number. Choose 1-10 or /exit. Nothing was sent to Ollama.\n');continue;}
       const cmd=choice.command;
       if(cmd==='/exit'){process.stdout.write('See you next time.\n');break;}
-      if(cmd==='/clear'){messages=messages.slice(0,1);process.stdout.write('Conversation cleared. Workspace stays '+root+'.\n');continue;}
-      if(cmd==='/help'){printMenu();continue;}
+      if(cmd==='/clear'){messages=messages.slice(0,1);lastTurn=null;process.stdout.write('Conversation cleared. Workspace stays '+root+'.\n');continue;}
+      if(cmd==='/menu'){printMenu();continue;}
+      if(cmd==='/help'){process.stdout.write(humanHelp(model)+'\n');continue;}
+      if(cmd==='/details'){process.stdout.write(lastTurn?lastTurn.text+'\n':'No execution receipt yet. Ask for work or use /read PATH first.\n');continue;}
       if(cmd==='/workspace'){process.stdout.write('You are working in '+root+'.\n');continue;}
-      if(cmd==='/tools'){for(const t of toolCatalog())process.stdout.write('  '+t.name+(t.write?' [asks you first]':' [read]')+' — '+t.description+'\n');process.stdout.write(commandLine()+'\n');continue;}
-      if(cmd==='/commands'){process.stdout.write('Ask naturally, or use the numbered menu. Every edit and command is shown to you and waits for your yes.\n'+commandLine()+'\n');continue;}
+      if(cmd==='/tools'){process.stdout.write(humanTools()+'\n');continue;}
+      if(cmd==='/tools details'){for(const t of toolCatalog())process.stdout.write('  '+t.name+(t.write?' [asks you first]':' [read]')+' — '+t.description+'\n');process.stdout.write(commandLine()+'\n');continue;}
+      if(cmd==='/commands'){process.stdout.write(humanExamples()+'\n');continue;}
       if(cmd.startsWith('/model ')){const selected=cmd.slice(7).trim();if(!names.includes(selected)){process.stdout.write('Choose a discovered installed model from /models.\n');continue;}model=selected;saveModel(model);process.stdout.write('Local model changed to '+model+'.\n');continue;}
       if(cmd==='/model'){process.stdout.write('Local model: '+(model||'none selected')+' via Ollama. Use /model NAME to switch among /models.\n');continue;}
       if(cmd==='/models'){
@@ -884,26 +1015,26 @@ async function interactive(flags,args=[]){
         else process.stdout.write(names.length?names.map((x,i)=>'  '+(i+1)+'. '+x).join('\n')+'\nUse /model NAME to select one.\n':'No local Ollama models were discovered.\n');
         continue;
       }
-      if(cmd==='/status'){const d=await doctor();process.stdout.write('Local xi-io status: '+d.state+'. Workspace: '+root+'. '+commandLine()+'\n');continue;}
-      if(cmd==='/ack'){
+      if(cmd==='/status'||cmd==='/status details'){const d=await doctor();process.stdout.write((cmd==='/status details'?JSON.stringify(d,null,2):humanDoctor(d,root))+'\n');continue;}
+      if(cmd==='/ack'||cmd==='/ack details'){
         const rows=await executeTool('list_registries',{}, {root});
-        process.stdout.write(rows.files.length?'I found '+rows.files.length+' ACK/current/registry candidates. Tell me what you are working on and I will resolve only the relevant ones.\n':'I did not find a local ACK/current registry in this workspace.\n');
+        process.stdout.write(humanRegistry(rows,{details:cmd==='/ack details'})+'\n');
         continue;
       }
       if(cmd==='/read'||cmd.startsWith('/read ')){
         const file=cmd.slice(5).trim();
         if(!file||file.length>4096||/[\x00-\x1f\x7f]/.test(file)){
-          process.stdout.write(toolFallbackText([],{source:'direct_read',error:'READ_PATH_INVALID'}).text+'\n');continue;
+          showTurn(toolFallbackText([],{source:'direct_read',error:'READ_PATH_INVALID'}));continue;
         }
         const fact=await executeObservedTool('read_workspace_file',{path:file},{root});
-        process.stdout.write(toolFallbackText([fact],{source:'direct_read'}).text+'\n');
+        showTurn(toolFallbackText([fact],{source:'direct_read'}));
         continue;
       }
       if(!model){process.stdout.write('No local model selected. No request sent.\n');continue;}
       messages.push({role:'user',content:input});
       try{
         const answer=await ollamaChat(messages,{model,root,approve});
-        process.stdout.write(answer.text+'\n');
+        showTurn(answer);
       }
       catch(e){process.stdout.write('I could not complete that locally: '+String(e.message||e)+'.\n');}
     }
@@ -924,7 +1055,52 @@ function receipt(){try{return JSON.parse(fs.readFileSync(path.join(ROOT,'install
 // signatures made with it. Identity is not permission: Ward grants per device.
 const DEVICE_FILE=path.join(CONFIG_DIR,'device.json');
 const DEVICE_KEY_FILE=path.join(CONFIG_DIR,'device-key.pem');
-function readDevice(){try{return JSON.parse(fs.readFileSync(DEVICE_FILE,'utf8'));}catch{return null;}}
+function readDevice(){
+  // Absence permits first-time sign-in. A failed read is not absence and must
+  // never turn an existing device into a new identity or recommend that repair.
+  let bytes,st;
+  try{
+    st=fs.lstatSync(DEVICE_FILE);
+  }catch(error){return error.code==='ENOENT'?{state:'ABSENT'}:{state:'BLOCKED',reason:'DEVICE_IDENTITY_UNREADABLE'};}
+  if(!st.isFile()||st.isSymbolicLink()||st.size>65536||(process.platform!=='win32'&&(st.mode&0o077)!==0))
+    return{state:'BLOCKED',reason:'DEVICE_IDENTITY_CUSTODY_UNVERIFIED'};
+  // Once observed, a disappearing record is an unreadable existing identity.
+  try{bytes=fs.readFileSync(DEVICE_FILE);}catch{return{state:'BLOCKED',reason:'DEVICE_IDENTITY_UNREADABLE'};}
+  try{
+    const device=JSON.parse(bytes.toString('utf8'));
+    // Existing device/v1 producers use UUIDs; match the bound observer contract.
+    // Unsupported records remain intact, never normalized into another identity.
+    if(device?.schema!=='xiio.cli.device/v1'||typeof device.device_id!=='string'||!/^device:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(device.device_id)
+      ||typeof device.principal!=='string'||!/^github:[0-9]+$/.test(device.principal)||typeof device.login!=='string'||!device.login
+      ||typeof device.hostname!=='string'||!device.hostname||typeof device.platform!=='string'||!device.platform
+      ||typeof device.public_key!=='string'||typeof device.fingerprint!=='string'
+      ||crypto.createPublicKey(device.public_key).asymmetricKeyType!=='ed25519'
+      ||deviceFingerprint(device.public_key)!==device.fingerprint)
+      return{state:'BLOCKED',reason:'DEVICE_IDENTITY_INVALID'};
+    return{state:'PASS',device,bytes};
+  }catch{return{state:'BLOCKED',reason:'DEVICE_IDENTITY_INVALID'};}
+}
+function deviceReadResult(observed,schema){
+  return observed.state==='ABSENT'?{schema,state:'UNSET',fix:'Run: xi-io-cli login'}
+    :{schema,state:'BLOCKED',reason:observed.reason,modified:false,note:'Existing identity was not replaced. Review the existing device record without re-registering this computer.'};
+}
+function readBoundDeviceKey(device){
+  try{
+    const st=fs.lstatSync(DEVICE_KEY_FILE);
+    if(!st.isFile()||st.isSymbolicLink()||st.size>65536||(process.platform!=='win32'&&(st.mode&0o077)!==0))throw Error('KEY_CUSTODY');
+    const privateKey=crypto.createPrivateKey(fs.readFileSync(DEVICE_KEY_FILE));
+    const publicKey=crypto.createPublicKey(privateKey).export({type:'spki',format:'pem'});
+    if(privateKey.asymmetricKeyType!=='ed25519'||deviceFingerprint(publicKey)!==device.fingerprint)throw Error('KEY_CHANGED');
+    return{state:'PASS',privateKey};
+  }catch{return{state:'BLOCKED',reason:'DEVICE_KEY_MISSING_OR_CHANGED',modified:false};}
+}
+function deviceHostHold(device,schema){
+  if(device.hostname===os.hostname()&&device.platform===process.platform)return null;
+  return{schema,state:'BLOCKED',reason:'DEVICE_HOST_RECONCILIATION_REQUIRED',modified:false,
+    device_id:device.device_id,principal:device.principal,hostname:device.hostname,platform:device.platform,
+    device_key_matches_record:true,current_host_binding_verified:false,
+    note:'The existing device identity is retained. A renamed or different host needs owner/Ward binding reconciliation before this target-bound operation; do not re-register or replace the key.'};
+}
 function githubIdentity(){
   const r=spawnSync(process.env.XIIO_GH||'gh',['api','user','--jq','{id:.id,login:.login}'],{encoding:'utf8',timeout:20000,env:controlledChildEnv()});
   if(r.error)return {state:'BLOCKED',reason:'GH_NOT_INSTALLED',fix:'Install the GitHub CLI, then run: gh auth login'};
@@ -934,29 +1110,47 @@ function githubIdentity(){
 }
 function deviceFingerprint(pubPem){return 'SHA256:'+crypto.createHash('sha256').update(crypto.createPublicKey(pubPem).export({type:'spki',format:'der'})).digest('base64').replace(/=+$/,'');}
 function login(){
+  const observed=readDevice();
+  if(observed.state==='BLOCKED')return deviceReadResult(observed,'xiio.cli.login/v1');
   const who=githubIdentity();
   if(who.state!=='PASS')return {schema:'xiio.cli.login/v1',...who};
-  fs.mkdirSync(CONFIG_DIR,{recursive:true,mode:0o700});
-  let created=false;
-  if(!fs.existsSync(DEVICE_KEY_FILE)){
-    const {privateKey}=crypto.generateKeyPairSync('ed25519');
-    fs.writeFileSync(DEVICE_KEY_FILE,privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600,flag:'wx'});
-    created=true;
-  }
-  try{fs.chmodSync(DEVICE_KEY_FILE,0o600);}catch{}
-  const priv=crypto.createPrivateKey(fs.readFileSync(DEVICE_KEY_FILE));
-  const pub=crypto.createPublicKey(priv).export({type:'spki',format:'pem'});
-  const prev=readDevice();
+  const prev=observed.device||null;
   const principal='github:'+who.id;
-  if(prev&&prev.principal&&prev.principal!==principal)return {schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_BOUND_TO_OTHER_ACCOUNT',bound_to:prev.principal,signed_in_as:principal,fix:'This computer is registered to another account. Remove '+DEVICE_FILE+' only if you mean to re-register it.'};
-  const device={schema:'xiio.cli.device/v1',device_id:prev?.device_id||('device:'+crypto.randomUUID()),hostname:os.hostname(),platform:process.platform,principal,login:who.login,public_key:pub,fingerprint:deviceFingerprint(pub),created_at:prev?.created_at||new Date().toISOString(),signed_in_at:new Date().toISOString(),authority:'NONE_UNTIL_WARD_GRANT'};
-  const t=DEVICE_FILE+'.tmp-'+process.pid;fs.writeFileSync(t,JSON.stringify(device,null,2)+'\n',{mode:0o600});fs.renameSync(t,DEVICE_FILE);
-  return {schema:'xiio.cli.login/v1',state:'PASS',signed_in_as:who.login,principal,device_id:device.device_id,hostname:device.hostname,fingerprint:device.fingerprint,device_key:created?'CREATED':'EXISTING',note:'Identity only. Ward grants what this computer may do.'};
+  if(prev&&prev.principal!==principal)return {schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_BOUND_TO_OTHER_ACCOUNT',bound_to:prev.principal,signed_in_as:principal,modified:false,note:'This computer remains bound to its existing account. No identity or key was changed.'};
+  let priv;
+  if(prev){
+    const key=readBoundDeviceKey(prev);
+    if(key.state!=='PASS')return{schema:'xiio.cli.login/v1',...key};
+    const hold=deviceHostHold(prev,'xiio.cli.login/v1');if(hold)return hold;
+    priv=key.privateKey;
+  }else{
+    // An orphan key is retained for review, not adopted into a replacement ID.
+    try{fs.lstatSync(DEVICE_KEY_FILE);return{schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_KEY_WITHOUT_IDENTITY',modified:false};}
+    catch(error){if(error.code!=='ENOENT')return{schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_KEY_UNREADABLE',modified:false};}
+  }
+  let created=false;
+  try{
+    if(!prev){
+      fs.mkdirSync(CONFIG_DIR,{recursive:true,mode:0o700});
+      priv=crypto.generateKeyPairSync('ed25519').privateKey;
+      fs.writeFileSync(DEVICE_KEY_FILE,priv.export({type:'pkcs8',format:'pem'}),{mode:0o600,flag:'wx'});
+      created=true;
+    }
+    const pub=crypto.createPublicKey(priv).export({type:'spki',format:'pem'});
+    const device={schema:'xiio.cli.device/v1',device_id:prev?.device_id||('device:'+crypto.randomUUID()),hostname:os.hostname(),platform:process.platform,principal,login:who.login,public_key:pub,fingerprint:deviceFingerprint(pub),created_at:prev?.created_at||new Date().toISOString(),signed_in_at:new Date().toISOString(),authority:'NONE_UNTIL_WARD_GRANT'};
+    const bytes=Buffer.from(JSON.stringify(device,null,2)+'\n');
+    if(prev)commitWorkspaceEditCAS({file:path.resolve(DEVICE_FILE),expectedBytes:observed.bytes,nextBytes:bytes});
+    else fs.writeFileSync(DEVICE_FILE,bytes,{mode:0o600,flag:'wx'});
+    const returned=readDevice();
+    if(returned.state!=='PASS'||!returned.bytes.equals(bytes)||readBoundDeviceKey(returned.device).state!=='PASS')throw Error('DEVICE_IDENTITY_READBACK_MISMATCH');
+    return {schema:'xiio.cli.login/v1',state:'PASS',signed_in_as:who.login,principal,device_id:device.device_id,hostname:device.hostname,fingerprint:device.fingerprint,device_key:created?'CREATED':'EXISTING',note:'Identity only. Ward grants what this computer may do.'};
+  }catch(error){return{schema:'xiio.cli.login/v1',state:'BLOCKED',reason:'DEVICE_IDENTITY_UPDATE_REFUSED',detail:String(error.code||error.message),modified:'UNKNOWN',note:'Existing files were not removed. Review the retained identity and key before retrying.'};}
 }
 function whoami(){
-  const d=readDevice();
-  if(!d)return {schema:'xiio.cli.whoami/v1',state:'UNSET',fix:'Run: xi-io-cli login'};
-  let keyOk=false;try{keyOk=deviceFingerprint(crypto.createPublicKey(crypto.createPrivateKey(fs.readFileSync(DEVICE_KEY_FILE))).export({type:'spki',format:'pem'}))===d.fingerprint;}catch{}
+  const observed=readDevice();
+  if(observed.state!=='PASS')return deviceReadResult(observed,'xiio.cli.whoami/v1');
+  const d=observed.device,keyOk=readBoundDeviceKey(d).state==='PASS';
+  if(keyOk){const hold=deviceHostHold(d,'xiio.cli.whoami/v1');if(hold)return hold;}
   return {schema:'xiio.cli.whoami/v1',state:keyOk?'PASS':'FAIL',reason:keyOk?null:'DEVICE_KEY_MISSING_OR_CHANGED',login:d.login,principal:d.principal,device_id:d.device_id,hostname:d.hostname,platform:d.platform,fingerprint:d.fingerprint,authority:d.authority};
 }
 function deviceSign(args){
@@ -964,8 +1158,11 @@ function deviceSign(args){
   // the registered device. Refuses anything that is not a plain nonce.
   const challenge=String(args[0]||'');
   if(!/^[A-Za-z0-9._:-]{16,256}$/.test(challenge))return {state:'FAIL',reason:'CHALLENGE_INVALID'};
-  const d=readDevice();if(!d)return {state:'UNSET',fix:'Run: xi-io-cli login'};
-  const sig=crypto.sign(null,Buffer.from('xiio-device-challenge/v1\n'+d.device_id+'\n'+challenge),crypto.createPrivateKey(fs.readFileSync(DEVICE_KEY_FILE)));
+  const observed=readDevice();if(observed.state!=='PASS')return deviceReadResult(observed,'xiio.cli.device-signature/v1');
+  const d=observed.device,key=readBoundDeviceKey(d);
+  if(key.state!=='PASS')return{schema:'xiio.cli.device-signature/v1',...key};
+  const hold=deviceHostHold(d,'xiio.cli.device-signature/v1');if(hold)return hold;
+  const sig=crypto.sign(null,Buffer.from('xiio-device-challenge/v1\n'+d.device_id+'\n'+challenge),key.privateKey);
   return {schema:'xiio.cli.device-signature/v1',state:'PASS',device_id:d.device_id,principal:d.principal,challenge,signature:sig.toString('base64'),fingerprint:d.fingerprint};
 }
 function version({staged=false}={}){
