@@ -22,10 +22,6 @@ for tool in npm flatpak-builder flatpak sha256sum; do
     fi
 done
 
-echo "=== [1/4] Building root frontend distribution ==="
-cd "$ROOT_DIR"
-npm run build
-
 echo "=== [2/4] Ensuring native carrier binary is staged ==="
 if [ ! -f "$PACKAGING_DIR/xi-io-hex-dev" ]; then
     if [ -f "$ROOT_DIR/deliveries/hex-dev/0.1.0-dev.9/xi-io-hex-dev_0.1.0-dev.9_amd64.deb" ]; then
@@ -50,6 +46,10 @@ printf '%s  %s\\n' "$EXPECTED_ELF_SHA256" "$PACKAGING_DIR/xi-io-hex-dev" | sha25
 }
 test ! -L "$PACKAGING_DIR/xi-io-hex-dev" || { echo "FLATPAK_STAGED_ELF_SYMLINK_REFUSED" >&2; exit 1; }
 test -f "$PACKAGING_DIR/xi-io-hex-dev" || { echo "FLATPAK_STAGED_ELF_NOT_REGULAR" >&2; exit 1; }
+
+echo "=== [1/5] Building root frontend distribution after native preflight ==="
+cd "$ROOT_DIR"
+npm run build
 
 echo "=== [4/5] Building Flatpak package into OSTree repository ==="
 mkdir -p "$BUILD_DIR" "$REPO_DIR" "$(dirname "$BUNDLE_OUT")"
