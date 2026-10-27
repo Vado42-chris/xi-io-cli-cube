@@ -27,6 +27,21 @@ test('Flatpak builder unavailability is a typed failure before any staging',()=>
     assert.equal(existsSync(join(dir,'packaging')),false,'no canonical artifact may be touched');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+test('Flatpak CLI absence refuses even if a builder command is present',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'xiio-flatpak-cli-absent-'));
+  try{
+    const scripts=join(dir,'scripts'),bin=join(dir,'bin');
+    mkdirSync(scripts);mkdirSync(bin);
+    const target=join(scripts,'build-flatpak.sh');
+    copyFileSync(script,target);
+    symlinkSync('/usr/bin/dirname',join(bin,'dirname'));
+    symlinkSync('/usr/bin/true',join(bin,'flatpak-builder'));
+    const result=spawnSync('/bin/bash',[target],{cwd:dir,env:{HOME:dir,PATH:bin,LANG:'C.UTF-8'},encoding:'utf8',timeout:10000});
+    assert.equal(result.status,69);
+    assert.match(result.stderr,/FLATPAK_BUILD_BLOCKED/);
+    assert.equal(existsSync(join(dir,'dist')),false);
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
 test('release script must require nonempty Flatpak output',()=>{
   const s=readFileSync(script,'utf8');
   assert.match(s,/if \[ ! -s "\$BUNDLE_OUT" \]/);
