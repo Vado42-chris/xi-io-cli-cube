@@ -369,9 +369,12 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
     original_state_root = (roots["xdg_state"] / "xi-io" / "installer"
                            / "bundles" / profile["profile_id"])
     with _secured_bundle_state_root(original_state_root) as (state_root, state_fd):
-        return _install_staged_bundle(
-            lock, profile, approved_lock_sha256, env, allowed_hosts, fetch,
-            fail_after_product, roots, state_root, state_fd, original_state_root)
+        # Cross-process custody starts before the first download; otherwise a
+        # second installer can acquire while an earlier one is still staging.
+        with _locked_bundle_state_file(state_fd):
+            return _install_staged_bundle(
+                lock, profile, approved_lock_sha256, env, allowed_hosts, fetch,
+                fail_after_product, roots, state_root, state_fd, original_state_root)
 
 
 def _install_staged_bundle(lock, profile, approved_lock_sha256, env, allowed_hosts,
@@ -403,42 +406,41 @@ def _install_staged_bundle(lock, profile, approved_lock_sha256, env, allowed_hos
 
         _assert_state_root_current(original_state_root, state_fd)
         _reject_existing_destination_symlinks(profile, roots)
-        with _locked_bundle_state_file(state_fd):
+        for role in profile["ordered_roles"]:
+            manifest = profile["products"][role][0]
+            plan_install(manifest, staged[role], env)
+        applied = []
+        try:
             for role in profile["ordered_roles"]:
-                manifest = profile["products"][role][0]
-                plan_install(manifest, staged[role], env)
-            applied = []
-            try:
-                for role in profile["ordered_roles"]:
-                    _assert_state_root_current(original_state_root, state_fd)
-                    _reject_existing_destination_symlinks(profile, roots)
-                    manifest = profile["products"][role][0]
-                    receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
-                                            + "-" + approved_lock_sha256[:12] + ".receipt.json")
-                    _require(not receipt.exists() and not receipt.is_symlink(),
-                             "BUNDLE_RECEIPT_ALREADY_EXISTS")
-                    apply_install(manifest, staged[role], receipt, env)
-                    applied.append(receipt)
-                    if fail_after_product is not None and len(applied) == fail_after_product:
-                        raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
                 _assert_state_root_current(original_state_root, state_fd)
-            except Exception as cause:
-                failures = []
-                for receipt in reversed(applied):
-                    try:
-                        rollback(receipt, env)
-                    except Exception:
-                        failures.append(receipt.name)
-                if failures:
-                    raise BundleError("BUNDLE_PARTIAL_ROLLBACK_UNVERIFIED_DO_NOT_RETRY") from cause
-                raise BundleError("BUNDLE_APPLY_FAILED_ROLLED_BACK") from cause
-            return {
-                "schema_version": "xiio-installer-bundle-result-v1",
-                "state": "INSTALLED_BYTES_VERIFIED",
-                "profile_id": profile["profile_id"],
-                "lock_sha256": approved_lock_sha256,
-                "roles": list(profile["ordered_roles"]),
-                "receipt_count": len(applied),
-                "runtime_qualified": False, "authority_granted": False,
-                "device_connected": False, "child_services_started": False
-            }
+                _reject_existing_destination_symlinks(profile, roots)
+                manifest = profile["products"][role][0]
+                receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
+                                        + "-" + approved_lock_sha256[:12] + ".receipt.json")
+                _require(not receipt.exists() and not receipt.is_symlink(),
+                         "BUNDLE_RECEIPT_ALREADY_EXISTS")
+                apply_install(manifest, staged[role], receipt, env)
+                applied.append(receipt)
+                if fail_after_product is not None and len(applied) == fail_after_product:
+                    raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
+            _assert_state_root_current(original_state_root, state_fd)
+        except Exception as cause:
+            failures = []
+            for receipt in reversed(applied):
+                try:
+                    rollback(receipt, env)
+                except Exception:
+                    failures.append(receipt.name)
+            if failures:
+                raise BundleError("BUNDLE_PARTIAL_ROLLBACK_UNVERIFIED_DO_NOT_RETRY") from cause
+            raise BundleError("BUNDLE_APPLY_FAILED_ROLLED_BACK") from cause
+        return {
+            "schema_version": "xiio-installer-bundle-result-v1",
+            "state": "INSTALLED_BYTES_VERIFIED",
+            "profile_id": profile["profile_id"],
+            "lock_sha256": approved_lock_sha256,
+            "roles": list(profile["ordered_roles"]),
+            "receipt_count": len(applied),
+            "runtime_qualified": False, "authority_granted": False,
+            "device_connected": False, "child_services_started": False
+        }
