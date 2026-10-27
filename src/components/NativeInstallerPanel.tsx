@@ -71,7 +71,7 @@ export default function NativeInstallerPanel() {
     } finally {busyRef.current = false; setBusy(false);}
   }
   async function coreRequest(request: Extract<Request, {action:'bundle_inspect'|'bundle_apply'}>) {
-    if (busyRef.current || coreUnknown) return;
+    if (busyRef.current || (coreUnknown && request.action === 'bundle_apply')) return;
     busyRef.current = true; setBusy(true); setCoreError('');
     const effect = request.action === 'bundle_apply';
     if (effect) {setCoreUnknown(true); setCoreApproved(false);}
@@ -98,7 +98,7 @@ export default function NativeInstallerPanel() {
     <div className="space-y-2 border border-workspace-border-strong/40 p-3" aria-label="XI-IO core baseline">
       <h4 className="font-semibold text-workspace-text">XI-IO core baseline</h4>
       <p className="text-xs text-workspace-muted">CLI, @ibal, Ward, Switchboard, BINS and Inbox. Automatic XDG locations; no computer address or installation folder required. Exact release packages must be published before installation can be enabled.</p>
-      {native && <button className={button} disabled={busy || coreUnknown}
+      {native && <button className={button} disabled={busy}
         onClick={() => {setCoreApproved(false);void coreRequest({action:'bundle_inspect'});}}>Check core package availability</button>}
       {coreBundle && <p role="status" className="text-xs text-workspace-text">{coreBundle.phase === 'BLOCKED_RELEASE_PROFILE_UNPUBLISHED'
         ? 'Core installer is blocked: qualified release package manifest is not yet shipped. No files were installed.'
