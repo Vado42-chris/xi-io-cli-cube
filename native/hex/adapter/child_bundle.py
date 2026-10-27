@@ -282,6 +282,36 @@ def _receipt_and_bytes_match(receipt: Path, manifest: ProductManifest,
                  "BUNDLE_INSTALLED_BYTES_DRIFT")
 
 
+def _archive_rolled_back_receipt(state_root: Path, receipt: Path) -> str:
+    """Move a verified rollback receipt out of the active-install namespace."""
+    _require(not receipt.is_symlink() and receipt.is_file(),
+             "BUNDLE_ROLLBACK_RECEIPT_UNTRUSTED")
+    archive = state_root / "rolled-back"
+    _require(not archive.is_symlink(), "BUNDLE_ROLLBACK_ARCHIVE_SYMLINK_FORBIDDEN")
+    if archive.exists():
+        _require(archive.is_dir(), "BUNDLE_ROLLBACK_ARCHIVE_INVALID")
+    else:
+        archive.mkdir(mode=0o700)
+    _require(not any(p.is_symlink() for p in (archive, *archive.parents)),
+             "BUNDLE_ROLLBACK_ARCHIVE_PATH_UNTRUSTED")
+    for attempt in range(1, 65):
+        target = archive / f"{receipt.stem}.rollback-{attempt:02d}.json"
+        if target.exists() or target.is_symlink():
+            continue
+        os.replace(receipt, target)
+        _require(not target.is_symlink() and target.is_file(),
+                 "BUNDLE_ROLLBACK_ARCHIVE_READBACK_FAILED")
+        # Preserve exact receipt bytes as audit evidence under private state.
+        _safe_existing_file(target, MAX_RECEIPT_BYTES)
+        fd = os.open(archive, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        return target.name
+    raise BundleError("BUNDLE_ROLLBACK_ARCHIVE_EXHAUSTED")
+
+
 def inspect_bundle_install(lock: Path, *, approved_lock_sha256: str,
                            env: dict[str, str] | None = None,
                            allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS):
@@ -407,13 +437,19 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                         raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
             except Exception as cause:
                 failures = []
+                archived = []
                 for receipt in reversed(applied):
                     try:
                         rollback(receipt, env)
+                        archived.append(_archive_rolled_back_receipt(state_root, receipt))
                     except Exception:
                         failures.append(receipt.name)
                 if failures:
                     raise BundleError("BUNDLE_PARTIAL_ROLLBACK_UNVERIFIED_DO_NOT_RETRY") from cause
+                # Active receipt names are now free only after the kernel proved
+                # rollback and the exact receipt bytes were durably archived.
+                _require(len(archived) == len(applied),
+                         "BUNDLE_ROLLBACK_ARCHIVE_INCOMPLETE")
                 raise BundleError("BUNDLE_APPLY_FAILED_ROLLED_BACK") from cause
             finally:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
