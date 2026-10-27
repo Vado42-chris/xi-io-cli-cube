@@ -81,11 +81,10 @@ jobs:
           test -n "$INSTALLED_BUILD_ID"
           test "$INSTALLED_BUILD_ID" = "$EXPECTED_BUILD_ID"
           echo "EXACT_SOURCE_TO_INSTALLED_STRIPPED_ELF_BUILD_ID_PASS:$INSTALLED_BUILD_ID"
-          # Run the Python IPC adapter with the same bounded XDG state
-          # initialization as the actual native launcher, not a parallel home.
-          echo '{"action":"inspect"}' | flatpak run --user --command=sh com.xiio.hex -c 'XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}"; export XDG_STATE_HOME; exec /usr/bin/python3 -I -B /app/lib/xi-io-hex/adapter/installer_adapter.py' > sandbox-inspect.json
-          python3 -c 'import json; r=json.load(open("sandbox-inspect.json")); assert isinstance(r.get("ok"),bool); assert "result" in r or "error" in r; print("NATIVE_PYTHON_IPC_ADAPTER_EXECUTED", "RESULT" if r["ok"] else "TYPED_REFUSAL")'
           flatpak run --user --command=sh com.xiio.hex -c 'test -n "$HOME" && test -d "$HOME"'
+          # No adapter was invoked so far. A native-IPC-produced file must be
+          # absent BEFORE the GUI, otherwise the window test is contaminated.
+          flatpak run --user --command=sh com.xiio.hex -c 'test ! -e "${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}/xi-io/installer/native-adapter.lock"'
       - name: Launch actual installed HEX native window under disposable Xvfb
         run: |
           set -euo pipefail
@@ -113,10 +112,29 @@ jobs:
               exit 82
             fi
             echo HEX_INSTALLED_WINDOW_VISIBLE_ON_DISPOSABLE_LINUX
+            # Default guided first page mounts SetupPackageDisclosure, which
+            # invokes installer_request(inspect) through Tauri's native IPC.
+            # The Python adapter creates native-adapter.lock. This must be an
+            # independently observed effect, not our direct Python fixture.
+            ipc=0
+            for attempt in $(seq 1 15); do
+              if flatpak run --user --command=sh com.xiio.hex -c '\''test -f "${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}/xi-io/installer/native-adapter.lock"'\''; then
+                ipc=1; break
+              fi
+              sleep 1
+            done
+            if [ "$ipc" != 1 ]; then
+              cat hex-window.log
+              echo HEX_NATIVE_WINDOW_IPC_INSPECT_NOT_OBSERVED
+              exit 83
+            fi
+            echo HEX_TAURI_IPC_AUTO_INSPECT_NATIVE_PYTHON_LOCK_OBSERVED
           '
-          echo "NATIVE_GUI_WINDOW_PASS_DOES_NOT_PROVE_TAURI_IPC"
-          flatpak run --user --command=sh com.xiio.hex -c 'test -d "${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}/xi-io/installer"'
-          echo "APP_RESTART_REQUIRES_SAME_EXACT_SOURCE_NO_HOST_NATIVE_CLI_ASSUMPTION"
+          # Independently call installed Python adapter only after the native
+          # window has produced the same state file via Tauri IPC.
+          echo '{"action":"inspect"}' | flatpak run --user --command=sh com.xiio.hex -c 'XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}"; export XDG_STATE_HOME; exec /usr/bin/python3 -I -B /app/lib/xi-io-hex/adapter/installer_adapter.py' > sandbox-inspect.json
+          python3 -c 'import json; r=json.load(open("sandbox-inspect.json")); assert r.get("ok") is True and isinstance(r.get("result"),dict); print("NATIVE_PYTHON_ADAPTER_INSPECT_READBACK_PASS")'
+          echo "NATIVE_GUI_IPC_AND_ADAPTER_READBACK_PASS_NOT_ARIES_LOKI"
 
       - name: Publish inspectable exact candidate artifact, never claim an approved release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
