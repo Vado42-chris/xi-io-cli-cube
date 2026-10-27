@@ -64,7 +64,8 @@ def _safe_existing_file(path: Path, limit: int) -> bytes:
     return data
 
 
-def _safe_url(raw: object, allowed_hosts: frozenset[str]) -> str:
+def _safe_url(raw: object, allowed_hosts: frozenset[str], *,
+              redirect: bool = False) -> str:
     _require(isinstance(raw, str) and len(raw) <= 2048, "BUNDLE_URL_INVALID")
     try:
         u = urlsplit(raw)
@@ -72,7 +73,11 @@ def _safe_url(raw: object, allowed_hosts: frozenset[str]) -> str:
         raise BundleError("BUNDLE_URL_INVALID") from exc
     _require(u.scheme == "https" and u.hostname in allowed_hosts
              and u.port in (None, 443) and not u.username and not u.password
-             and not u.query and not u.fragment and u.path.startswith("/")
+             and not u.fragment and (not u.query or
+                 (redirect and u.hostname in (
+                     "release-assets.githubusercontent.com",
+                     "objects.githubusercontent.com"
+                 ))) and u.path.startswith("/")
              and "//" not in u.path and "\\" not in u.path,
              "BUNDLE_URL_NOT_APPROVED")
     return raw
@@ -84,7 +89,7 @@ class _HTTPSRedirectOnly(urllib.request.HTTPRedirectHandler):
         self.allowed_hosts = allowed_hosts
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        _safe_url(newurl, self.allowed_hosts)
+        _safe_url(newurl, self.allowed_hosts, redirect=True)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -94,7 +99,7 @@ def _fetch_https(url: str, dest: Path, limit: int,
     opener = urllib.request.build_opener(_HTTPSRedirectOnly(allowed_hosts))
     request = urllib.request.Request(url, headers={"Accept": "application/octet-stream"})
     with opener.open(request, timeout=20) as response:
-        _safe_url(response.geturl(), allowed_hosts)
+        _safe_url(response.geturl(), allowed_hosts, redirect=True)
         _require(getattr(response, "status", 200) == 200, "BUNDLE_DOWNLOAD_HTTP_FAILED")
         declared = response.headers.get("Content-Length")
         if declared is not None:
@@ -162,6 +167,9 @@ def load_bundle_profile(lock: Path, *,
         _require(_sha(manifest_bytes) == claimed_sha,
                  "BUNDLE_MANIFEST_DIGEST_MISMATCH")
         manifest = load_manifest(file)
+        _require(isinstance(manifest.version, str) and
+                 re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,95}", manifest.version),
+                 "BUNDLE_PRODUCT_VERSION_INVALID")
         _require(manifest.product_id == product_id and manifest.fixture == fixture,
                  "BUNDLE_PRODUCT_MANIFEST_IDENTITY_MISMATCH")
         deps = row["depends_on"]
@@ -231,7 +239,8 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
     roots = xdg_roots(env)
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
     state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    _require(not state_root.is_symlink(), "BUNDLE_STATE_ROOT_UNTRUSTED")
+    _require(not any(p.is_symlink() for p in (state_root, *state_root.parents)),
+             "BUNDLE_STATE_ROOT_UNTRUSTED")
     fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
     _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
     with tempfile.TemporaryDirectory(prefix="xiio-stage-", dir=state_root) as tmp:
