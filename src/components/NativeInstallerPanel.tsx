@@ -106,9 +106,11 @@ export default function NativeInstallerPanel() {
           ? 'All six core manifest roles are present. Review the exact release digest before installing; operation and connectivity still require independent qualification.'
           : coreBundle.phase === 'RECONCILED_NOT_INSTALLED'
             ? 'A prior attempt is durably reconciled as not installed. A fresh exact approval may be attempted.'
-            : coreBundle.phase === 'APPLY_OUTCOME_UNCERTAIN'
-              ? 'A prior core install has unreconciled receipts or destination bytes. Retry is blocked until exact readback is clean.'
-              : coreBundle.state === 'INSTALLED_BYTES_VERIFIED' || coreBundle.phase === 'INSTALLED_BYTES_VERIFIED'
+            : coreBundle.phase === 'APPLY_IN_PROGRESS'
+              ? 'Another core install currently holds cross-process custody. Read-only inspection remains available; a second apply is blocked.'
+              : coreBundle.phase === 'APPLY_OUTCOME_UNCERTAIN'
+                ? 'A prior core install has unreconciled receipts or destination bytes. Retry is blocked until exact readback is clean.'
+                : coreBundle.state === 'INSTALLED_BYTES_VERIFIED' || coreBundle.phase === 'INSTALLED_BYTES_VERIFIED'
                 ? 'Verified child bytes installed. Service startup, authentication and two-way device connection are not yet proven.'
                 : 'Installation result requires review.'}</p>}
       {['REVIEW_REQUIRED', 'RECONCILED_NOT_INSTALLED'].includes(coreBundle?.phase) && !coreUnknown && <>
