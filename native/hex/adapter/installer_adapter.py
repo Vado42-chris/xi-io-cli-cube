@@ -357,6 +357,20 @@ def _bundle_attempts(base,profile):
     return sorted(out,key=lambda row:row[0])
 
 def _bundle_projection(base,lock,profile,custody=None):
+    if custody is None:
+        try:
+            with child_bundle.bundle_inspection_custody(
+                lock, approved_lock_sha256=profile['lock_sha256']
+            ) as observed:
+                return _bundle_projection(base,lock,profile,custody=observed)
+        except child_bundle.BundleError as error:
+            if str(error) == 'BUNDLE_APPLY_IN_PROGRESS':
+                return {'phase':'APPLY_IN_PROGRESS','profile_id':profile['profile_id'],
+                        'components':list(profile['ordered_roles']),'lock_sha256':profile['lock_sha256'],
+                        'downloadable':True,'installable':False,'retry_allowed':False,'do_not_retry':True,
+                        'receipt_count':0,'first_red':'BUNDLE_APPLY_IN_PROGRESS','attempts':[],
+                        'authority_granted':False,'device_connected':False,'child_services_started':False}
+            raise
     try:
         installed=child_bundle.inspect_bundle_install(
             lock,approved_lock_sha256=profile['lock_sha256'],custody=custody)
