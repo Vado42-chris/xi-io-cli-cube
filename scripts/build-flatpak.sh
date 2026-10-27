@@ -14,6 +14,24 @@ if ! command -v flatpak-builder >/dev/null 2>&1 || ! command -v flatpak >/dev/nu
     exit 69
 fi
 
+# The canonical logo remains untouched. Export a disposable sized derivative
+# for Flatpak's strict 512x512 app-icon slot, then restore a clean workspace.
+if ! command -v convert >/dev/null 2>&1; then
+    echo "FLATPAK_BUILD_BLOCKED: ImageMagick convert required for bounded icon export" >&2
+    exit 69
+fi
+ICON_STAGE="$PACKAGING_DIR/.xiio-hex-icon-512.png"
+if [ -e "$ICON_STAGE" ] || [ -L "$ICON_STAGE" ]; then
+    echo "FLATPAK_BUILD_BLOCKED: transient icon staging path already exists" >&2
+    exit 73
+fi
+trap 'rm -f -- "$ICON_STAGE"' EXIT
+convert "$PACKAGING_DIR/com.xiio.hex.png" -resize 512x512 -background none -gravity center -extent 512x512 "$ICON_STAGE"
+if [ ! -s "$ICON_STAGE" ]; then
+    echo "FLATPAK_BUILD_BLOCKED: rescaled icon missing or empty" >&2
+    exit 74
+fi
+
 echo "=== [1/4] Building root frontend distribution ==="
 cd "$ROOT_DIR"
 npm run build
