@@ -25,7 +25,8 @@ fn execute_deadline(request: InstallerRequest, adapter: PathBuf, home: PathBuf, 
     let (tx,rx)=mpsc::channel();
     thread::spawn(move || {
         let _guard=match gate.try_lock() {Ok(g)=>g,Err(_)=>{let _=tx.send(uncertain("NATIVE_REQUEST_BUSY_DO_NOT_RETRY"));return}};
-        let mut cmd = Command::new("/usr/bin/python3").arg("-I").arg("-B").arg(&adapter);
+        let mut cmd = Command::new("/usr/bin/python3");
+        cmd.arg("-I").arg("-B").arg(&adapter);
         cmd.env_clear()
             .env("HOME", &home)
             .env("LANG", "C.UTF-8")
