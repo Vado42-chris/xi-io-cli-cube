@@ -75,3 +75,9 @@ test('Flatpak icon packaging preserves original logo and uses transient 512-squa
   assert.ok(builder.includes('convert "$PACKAGING_DIR/com.xiio.hex.png" -resize 512x512'));
   assert.ok(builder.includes('-extent 512x512 "$ICON_STAGE"'));
 });
+
+test('Flatpak builder and build-bundle select identical stable OSTree ref',()=>{
+  const builder=readFileSync(script,'utf8');
+  assert.ok(builder.includes('--default-branch=stable'));
+  assert.ok(builder.includes('flatpak build-bundle "$REPO_DIR" "$BUNDLE_OUT" com.xiio.hex stable'));
+});
