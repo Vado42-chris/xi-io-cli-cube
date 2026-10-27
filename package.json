@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "node --test test/installer-contract.test.mjs tests/installer-contract.test.mjs tests/cube-continuation.test.mjs tests/rollback-history.test.mjs test/rollback-history.test.mjs tests/installation-journey.test.mjs tests/version-readback.test.mjs tests/core-catalog-custody.test.mjs",
+    "test": "node --test test/installer-contract.test.mjs tests/installer-contract.test.mjs tests/cube-continuation.test.mjs tests/rollback-history.test.mjs test/rollback-history.test.mjs tests/installation-journey.test.mjs tests/version-readback.test.mjs tests/core-catalog-custody.test.mjs tests/flatpak-builder-admission.test.mjs",
     "test:contract": "node scripts/verify-installer-contract.mjs",
     "test:interaction": "node --experimental-vm-modules --test tests/product-navigation.test.mjs tests/shared-window-consumer.test.mjs tests/native-frame-interaction.test.mjs tests/launcher-repair-interaction.test.mjs tests/scroll-accordion.test.mjs tests/source-owned-light.test.mjs tests/empire-grid.test.mjs tests/setup-package.test.mjs",
     "test:bindings": "node --test test/local-journey.test.mjs test/installer-readiness.test.mjs test/installer-availability.test.mjs test/native-directory.test.mjs native/hex/adapter/local_steps/local_ai_status.test.mjs test/launcher-repair-ui.test.mjs test/backdrop-motion.test.mjs",
