@@ -14,7 +14,6 @@
     "--filesystem=xdg-config/xi-io:create",
     "--filesystem=xdg-state/xi-io:create",
     "--filesystem=xdg-cache/xi-io:create",
-    "--filesystem=~/.local/bin:create",
     "--talk-name=org.freedesktop.portal.Desktop",
     "--talk-name=org.freedesktop.portal.FileChooser",
     "--talk-name=org.freedesktop.Notifications"
