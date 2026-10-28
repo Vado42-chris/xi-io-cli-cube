@@ -16,6 +16,7 @@ on:
       - 'tsconfig.json'
       - 'tests/hex-plugin-catalog.test.mjs'
       - 'tests/native-plugin-ui-contract.test.mjs'
+      - 'tests/native-plugin-operation-lifecycle.test.mjs'
       - '.github/workflows/native-hex-plugin-candidate.yml'
   workflow_dispatch:
 
@@ -41,7 +42,7 @@ jobs:
       - name: Test plugin multi-account, authority and existing-window contracts
         run: |
           set -euo pipefail
-          node --test tests/hex-plugin-catalog.test.mjs tests/native-plugin-ui-contract.test.mjs
+          node --test tests/hex-plugin-catalog.test.mjs tests/native-plugin-ui-contract.test.mjs tests/native-plugin-operation-lifecycle.test.mjs
       - name: Install exact frontend build dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Check TypeScript and source-owned frontend
