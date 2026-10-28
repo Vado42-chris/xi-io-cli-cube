@@ -24,7 +24,7 @@ test('Cube is self-contained and shares one existing appearance store',()=>{
  assert.match(host,/NativeProductWindowShell.*from '\.\/shared\/window-frame.mjs'/);
  assert.match(host,/controlsAvailable=\{nativeInstallerAvailable\(\)\}/);
  assert.match(host,/attachShadow\(\{mode: 'open'\}\)/);
- assert.match(host,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} \/>/);
+ assert.match(host,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} visible=\{!pluginsVisible\} \/>/);
  assert.doesNotMatch(app,/Traffic Light Window Dots|bg-rose-500\/80/);
 });
 test('unbound product/context is honest, with no fake authority or navigation',()=>{
@@ -71,7 +71,7 @@ test('original carved plate is bundled locally with exact source custody',()=>{
 
 test('product backdrop retains existing parallax layers with reduced-motion and cleanup',()=>{
  const app=read('../src/components/TabletBackdrop.tsx'),css=read('../src/styles/product-workspace.css');
- assert.match(read('../src/App.tsx'),/<TabletBackdrop \/>/);
+ assert.match(read('../src/App.tsx'),/<TabletBackdrop active=\{visible\} \/>/);
  for(const coefficient of ['*-34','*-22','*-.018'])assert.ok(app.includes(coefficient));
  assert.match(read('../src/lib/backdropMotion.mjs'),/\*\.055/);
  for(const cleanup of ["motion.dispose()","removeEventListener('pointermove'","removeEventListener('scroll'","removeEventListener('change'","removeEventListener('pagehide'","removeEventListener('pageshow'"])assert.ok(app.includes(cleanup));
