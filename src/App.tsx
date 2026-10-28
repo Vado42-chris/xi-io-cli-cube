@@ -1210,7 +1210,9 @@ export default function App({ embedded = false, navigation, onNavigate, visible 
               {/* AUDITOR TAB 2: INSTALL & COMPILE GUIDE */}
               <div className={activeView === 'installer' ? 'block' : 'hidden'}>
                 <section className="space-y-6">
-                  <div className={['cli', 'bins', 'switchboard'].includes(selectedTarget) ? 'block' : 'hidden'}><NativeInstallerPanel active={visible && perspective === 'auditor' && activeView === 'installer'} /></div>
+                  {/* Core HEX installer is visible for every selected suite product.
+                      Selecting Ibal, Ward or Inbox must not hide six-product installation. */}
+                  <NativeInstallerPanel active={visible && perspective === 'auditor' && activeView === 'installer'} />
                   {!['cli', 'bins', 'switchboard'].includes(selectedTarget) && <section role="status" className="p-5 border border-workspace-border space-y-2">
                     <h3>{currentComponent.name}</h3><p>{currentComponent.statusDetail}</p><p>{currentComponent.prerequisites}</p>
                   </section>}

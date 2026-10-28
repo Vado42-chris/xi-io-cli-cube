@@ -1,7 +1,7 @@
 name: XI-IO HEX native Plugins candidate (fresh source)
 on:
   push:
-    branches: [fix/native-hex-plugin-catalog-20261028]
+    branches: [fix/native-hex-plugin-catalog-20261028, fix/hex27-reuse-core-bundle-20261028]
     paths:
       - 'package.json'
       - 'package-lock.json'
@@ -16,10 +16,13 @@ on:
       - 'index.html'
       - 'vite.config.ts'
       - 'tsconfig.json'
+      - 'tests/core-bundle-interaction.test.mjs'
+      - 'tests/native-source-adoption.test.mjs'
       - 'tests/hex-plugin-catalog.test.mjs'
       - 'tests/native-plugin-ui-contract.test.mjs'
       - 'tests/native-plugin-operation-lifecycle.test.mjs'
       - 'tests/hex-plugins-install-state-regression.test.mjs'
+      - 'tests/product-navigation.test.mjs'
       - '.github/workflows/native-hex-plugin-candidate.yml'
   workflow_dispatch:
 
@@ -46,6 +49,12 @@ jobs:
         run: |
           set -euo pipefail
           node --test tests/hex-plugin-catalog.test.mjs tests/native-plugin-ui-contract.test.mjs tests/native-plugin-operation-lifecycle.test.mjs tests/hex-plugins-install-state-regression.test.mjs
+      - name: Qualify existing six-product bundle kernel and source adoption
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_bundle.py -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_core_bundle_native.py -v
+          npm run test:source-adoption
       - name: Check extracted GUI smoke harness without launching a desktop
         run: bash tests/extracted-hex-gui-harness.sh
       - name: Install exact frontend build dependencies
@@ -54,6 +63,7 @@ jobs:
         run: |
           npm run lint
           npm run build
+          npm run test:interaction
           test -f dist/index.html
           grep -Rq 'data-native-hex-plugins' dist/assets
           echo FRESH_PLUGIN_FRONTEND_INCLUDED
@@ -79,6 +89,12 @@ jobs:
           test -x native/hex/carrier/src-tauri/target/release/xi-io-hex-dev
           dpkg-deb --contents "${debs[0]}" > hex-native-plugins.contents
           grep -q 'xi-io-hex-dev' hex-native-plugins.contents
+          # The GUI is not an accepted product installation without these
+          # exact packaged core producer and native IPC resources.
+          grep -Fq 'adapter/child_bundle.py' hex-native-plugins.contents
+          grep -Fq 'adapter/test_core_bundle_native.py' hex-native-plugins.contents
+          grep -Fq 'adapter/installer_adapter.py' hex-native-plugins.contents
+          grep -Rq 'bundle_inspect' src/components/NativeInstallerPanel.tsx
           printf '%s  %s\n' "$(sha256sum "${debs[0]}" | cut -d' ' -f1)" "${debs[0]}" > hex-native-plugins.sha256
           echo PACKAGE_SOURCE_HEAD="${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
           cat hex-native-plugins.sha256 >> "$GITHUB_STEP_SUMMARY"
@@ -93,6 +109,12 @@ jobs:
           test "${#debs[@]}" -eq 1
           payload="$(mktemp -d "$RUNNER_TEMP/hex-gui-payload.XXXXXXXX")"
           dpkg-deb --extract "${debs[0]}" "$payload"
+          # Native inspect on the *extracted package*, not the source tree.
+          # Without qualified six-owner release payloads, refuse installation.
+          adapter="$payload/usr/lib/XI-IO HEX DEV/adapter/installer_adapter.py"
+          test -f "$adapter"
+          printf '{"action":"bundle_inspect"}\n' | /usr/bin/python3 -I -B "$adapter" > hex-bundle-inspect.json
+          python3 -c 'import json; r=json.load(open("hex-bundle-inspect.json")); assert r["ok"] is True; assert r["result"]["phase"] in ("BLOCKED_RELEASE_PROFILE_UNPUBLISHED","REVIEW_REQUIRED","RECONCILED_NOT_INSTALLED","INSTALLED_BYTES_VERIFIED"); assert r["result"].get("authority_granted") is False; print(r["result"]["phase"])'
           mkdir -p hex-gui-proof
           printf '%s\n' "${GITHUB_SHA}" > hex-gui-proof/source-commit.txt
           xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof"
@@ -107,6 +129,7 @@ jobs:
             hex-gui-proof/*.png
             hex-gui-proof/*.json
             hex-gui-proof/*.log
+            hex-bundle-inspect.json
             hex-gui-proof/source-commit.txt
           if-no-files-found: error
           retention-days: 14
