@@ -22,6 +22,7 @@ on:
       - 'tests/native-plugin-ui-contract.test.mjs'
       - 'tests/native-plugin-operation-lifecycle.test.mjs'
       - 'tests/hex-plugins-install-state-regression.test.mjs'
+      - 'tests/product-navigation.test.mjs'
       - '.github/workflows/native-hex-plugin-candidate.yml'
   workflow_dispatch:
 
