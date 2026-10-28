@@ -7,6 +7,11 @@ on:
       - 'tests/test_public_core_six.py'
       - '.github/workflows/hex-public-core-six-qualification.yml'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing public Cube six-owner release tag to independently verify'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -37,3 +42,44 @@ jobs:
             echo 'Release lock found; it still requires owner publication and byte verification.'
             echo 'Never publish source or unapproved assets from this workflow.'
           fi
+
+  qualify-published-custody:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - name: Check out exact source without publishing credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Reopen every published role payload and exact release metadata
+        env:
+          XIIO_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          python3 -B scripts/qualify-public-core-six.py \
+            --tag "$XIIO_RELEASE_TAG" --published --verify-bytes \
+            > core-six-public-readback.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          row=json.loads(Path('core-six-public-readback.json').read_text())
+          assert row["state"] == "PUBLIC_RELEASE_BYTES_VERIFIED"
+          assert row["role_count"] == 6
+          assert row["verified_assets"] == row["expected_asset_count"]
+          assert row["owner_distribution_approval"] == "SEPARATELY_REQUIRED"
+          assert row["native_install_readback"] == "NOT_VERIFIED"
+          print("PUBLIC_RUNTIME_RELEASE_BYTES_VERIFIED")
+          print("OWNER_DISTRIBUTION_APPROVAL_SEPARATELY_REQUIRED")
+          print("PHYSICAL_HOST_INSTALL_NOT_PERFORMED")
+          PY
+          sha256sum core-six-public-readback.json > core-six-public-readback.sha256
+      - name: Preserve release byte qualification output
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-six-public-readback-${{ github.sha }}
+          path: |
+            core-six-public-readback.json
+            core-six-public-readback.sha256
+          if-no-files-found: error
+          retention-days: 30
