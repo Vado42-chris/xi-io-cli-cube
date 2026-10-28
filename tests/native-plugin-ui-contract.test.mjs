@@ -17,13 +17,13 @@ test('the existing six-product installer remains separate',()=>{
  assert.match(app,/<NativeInstallerPanel/);
  const panel=read('src/components/NativePluginMarketplace.tsx');
  assert.doesNotMatch(panel,/installer_request|apply_repair|shell_command|eval\(/);
- assert.match(panel,/Current account-profile service not yet connected/);
+ assert.match(panel,/Account-profile service is not yet connected/);
 });
 test('local Tauri plugin operations require bundled-window provenance',()=>{
  const rs=read('native/hex/carrier/src-tauri/src/lib.rs');
  assert.match(rs,/fn native_plugin_inspect/);
  assert.match(rs,/fn native_plugin_open_provider/);
- assert.match(rs,/native_plugin_inspect,native_plugin_open_provider/);
+ assert.match(rs,/native_plugin_inspect,native_plugin_onboarding_current,native_plugin_open_provider/);
  assert.match(rs,/local_caller\(&window\)\?/);
 });
 test('provider browser open is allowlisted and never accepts a URL argument',()=>{
@@ -51,4 +51,49 @@ test('no structural modification to HEX six-component installer',()=>{
  assert.ok(expected.every(x=>app.includes('id: "'+x+'" as TargetComponentId')));
  const native=read('src/components/NativeInstallerPanel.tsx');
  assert.match(native,/createInstallerClient/);
+});
+
+test('native Plugins consumer reads existing first-party owner without fabricating login',()=>{
+ const rs=read('native/hex/carrier/src-tauri/src/lib.rs');
+ const adapter=read('native/hex/carrier/src-tauri/src/plugin_onboarding.rs');
+ const ui=read('src/components/NativePluginMarketplace.tsx');
+ assert.match(rs,/mod plugin_onboarding;/);
+ assert.match(rs,/fn native_plugin_onboarding_current/);
+ assert.match(rs,/local_caller\(&window\)\?/);
+ assert.match(rs,/plugin_onboarding::read_current\(\)/);
+ assert.match(ui,/invoke\('native_plugin_onboarding_current'\)/);
+ assert.match(ui,/data-native-onboarding-state/);
+ assert.match(ui,/Account-profile service is not yet connected/);
+ assert.doesNotMatch(ui,/projectPluginProfiles\(\[\]\)/);
+ assert.match(adapter,/127\.0\.0\.1:8798/);
+ assert.match(adapter,/GET \/v1\/onboarding\/current/);
+ assert.doesNotMatch(adapter,/https:\/\//);
+});
+test('native account status is an observation without browser credential custody',()=>{
+ const rs=read('native/hex/carrier/src-tauri/src/plugin_onboarding.rs');
+ assert.match(rs,/NATIVE_AUTHENTICATED_HANDOFF_UNBOUND/);
+ assert.match(rs,/native_browser_session_shared/);
+ assert.match(rs,/Some\(200\)=>unavailable/);
+ assert.match(rs,/NATIVE_ONBOARDING_HTTP_INVALID/);
+ assert.match(rs,/NATIVE_ONBOARDING_SCHEMA_UNVERIFIED/);
+ const request=rs.match(/const REQUEST:&\[u8\]=b"([\s\S]*?)";/)?.[1]||'';
+ assert.ok(request.includes('127.0.0.1:8798'));
+ assert.doesNotMatch(request,/Authorization|Cookie|X-Forwarded|password|secret/i);
+ assert.doesNotMatch(rs,/createDeviceSessionIssuer|grantWard|CREATE TABLE|mint[A-Z]/);
+});
+test('native account readback refuses stale privilege and UI clears busy on denial',()=>{
+ const rs=read('native/hex/carrier/src-tauri/src/plugin_onboarding.rs');
+ const ui=read('src/components/NativePluginMarketplace.tsx');
+ assert.match(rs,/value\.get\("ward_admission"\)==Some\(&json!\(false\)\)/);
+ assert.match(rs,/value\.get\("authority_granted"\)==Some\(&json!\(false\)\)/);
+ assert.match(rs,/value\.get\("provider_effect"\)==Some\(&json!\(false\)\)/);
+ assert.match(rs,/let mut raw=Vec::new/);
+ assert.match(rs,/MAX_RESPONSE\+1/);
+ assert.match(rs,/#\[test\]fn even_200_with_fake_identity_never_becomes_native_auth/);
+ assert.match(ui,/setOnboarding\(null\)/);
+ assert.match(ui,/finally\{setBusy\(false\)\}/);
+ const start=ui.indexOf("const refresh=useCallback(");
+ const end=ui.indexOf("useEffect(",start);
+ const refresh=ui.slice(start,end);
+ assert.doesNotMatch(refresh,/setMessage\('Installed plugin receipt did not pass local verification\.'\);return;/);
 });
