@@ -25,6 +25,14 @@ import child_bundle  # noqa: E402  Reuse the current HEX six-product kernel.
 
 REPO = "Vado42-chris/xi-io-cli-cube"
 ROLES = ("bins", "cli", "ibal", "inbox", "switchboard", "ward")
+OWNERS = {
+    "bins": "Vado42-chris/xi-io_bins",
+    "cli": "Vado42-chris/xi-io-cli",
+    "ibal": "Vado42-chris/xi-io-ibal",
+    "inbox": "Vado42-chris/xi-io-Inbox",
+    "switchboard": "Vado42-chris/xi-io-Switchboard",
+    "ward": "Vado42-chris/xi-io-ward",
+}
 RELEASE_ASSET_PREFIX = "https://github.com/" + REPO + "/releases/download/"
 API_PREFIX = "https://api.github.com/repos/" + REPO + "/releases/tags/"
 TAG = re.compile(r"^xiio-core-six-[a-z0-9][a-z0-9._-]{3,80}$")
@@ -85,6 +93,7 @@ def qualify_local(lock, tag):
             "CORE_SIX_OWNER_ROLES_NOT_QUALIFIED")
 
     expected = {}
+    role_payload_assets = {}
     def add(name, digest, length):
         require(ASSET.fullmatch(name) and name not in (".", "..") and
                 not name.startswith("."), "CORE_ASSET_NAME_INVALID")
@@ -106,11 +115,13 @@ def qualify_local(lock, tag):
         raw_manifest = path.read_bytes()
         add(manifest_name, sha(raw_manifest), len(raw_manifest))
         manifest = bundle["products"][role][0]
+        role_payload_assets[role] = []
         require(manifest.channel in ("alpha", "beta", "rc", "stable") and
                 not manifest.fixture, "CORE_PRODUCT_FIXTURE_NOT_DISTRIBUTABLE")
         for entry in manifest.entries:
             url = row["payload_urls"][entry.source]
             filename = payload_asset(url, tag)
+            role_payload_assets[role].append(filename)
             require(filename not in META_ASSETS and
                     filename != "core-release.lock.json" and
                     filename not in (r + ".json" for r in ROLES),
@@ -122,6 +133,7 @@ def qualify_local(lock, tag):
             "release_tag": tag, "role_count": len(ROLES),
             "roles": list(ROLES),
             "expected_assets": expected,
+            "role_payload_assets": role_payload_assets,
             "lock_sha256": sha(raw_lock),
             "github_runtime_dependency": False,
             "first_run_credentials_required": False,
@@ -193,29 +205,96 @@ def published_metadata(qualified, release, *, verify_bytes=False):
                 "verified_assets": 0,
                 "expected_asset_count": len(expected),
                 "native_install_readback": "NOT_VERIFIED"}
-    # Use the EXISTING child_bundle download guard, which allows only approved
-    # GitHub release redirect hosts. Do not add any auth headers or new CDN.
-    verified = []
+
+    # Reopen ALL allowed release bytes through the original uncredentialed
+    # HTTPS redirect guard. Provenance and SHA256SUMS are not decorative files.
+    downloaded = {}
     with TemporaryDirectory(prefix="xiio-core-release-qualification-") as temp:
-        for index, (name, (expected_sha, expected_size)) in enumerate(sorted(expected.items())):
+        names = sorted(set(expected) | META_ASSETS)
+        for index, name in enumerate(names):
+            size = expected[name][1] if name in expected else by_name[name]["size"]
             dest = Path(temp) / ("asset-" + str(index))
             try:
                 child_bundle._fetch_https(
                     RELEASE_ASSET_PREFIX + tag + "/" + name,
-                    dest, expected_size, child_bundle.DEFAULT_RELEASE_HOSTS)
+                    dest, size, child_bundle.DEFAULT_RELEASE_HOSTS)
             except (ValueError, OSError, child_bundle.BundleError):
                 raise Refused("PUBLIC_CORE_RELEASE_BYTE_READBACK_FAILED") from None
-            require(dest.stat().st_size == expected_size and
-                    child_bundle.sha256_file(dest) == expected_sha,
-                    "PUBLIC_CORE_RELEASE_BYTES_MISMATCH")
-            verified.append(name)
+            raw = dest.read_bytes()
+            require(len(raw) == size, "PUBLIC_CORE_RELEASE_SIZE_MISMATCH")
+            if name in expected:
+                require(sha(raw) == expected[name][0],
+                        "PUBLIC_CORE_RELEASE_BYTES_MISMATCH")
+            downloaded[name] = raw
+    _verify_release_provenance(qualified, downloaded)
     return {**{k: v for k, v in qualified.items() if k != "expected_assets"},
             "state": "PUBLIC_RELEASE_BYTES_VERIFIED",
-            "verified_assets": len(verified),
+            "verified_assets": len(expected),
             "expected_asset_count": len(expected),
+            "release_provenance_verified": True,
+            "release_checksum_index_verified": True,
             "role_count": 6,
             "owner_distribution_approval": "SEPARATELY_REQUIRED",
             "native_install_readback": "NOT_VERIFIED"}
+
+
+def _verify_release_provenance(qualified, data):
+    expected = qualified["expected_assets"]
+    tag = qualified["release_tag"]
+    try:
+        document = json.loads(data["PROVENANCE.json"])
+    except (ValueError, UnicodeError, KeyError, TypeError):
+        raise Refused("PUBLIC_CORE_RELEASE_PROVENANCE_INVALID") from None
+    require(isinstance(document, dict) and set(document) ==
+            {"schema", "release_tag", "runtime_only", "products"} and
+            document["schema"] == "xiio.cube.core-runtime-provenance/v1" and
+            document["release_tag"] == tag and document["runtime_only"] is True and
+            isinstance(document["products"], list) and
+            len(document["products"]) == 6,
+            "PUBLIC_CORE_RELEASE_PROVENANCE_INVALID")
+    observed = set()
+    for row in document["products"]:
+        require(isinstance(row, dict) and set(row) ==
+                {"role", "owner_repository", "source_commit", "assets",
+                 "owner_review_url", "owner_review_state"},
+                "PUBLIC_CORE_RELEASE_PROVENANCE_FIELDS_INVALID")
+        role = row["role"]
+        require(isinstance(role, str) and role in OWNERS and role not in observed,
+                "PUBLIC_CORE_RELEASE_PROVENANCE_ROLE_INVALID")
+        observed.add(role)
+        owner = OWNERS[role]
+        review = row["owner_review_url"]
+        require(row["owner_repository"] == owner and
+                isinstance(row["source_commit"], str) and
+                re.fullmatch(r"[a-f0-9]{40}", row["source_commit"]) and
+                row["owner_review_state"] == "APPROVED_FOR_RUNTIME_DISTRIBUTION" and
+                isinstance(review, str) and len(review) <= 256 and
+                re.fullmatch("https://github[.]com/" + re.escape(owner) +
+                             r"/(?:issues|pull)/[1-9][0-9]*", review),
+                "PUBLIC_CORE_RELEASE_PROVENANCE_OWNER_UNVERIFIED")
+        require(isinstance(row["assets"], list) and
+                sorted(row["assets"]) == sorted(qualified["role_payload_assets"][role]),
+                "PUBLIC_CORE_RELEASE_PROVENANCE_ASSETS_MISMATCH")
+    require(observed == set(ROLES), "PUBLIC_CORE_RELEASE_PROVENANCE_ROLES_MISSING")
+    # The signed-off review URL is metadata. Its existence or contents are not
+    # authenticated by this public, no-credential consumer. Human owner approval
+    # and rights review stay independent gates before public publication.
+    try:
+        lines = data["SHA256SUMS"].decode("ascii").splitlines()
+    except (UnicodeError, KeyError):
+        raise Refused("PUBLIC_CORE_RELEASE_SHA256SUMS_INVALID") from None
+    stated = {}
+    for line in lines:
+        match = re.fullmatch(r"([a-f0-9]{64})  ([A-Za-z0-9][A-Za-z0-9._-]{0,190})", line)
+        require(match is not None, "PUBLIC_CORE_RELEASE_SHA256SUMS_INVALID")
+        digest, name = match.groups()
+        require(name not in stated, "PUBLIC_CORE_RELEASE_SHA256SUMS_DUPLICATE")
+        stated[name] = digest
+    required = set(expected) | {"PROVENANCE.json"}
+    require(set(stated) == required, "PUBLIC_CORE_RELEASE_SHA256SUMS_COVERAGE_INVALID")
+    for name in sorted(required):
+        require(stated[name] == sha(data[name]),
+                "PUBLIC_CORE_RELEASE_SHA256SUMS_MISMATCH")
 
 
 def main():
