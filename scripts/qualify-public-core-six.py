@@ -168,8 +168,16 @@ def published_metadata(qualified, release, *, verify_bytes=False):
         by_name[name] = row
     expected = qualified["expected_assets"]
     require(set(expected).issubset(set(by_name)), "PUBLIC_CORE_RELEASE_ASSETS_MISSING")
+    require(set(by_name) == set(expected) | META_ASSETS,
+            "PUBLIC_CORE_RELEASE_UNREVIEWED_EXTRA_OR_MISSING_METADATA_ASSETS")
     # An owner-only approval and SHA256SUMS/provenance review are external
     # publication gates, not assertions this validator may invent.
+    for name in META_ASSETS:
+        meta = by_name[name]
+        require(type(meta.get("size")) is int and 0 < meta["size"] <= 131072 and
+                meta.get("browser_download_url") == RELEASE_ASSET_PREFIX + tag + "/" + name and
+                meta.get("state") == "uploaded",
+                "PUBLIC_CORE_RELEASE_METADATA_ASSET_INVALID")
     for name, (digest, size) in expected.items():
         row = by_name[name]
         url = RELEASE_ASSET_PREFIX + tag + "/" + name
