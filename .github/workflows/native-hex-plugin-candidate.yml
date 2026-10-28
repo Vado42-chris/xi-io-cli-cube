@@ -19,6 +19,7 @@ on:
       - 'tests/hex-plugin-catalog.test.mjs'
       - 'tests/native-plugin-ui-contract.test.mjs'
       - 'tests/native-plugin-operation-lifecycle.test.mjs'
+      - 'tests/hex-plugins-install-state-regression.test.mjs'
       - '.github/workflows/native-hex-plugin-candidate.yml'
   workflow_dispatch:
 
@@ -44,7 +45,7 @@ jobs:
       - name: Test plugin multi-account, authority and existing-window contracts
         run: |
           set -euo pipefail
-          node --test tests/hex-plugin-catalog.test.mjs tests/native-plugin-ui-contract.test.mjs tests/native-plugin-operation-lifecycle.test.mjs
+          node --test tests/hex-plugin-catalog.test.mjs tests/native-plugin-ui-contract.test.mjs tests/native-plugin-operation-lifecycle.test.mjs tests/hex-plugins-install-state-regression.test.mjs
       - name: Check extracted GUI smoke harness without launching a desktop
         run: bash tests/extracted-hex-gui-harness.sh
       - name: Install exact frontend build dependencies
