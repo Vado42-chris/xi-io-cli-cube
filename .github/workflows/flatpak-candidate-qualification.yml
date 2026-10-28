@@ -17,7 +17,21 @@ on:
 permissions:
   contents: read
 jobs:
+  syntax-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Checkout exact Flatpak candidate source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Qualify GUI smoke script before costly native compilation
+        run: |
+          set -euo pipefail
+          bash -n scripts/verify-installed-flatpak-gui.sh
+          test -s scripts/verify-installed-flatpak-gui.sh
+          ! grep -Eq "xvfb-run -a bash -c" scripts/verify-installed-flatpak-gui.sh
+          echo FLATPAK_GUI_ACCEPTANCE_SYNTAX_PASS
   flatpak-native-candidate:
+    needs: syntax-preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
