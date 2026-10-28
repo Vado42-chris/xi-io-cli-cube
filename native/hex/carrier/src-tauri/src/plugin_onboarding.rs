@@ -115,7 +115,7 @@ pub fn read_current()->Value{
         return unavailable("FIRST_PARTY_HEX_READER_UNREACHABLE")
     }
     let mut raw=Vec::new();
-    let response=stream.by_ref().take((MAX_RESPONSE+1) as u64).read_to_end(&mut raw);
+    let response=(&mut stream).take((MAX_RESPONSE+1) as u64).read_to_end(&mut raw);
     if response.is_err(){return unavailable("FIRST_PARTY_HEX_READER_UNREACHABLE")}
     parse_status(&raw)
 }
