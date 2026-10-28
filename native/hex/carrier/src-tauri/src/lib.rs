@@ -1,6 +1,7 @@
 mod chooser;
 mod protocol;
 mod transport;
+mod plugin_onboarding;
 use protocol::InstallerRequest;
 use serde_json::{json, Value};
 use std::{path::{Path,PathBuf}, sync::{Arc, Mutex}};
@@ -100,6 +101,15 @@ fn native_plugin_inspect(app:tauri::AppHandle,window:WebviewWindow)->Result<Valu
         "effect_authority":0}))
 }
 
+/// Inspect existing XI-IO first-party onboarding through installed HEX on
+/// fixed local loopback. The native WebView does not share browser cookies or
+/// bearer credentials: even a response claiming signed-in is not promoted.
+#[tauri::command]
+fn native_plugin_onboarding_current(window:WebviewWindow)->Result<Value,String>{
+    local_caller(&window)?;
+    Ok(plugin_onboarding::read_current())
+}
+
 /// Fixed allowlisted provider links only, initiated by a real local UI click.
 /// A provider login or OpenAI Platform session is never copied into HEX.
 #[tauri::command]
@@ -124,7 +134,7 @@ fn native_plugin_open_provider(window:WebviewWindow,provider:String)->Result<Val
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){
     tauri::Builder::default().manage(Arc::new(Mutex::new(())) as transport::Gate)
-        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,native_plugin_inspect,native_plugin_open_provider,chooser::native_select_directory])
+        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,native_plugin_inspect,native_plugin_onboarding_current,native_plugin_open_provider,chooser::native_select_directory])
         .setup(|app|{
             WebviewWindowBuilder::new(app,"hex",WebviewUrl::App("index.html".into()))
                 .title("XI-IO HEX").inner_size(1440.,900.).min_inner_size(720.,480.)
