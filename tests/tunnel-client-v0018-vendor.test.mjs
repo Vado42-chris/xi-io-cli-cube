@@ -29,9 +29,13 @@ test('official OpenAI v0.0.18 full Linux tunnel client is executable with suppor
     writeFileSync(bin,bytes,{mode:0o700});chmodSync(bin,0o700);
     const version=execFileSync(bin,['--version'],{encoding:'utf8',timeout:8000});
     assert.match(version,/0\.0\.18/,'vendor version');
-    for (const args of [['help','quickstart'],['doctor','--help'],['run','--help']]) {
-      execFileSync(bin,args,{timeout:8000,stdio:['ignore','pipe','pipe']});
-    }
+    const quickstart=execFileSync(bin,['help','quickstart'],{encoding:'utf8',timeout:8000});
+    assert.ok(quickstart.trim().length>0,'quickstart is visible');
+    const doctorHelp=execFileSync(bin,['doctor','--help'],{encoding:'utf8',timeout:8000});
+    assert.match(doctorHelp,/--profile-file/,'doctor accepts the existing explicit profile');
+    assert.match(doctorHelp,/--explain/,'doctor supports the diagnostic path');
+    const runHelp=execFileSync(bin,['run','--help'],{encoding:'utf8',timeout:8000});
+    assert.match(runHelp,/--profile-file/,'runtime accepts the same explicit profile');
     console.log('OFFICIAL_FULL_CLIENT_V0018_DIGEST_MEMBER_VERSION_CLI_PASS',
        JSON.stringify({sha256:createHash('sha256').update(bytes).digest('hex'),
          bytes:bytes.length,member:bins[0]}));
