@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "native/hex/adapter/kernel"))
 sys.path.insert(0, str(ROOT / "native/hex/adapter"))
 import child_bundle  # noqa: E402  Reuse the current HEX six-product kernel.
 
