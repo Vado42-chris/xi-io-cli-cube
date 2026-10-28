@@ -3,6 +3,10 @@ on:
   push:
     branches: [fix/native-hex-plugin-catalog-20261028]
     paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'native/hex/carrier/package.json'
+      - 'native/hex/carrier/package-lock.json'
       - 'src/**'
       - 'native/hex/carrier/src-tauri/**'
       - 'tests/hex-plugin-catalog.test.mjs'
