@@ -92,6 +92,9 @@ test('native account readback refuses stale privilege and UI clears busy on deni
  assert.match(rs,/#\[test\]fn even_200_with_fake_identity_never_becomes_native_auth/);
  assert.match(ui,/setOnboarding\(null\)/);
  assert.match(ui,/finally\{setBusy\(false\)\}/);
+ assert.match(ui,/Object\.keys\(value\)\.some\(key=>!keys\.has\(key\)\)/);
+ assert.match(ui,/value\.next!=='XIIO_FIRST_PARTY_SIGN_IN'/);
+ assert.match(ui,/value\.next!=='RESTORE_FIRST_PARTY_SESSION_OWNER'/);
  const start=ui.indexOf("const refresh=useCallback(");
  const end=ui.indexOf("useEffect(",start);
  const refresh=ui.slice(start,end);
