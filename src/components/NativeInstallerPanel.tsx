@@ -8,7 +8,7 @@ type Plan = {plan_id: string; phase: string; prefix?: string; components?: strin
 type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true};
 
 /** Local native controls within the accepted Cube design, not another launcher. */
-export default function NativeInstallerPanel() {
+export default function NativeInstallerPanel({active = true}: {active?: boolean}) {
   const native = nativeInstallerAvailable();
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -32,6 +32,15 @@ export default function NativeInstallerPanel() {
   const [unknown, setUnknown] = useState(false);
   const [approval, setApproval] = useState(false);
   const [rollbackApproval, setRollbackApproval] = useState(false);
+  // Reviewed plans, unknown outcomes and in-flight native calls survive a
+  // Plugins/Install tab switch. Approval does not: leaving the visible action
+  // surface requires an explicit new confirmation before any file effect.
+  useEffect(() => {
+    if (!active) {
+      setApproval(false);
+      setRollbackApproval(false);
+    }
+  }, [active]);
   const invoke = (command: string, args: object) => (globalThis as any).__TAURI__.core.invoke(command, args);
   const client = createInstallerClient(native ? invoke : undefined);
 
