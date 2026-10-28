@@ -102,3 +102,24 @@ test('uncertain core bundle blocks apply but keeps read-only reconciliation reac
  assert.doesNotMatch(panel,/disabled=\{busy \|\| coreUnknown\}[\s\S]{0,180}bundle_inspect/);
  assert.match(panel,/setCoreUnknown\(\(result\?\.do_not_retry === true && result\?\.phase !== 'INSTALLED_BYTES_VERIFIED'\)/);
 });
+
+// HEX's six-product base is the installer, not a CLI-only add-on. The native
+// Install view must remain reachable for any of the six selected products.
+test('native HEX six-product installer remains visible across every selected suite product',()=>{
+ const app=read('src/App.tsx');
+ const panel=read('src/components/NativeInstallerPanel.tsx');
+ const rust=read('native/hex/carrier/src-tauri/src/protocol.rs');
+ const adapter=read('native/hex/adapter/installer_adapter.py');
+ assert.match(app,/NativeInstallerPanel active=\{visible && perspective === 'auditor' && activeView === 'installer'\}/);
+ assert.doesNotMatch(app,/\['cli', 'bins', 'switchboard'\]\.includes\(selectedTarget\)[^\n]+<NativeInstallerPanel/);
+ for(const action of ['bundle_inspect','bundle_apply']){
+   assert.ok(panel.includes(action));
+   assert.ok(rust.includes('"' + action + '"'));
+   assert.ok(adapter.includes(action));
+ }
+ assert.match(panel,/if \(!active\)[\s\S]{0,160}setCoreApproved\(false\)/);
+ assert.match(panel,/disabled=\{busy \|\| !active \|\| !coreApproved\}/);
+ assert.match(adapter,/BUNDLE_RELEASE_PROFILE_UNPUBLISHED/);
+ assert.match(adapter,/BUNDLE_EXACT_REVIEW_AND_APPROVAL_REQUIRED/);
+ assert.match(panel,/XI-IO core baseline/);
+});
