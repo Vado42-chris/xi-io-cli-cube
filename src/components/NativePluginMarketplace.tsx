@@ -1,5 +1,5 @@
 import React,{useCallback,useEffect,useState} from 'react';
-import {PLUGIN_CATEGORIES,PLUGINS,statusForPlugin,projectPluginProfiles} from '../lib/pluginCatalog.mjs';
+import {PLUGIN_CATEGORIES,PLUGINS,statusForPlugin} from '../lib/pluginCatalog.mjs';
 
 type Observation={
   schema:string;
@@ -10,6 +10,33 @@ type Observation={
   ward_admission?:boolean;
   effect_authority?:number;
 };
+type NativeOnboarding={
+  schema:'xiio.onboarding.current/v1';
+  plane:'XIIO_FIRST_PARTY';
+  state:'OWNER_SIGNIN_REQUIRED'|'AUTHORITY_UNAVAILABLE';
+  next?:string;
+  first_red?:string;
+  authenticated:false;
+  connection_choice:'NOT_ASKED';
+  consent:'NOT_REQUESTED';
+  services:'NOT_DISCOVERED';
+  provisioning:'NOT_AUTHORIZED';
+  authority_granted:false;
+  ward_admission:false;
+  provider_effect:false;
+  native_browser_session_shared?:false;
+};
+function acceptNativeOnboarding(value:any):value is NativeOnboarding{
+  return value?.schema==='xiio.onboarding.current/v1'&&
+    value?.plane==='XIIO_FIRST_PARTY'&&value.authenticated===false&&
+    value.connection_choice==='NOT_ASKED'&&
+    value.consent==='NOT_REQUESTED'&&value.services==='NOT_DISCOVERED'&&
+    value.provisioning==='NOT_AUTHORIZED'&&
+    value.authority_granted===false&&value.ward_admission===false&&
+    value.provider_effect===false&&
+    (value.state==='OWNER_SIGNIN_REQUIRED'||value.state==='AUTHORITY_UNAVAILABLE')&&
+    (value.state!=='OWNER_SIGNIN_REQUIRED'||value.native_browser_session_shared===false);
+}
 const base='min-h-[44px] px-4 py-2 border border-workspace-border-strong text-xs font-semibold hover:border-workspace-focus focus-visible:ring-2 focus-visible:ring-workspace-focus';
 const nativeAvailable=()=>typeof (globalThis as any).__TAURI__?.core?.invoke==='function';
 const categoryInfo=()=>[{id:'all',label:'All plugins'},...PLUGIN_CATEGORIES];
@@ -17,11 +44,12 @@ export default function NativePluginMarketplace() {
   const [category,setCategory]=useState('all');
   const [selected,setSelected]=useState('chatgpt');
   const [observation,setObservation]=useState<Observation|null>(null);
+  const [onboarding,setOnboarding]=useState<NativeOnboarding|null>(null);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [visit,setVisit]=useState('');
   const refresh=useCallback(async()=>{
-    if(!nativeAvailable()){setObservation(null);setMessage('Preview only. Open installed native HEX to inspect local connection receipts.');return}
+    if(!nativeAvailable()){setObservation(null);setOnboarding(null);setMessage('Preview only. Open installed native HEX to inspect local connection receipts.');return}
     setBusy(true);setMessage('');
     try{
       const result=await (globalThis as any).__TAURI__.core.invoke('native_plugin_inspect');
@@ -32,6 +60,10 @@ export default function NativePluginMarketplace() {
       }
       setObservation(result);
     }catch{setObservation(null);setMessage('Native plugin observation unavailable. No account or permission was changed.');}
+    try{
+      const current=await (globalThis as any).__TAURI__.core.invoke('native_plugin_onboarding_current');
+      setOnboarding(acceptNativeOnboarding(current)?current:null);
+    }catch{setOnboarding(null)}
     finally{setBusy(false)}
   },[]);
   useEffect(()=>{void refresh()},[refresh]);
@@ -49,7 +81,6 @@ export default function NativePluginMarketplace() {
   };
   // Only the authenticated XI-IO account owner may return real profiles.
   // Never treat a provider token or platform login as a XI-IO principal.
-  const projected=projectPluginProfiles([]);
   const cards=PLUGINS.filter((p:any)=>category==='all'||p.category===category);
   const current=PLUGINS.find((p:any)=>p.id===selected)||PLUGINS[0];
   const status=statusForPlugin(observation,selected);
@@ -90,7 +121,16 @@ export default function NativePluginMarketplace() {
     <section className="p-4 space-y-2 border border-workspace-border" aria-label="XI-IO account profiles">
       <h4 className="text-sm font-bold">Linked account profiles</h4>
       <p className="text-xs text-workspace-muted">Account ownership and access grants come from XI-IO's existing user/workspace lifecycle. No default identity or account limit is imposed.</p>
-      <p className="text-xs text-workspace-muted">Current account-profile service not yet connected to this HEX build. Existing provider data is preserved. {projected.profiles.length} profiles authenticated by this surface.</p>
+      <p role="status" data-native-onboarding-state={onboarding?.state||'NOT_VERIFIED'} className="text-xs text-workspace-text">
+        {onboarding?.state==='OWNER_SIGNIN_REQUIRED'
+          ? 'Native XI-IO session not established. A separate browser session may still be signed in.'
+          : onboarding?.state==='AUTHORITY_UNAVAILABLE'
+            ? 'First-party onboarding authority unavailable on this native surface.'
+            : 'First-party onboarding state has not been verified by the installed native consumer.'}
+      </p>
+      {onboarding?.state==='AUTHORITY_UNAVAILABLE'&&
+        <p className="text-xs text-workspace-muted">Source: {onboarding.first_red||'FIRST_PARTY_ONBOARDING_READBACK_UNVERIFIED'}</p>}
+      <p className="text-xs text-workspace-muted">Account-profile service is not yet connected. Existing provider accounts remain untouched. This surface has not verified any linked profiles or granted access.</p>
     </section>
   </section>;
 }
