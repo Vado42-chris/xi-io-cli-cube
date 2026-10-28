@@ -26,10 +26,18 @@ test('Leaving visible Install invalidates approval without losing reviewed plan'
  const app=read('src/App.tsx');
  const installer=read('src/components/NativeInstallerPanel.tsx');
  assert.match(app,/NativeInstallerPanel active=\{visible && perspective === 'auditor' && activeView === 'installer'\}/);
- assert.match(installer,/if \(!active\) \{\s*setApproval\(false\);\s*setRollbackApproval\(false\);\s*\}/);
- // Never clear a prepared/uncertain plan, receipts or the busy lock upon tab switch.
- const visibilityEffect=installer.slice(installer.indexOf('// Reviewed plans'),installer.indexOf('const invoke ='));
- assert.doesNotMatch(visibilityEffect,/setPlan\(|setUnknown\(|setObserved\(|busyRef\.current|setHistory\(/);
+ // Assert against the actual active-tab effect, not an obsolete literal
+ // formatting snapshot. All three effect approvals must reset, including the
+ // six-product bundle approval introduced by the existing Cube #29 owner.
+ const visibilityEffect=installer.match(/useEffect\(\(\) => \{\s*if \(!active\) \{([\s\S]*?)\}\s*\}, \[active\]\);/);
+ assert.ok(visibilityEffect,'Install visibility effect missing');
+ const body=visibilityEffect[1];
+ for(const reset of ['setApproval','setRollbackApproval','setCoreApproved']){
+   assert.match(body,new RegExp(reset+'\\(false\\);'),reset+' must reset when hidden');
+ }
+ // Never clear reviewed plans, receipts, uncertainty or in-flight operation
+ // when switching from Install to Plugins.
+ assert.doesNotMatch(body,/setPlan\(|setUnknown\(|setObserved\(|busyRef\.current|setHistory\(/);
  assert.match(installer,/const busyRef = useRef\(false\)/);
  assert.match(installer,/const \[plan, setPlan\] = useState/);
 });
