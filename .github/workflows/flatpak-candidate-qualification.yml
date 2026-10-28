@@ -76,6 +76,13 @@ jobs:
           test ! -e packaging/flatpak/.xiio-hex-icon-512.png
           stat -c 'FLATPAK_ACTUAL_BYTES=%s' dist/flatpak/com.xiio.hex.flatpak
           sha256sum dist/flatpak/com.xiio.hex.flatpak
+      - name: Preserve exact compiled Flatpak candidate before any GUI smoke failure
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hex-flatpak-candidate-not-release-${{ github.sha }}
+          path: dist/flatpak/com.xiio.hex.flatpak
+          if-no-files-found: error
+          retention-days: 14
       - name: Install the actual built bundle, then independently inspect it
         run: |
           set -euo pipefail
@@ -113,9 +120,7 @@ jobs:
           set -euo pipefail
           dbus-run-session -- xvfb-run -a bash scripts/verify-installed-flatpak-gui.sh
 
-      - name: Publish inspectable exact candidate artifact, never claim an approved release
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: hex-flatpak-native-candidate-${{ github.sha }}
-          path: dist/flatpak/com.xiio.hex.flatpak
-          if-no-files-found: error
+      - name: Mark actual installed Linux GUI/IPC acceptance, not a Pop OS release
+        run: |
+          echo INSTALLED_LINUX_FLATPAK_CANDIDATE_ACCEPTED
+          echo POP_OS_PHYSICAL_AND_SIGNED_UPDATE_CHANNEL_STILL_REQUIRED
