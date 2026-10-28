@@ -164,7 +164,8 @@ jobs:
           debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
           test "${#debs[@]}" -eq 1
           sha256sum "${debs[0]}" | tee maths-native-deb.sha256
-          dpkg-deb --contents "${debs[0]}" | grep -q 'xi-io-hex-dev'
+          dpkg-deb --contents "${debs[0]}" > maths-deb.contents
+          grep -F 'xi-io-hex-dev' maths-deb.contents >/dev/null
       - name: Install actual candidate on disposable Linux and observe running window
         run: |
           set -euo pipefail
@@ -207,7 +208,9 @@ jobs:
             test -s "$MATHS_WINDOW_WORK/installed-window.png"
             test -e "$MATHS_WINDOW_WORK/home"
           '
-          sha256sum "$work/installed-window.png" | tee maths-installed-window.sha256
+          cp "$work/installed-window.png" maths-installed-window.png
+          cp "$work/stderr.log" maths-installed-window.stderr.log
+          sha256sum maths-installed-window.png | tee maths-installed-window.sha256
           printf 'SOURCE=%s\nINSTALLED_WINDOW_OBSERVED=true\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nARIES_INSTALL=NOT_PERFORMED\n' "$GITHUB_SHA"
       - name: Preserve package and source-bound hosted acceptance receipts
         if: always()
@@ -219,5 +222,8 @@ jobs:
             maths-native-deb.sha256
             maths-installed-elf.sha256
             maths-installed-window.sha256
+            maths-installed-window.png
+            maths-installed-window.stderr.log
+            maths-deb.contents
           if-no-files-found: warn
           retention-days: 14
