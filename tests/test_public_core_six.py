@@ -61,6 +61,8 @@ class PublicCoreRelease(unittest.TestCase):
         }
         self.lock = self.root / "core-release.lock.json"
         self.set_lock(lock)
+        self.contents["PROVENANCE.json"] = b'{"schema":"xiio.core-public-provenance/v1"}'
+        self.contents["SHA256SUMS"] = b"synthetic-checksum-index\n"
 
     def set_lock(self, lock):
         raw = json.dumps(lock, sort_keys=True).encode()
@@ -78,6 +80,12 @@ class PublicCoreRelease(unittest.TestCase):
                     "browser_download_url":
                     module.RELEASE_ASSET_PREFIX + TAG + "/" + name,
                 })
+        for name in module.META_ASSETS:
+            assets.append({
+                "name": name, "size": len(self.contents[name]), "state": "uploaded",
+                "content_type": "application/octet-stream",
+                "browser_download_url": module.RELEASE_ASSET_PREFIX + TAG + "/" + name,
+            })
         assets.extend(additional)
         return {
             "tag_name": TAG, "draft": False,
@@ -157,6 +165,24 @@ class PublicCoreRelease(unittest.TestCase):
         self.assertEqual(observed["verified_assets"], 0)
         self.assertEqual(observed["native_install_readback"], "NOT_VERIFIED")
 
+    def test_unapproved_extra_source_asset_is_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        unknown = {
+            "name": "private-source.tar.gz", "size": 100,
+            "state": "uploaded", "content_type": "application/gzip",
+            "browser_download_url": module.RELEASE_ASSET_PREFIX + TAG +
+                                    "/private-source.tar.gz",
+        }
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_UNREVIEWED_EXTRA_OR_MISSING_METADATA_ASSETS"):
+            module.published_metadata(local, self.release(additional=(unknown,)))
+
+    def test_missing_public_provenance_is_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        data = self.release()
+        data["assets"] = [a for a in data["assets"] if a["name"] != "PROVENANCE.json"]
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_UNREVIEWED_EXTRA_OR_MISSING_METADATA_ASSETS"):
+            module.published_metadata(local, data)
+
     def test_all_public_bytes_reopened_and_verified(self):
         local = module.qualify_local(self.lock, TAG)
         calls = []
@@ -171,7 +197,7 @@ class PublicCoreRelease(unittest.TestCase):
             observed = module.published_metadata(local, self.release(), verify_bytes=True)
         self.assertEqual(observed["state"], "PUBLIC_RELEASE_BYTES_VERIFIED")
         self.assertEqual(observed["verified_assets"], 13)
-        self.assertEqual(set(calls), set(self.contents))
+        self.assertEqual(set(calls), set(self.contents) - module.META_ASSETS)
         self.assertEqual(observed["native_install_readback"], "NOT_VERIFIED")
 
     def test_tampered_download_refused_even_when_metadata_matches(self):
