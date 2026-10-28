@@ -10,6 +10,7 @@ import TabletBackdrop from './components/TabletBackdrop';
 import ExternalSiteLink from './components/ExternalSiteLink';
 import RollbackHistory from './components/RollbackHistory';
 import NativeInstallerPanel from './components/NativeInstallerPanel';
+import Snap55Workbench from './components/Snap55Workbench';
 import LocalJourneyControls from './components/LocalJourneyControls';
 import {selectNativeDirectory} from './lib/nativeDirectory.mjs';
 import {createInstallerClient, nativeInstallerAvailable} from './lib/nativeInstaller.mjs';
@@ -84,7 +85,7 @@ const RELEASE = {
 
 const OS_LIST = ['linux', 'macos', 'windows'] as const;
 type OperatingSystem = typeof OS_LIST[number];
-type ActiveView = 'catalog' | 'installer' | 'status-dashboard' | 'rebaseline';
+type ActiveView = 'catalog' | 'installer' | 'status-dashboard' | 'rebaseline' | 'maths';
 type TargetComponentId = 'cli' | 'editor' | 'studio' | 'web' | 'switchboard' | 'bins' | 'ward';
 type CliInstallMode = 'script' | 'source' | 'validator';
 type PerspectiveMode = 'client' | 'auditor';
@@ -1161,9 +1162,16 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
                     >
                       4. Onboarding &amp; Revenue (5.5)
                     </button>
+                    <button type="button" role="tab" aria-selected={activeView === 'maths'}
+                      onClick={() => setActiveView('maths')}
+                      className={`min-h-[44px] px-3.5 py-2 rounded-none text-xs font-medium transition-all ${activeView === 'maths' ? 'bg-workspace-focus text-workspace-inverse font-bold' : 'text-workspace-muted hover:text-workspace-text'}`}>
+                      5. Offline Maths
+                    </button>
                   </div>
                 </div>
               </section>
+
+              {activeView === 'maths' && <Snap55Workbench />}
 
               {/* AUDITOR TAB 1: HEX SOFTWARE SUITE */}
               {activeView === 'catalog' && (
