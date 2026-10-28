@@ -19,6 +19,7 @@ on:
       - 'tests/core-bundle-interaction.test.mjs'
       - 'tests/native-source-adoption.test.mjs'
       - 'tests/hex-plugin-catalog.test.mjs'
+      - 'tests/native-release-identity.test.mjs'
       - 'tests/native-plugin-ui-contract.test.mjs'
       - 'tests/native-plugin-operation-lifecycle.test.mjs'
       - 'tests/hex-plugins-install-state-regression.test.mjs'
@@ -49,6 +50,8 @@ jobs:
         run: |
           set -euo pipefail
           node --test tests/hex-plugin-catalog.test.mjs tests/native-plugin-ui-contract.test.mjs tests/native-plugin-operation-lifecycle.test.mjs tests/hex-plugins-install-state-regression.test.mjs
+      - name: Refuse mislabeled DEV9 carrier and unqualified core release
+        run: node --test tests/native-release-identity.test.mjs
       - name: Qualify existing six-product bundle kernel and source adoption
         run: |
           set -euo pipefail
