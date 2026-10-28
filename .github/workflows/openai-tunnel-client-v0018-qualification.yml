@@ -1,0 +1,59 @@
+name: XI-IO independent OpenAI tunnel-client v0.0.18 vendor canary
+on:
+  push:
+    branches:
+      - qualification/vendor-tunnel-client-v0.0.18-20261028
+    paths:
+      - .github/workflows/openai-tunnel-client-v0018-qualification.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  vendor-full-client:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - name: Verify official full archive and exercise actual vendor executable, without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$temp_dir"' EXIT
+          zip="$temp_dir/tunnel-client.zip"
+          curl --fail --location --silent --show-error --retry 2 --connect-timeout 12 --max-time 210 --proto '=https' --tlsv1.2 \
+            --output "$zip" \
+            https://github.com/openai/tunnel-client/releases/download/v0.0.18/tunnel-client-v0.0.18-linux-amd64.zip
+          test "$(stat -c '%s' "$zip")" = '29420141'
+          printf '%s  %s\n' '3c82307316acd93c88a384b62af1d81d3f4cb0efa975f9c0bfaef922866a04c4' "$zip" | sha256sum --check -
+          python3 - "$zip" "$temp_dir" <<'PY'
+          import hashlib, os, pathlib, stat, sys, zipfile
+          source, target = sys.argv[1:]
+          with zipfile.ZipFile(source) as archive:
+              rows = archive.infolist()
+              assert 0 < len(rows) <= 30, "ZIP_ENTRIES_INVALID"
+              found = [z for z in rows if pathlib.PurePosixPath(z.filename).name == "tunnel-client" and not z.is_dir()]
+              assert len(found) == 1, "ZIP_BINARY_NOT_UNIQUE"
+              row = found[0]
+              parts = pathlib.PurePosixPath(row.filename).parts
+              assert not row.filename.startswith("/") and ".." not in parts and "" not in parts, "ZIP_PATH_UNTRUSTED"
+              assert stat.S_IFMT(row.external_attr >> 16) in (0, stat.S_IFREG), "ZIP_SYMLINK_DENIED"
+              assert 1024 < row.file_size <= 65 * 1024 * 1024, "ZIP_ELF_SIZE_UNEXPECTED"
+              binary = archive.read(row)
+              assert len(binary) == row.file_size and binary.startswith(b"\x7fELF"), "ELF_INVALID"
+              dst = pathlib.Path(target) / "tunnel-client"
+              dst.write_bytes(binary)
+              dst.chmod(0o700)
+              print("VENDOR_ARCHIVE_MEMBER=" + row.filename)
+              print("VENDOR_ELF_BYTES=" + str(len(binary)))
+              print("VENDOR_ELF_SHA256=" + hashlib.sha256(binary).hexdigest())
+          PY
+          file "$temp_dir/tunnel-client"
+          "$temp_dir/tunnel-client" --version
+          "$temp_dir/tunnel-client" help quickstart > "$temp_dir/quickstart.txt"
+          test -s "$temp_dir/quickstart.txt"
+          "$temp_dir/tunnel-client" doctor --help > "$temp_dir/doctor.txt"
+          test -s "$temp_dir/doctor.txt"
+          "$temp_dir/tunnel-client" run --help > "$temp_dir/run.txt"
+          test -s "$temp_dir/run.txt"
+          echo 'OFFICIAL_TUNNEL_V0018_FULL_CLI_SHA_COMMANDS_PASS_NO_CREDENTIAL_NO_HOST'
