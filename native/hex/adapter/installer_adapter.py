@@ -384,15 +384,21 @@ def _bundle_projection(base,lock,profile,custody=None):
     elif state=='OUTCOME_UNCERTAIN': phase='APPLY_OUTCOME_UNCERTAIN'
     elif attempts: phase='RECONCILED_NOT_INSTALLED'
     else: phase='REVIEW_REQUIRED'
-    retry_safe=state=='NOT_INSTALLED'
+    # Preserve inspection when the journal cap is exhausted; never admit a
+    # 65th operation that would make future inspection/reconciliation fail.
+    exhausted=len(attempts)>=64
+    retry_safe=state=='NOT_INSTALLED' and not exhausted
+    first_red=('BUNDLE_OPERATION_HISTORY_REVIEW_REQUIRED' if exhausted and state=='NOT_INSTALLED'
+               else installed.get('first_red'))
     return {'phase':phase,'profile_id':profile['profile_id'],'components':list(profile['ordered_roles']),
             'lock_sha256':profile['lock_sha256'],'downloadable':True,'installable':retry_safe,
             'retry_allowed':retry_safe,'do_not_retry':not retry_safe,'receipt_count':installed.get('receipt_count',0),
-            'first_red':installed.get('first_red'),'attempts':summaries,
+            'first_red':first_red,'attempts':summaries,
             'authority_granted':False,'device_connected':False,'child_services_started':False}
 
 def _next_bundle_operation(base,profile):
     attempts=_bundle_attempts(base,profile)
+    demand(len(attempts)<64,'BUNDLE_OPERATION_HISTORY_REVIEW_REQUIRED')
     number=(max((n for n,_ in attempts),default=0)+1)
     return _bundle_operation_prefix(profile)+'-'+str(number)
 
@@ -428,6 +434,8 @@ def handle(req):
                 lock, approved_lock_sha256=profile['lock_sha256']
             ) as custody:
                 projection=_bundle_projection(base,lock,profile,custody=custody)
+                demand(projection.get('first_red')!='BUNDLE_OPERATION_HISTORY_REVIEW_REQUIRED',
+                       'BUNDLE_OPERATION_HISTORY_REVIEW_REQUIRED')
                 demand(projection['retry_allowed'] is True,
                        'BUNDLE_OUTCOME_UNCERTAIN_OR_ALREADY_INSTALLED_DO_NOT_RETRY')
                 operation_id=_next_bundle_operation(base,profile)
