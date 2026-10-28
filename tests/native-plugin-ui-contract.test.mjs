@@ -92,7 +92,7 @@ test('native account readback refuses stale privilege and UI clears busy on deni
  assert.match(rs,/#\[test\]fn even_200_with_fake_identity_never_becomes_native_auth/);
  assert.match(ui,/setOnboarding\(null\)/);
  assert.match(ui,/createNativePluginOperationLifecycle\(setBusy\)/);
- assert.match(ui,/lifecycle\.current\.run\(async isCurrent=>/);
+ assert.match(ui,/lifecycle\.current\.run\(async \(isCurrent:\(\)=>boolean\)=>/);
  assert.match(ui,/if\(!isCurrent\(\)\)return/);
  assert.match(ui,/lifecycle\.current\.cancel\(\{unmounted:true\}\)/);
  assert.match(ui,/Object\.keys\(value\)\.some\(key=>!keys\.has\(key\)\)/);
