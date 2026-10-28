@@ -104,7 +104,7 @@ class PublicCoreRelease(unittest.TestCase):
         lock["products"][0]["payload_urls"]["bins.bin"] = (
             "https://raw.githubusercontent.com/Vado42-chris/xi-io_bins/main/index.js")
         self.set_lock(lock)
-        with self.assertRaisesRegex(Exception, "BUNDLE_URL_NOT_APPROVED|CORE_RELEASE_LOCK_INVALID"):
+        with self.assertRaisesRegex(module.Refused, "CORE_PAYLOAD_NOT_IN_PUBLIC_CUBE_RELEASE"):
             module.qualify_local(self.lock, TAG)
 
     def test_private_repo_release_url_refused(self):
