@@ -1,5 +1,6 @@
-import React,{useCallback,useEffect,useState} from 'react';
+import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {PLUGIN_CATEGORIES,PLUGINS,statusForPlugin} from '../lib/pluginCatalog.mjs';
+import {createNativePluginOperationLifecycle} from '../lib/nativePluginOperationLifecycle.mjs';
 
 type Observation={
   schema:string;
@@ -60,11 +61,19 @@ export default function NativePluginMarketplace() {
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [visit,setVisit]=useState('');
-  const refresh=useCallback(async()=>{
-    if(!nativeAvailable()){setObservation(null);setOnboarding(null);setMessage('Preview only. Open installed native HEX to inspect local connection receipts.');return}
-    setBusy(true);setMessage('');setOnboarding(null);
+  const lifecycle=useRef(createNativePluginOperationLifecycle(setBusy));
+  const refresh=useCallback(async()=>lifecycle.current.run(async isCurrent=>{
+    if(!nativeAvailable()){
+      if(isCurrent()){
+        setObservation(null);setOnboarding(null);
+        setMessage('Preview only. Open installed native HEX to inspect local connection receipts.');
+      }
+      return;
+    }
+    if(isCurrent()){setMessage('');setOnboarding(null);}
     try{
       const result=await (globalThis as any).__TAURI__.core.invoke('native_plugin_inspect');
+      if(!isCurrent())return;
       if(result?.schema!=='xiio.hex.plugin-local-inspection/v1'||
          result.credential_values_read!==false||result.effect_authority!==0||
          result.ward_admission!==false){
@@ -72,14 +81,22 @@ export default function NativePluginMarketplace() {
       }else{
         setObservation(result);
       }
-    }catch{setObservation(null);setMessage('Native plugin observation unavailable. No account or permission was changed.');}
+    }catch{
+      if(isCurrent()){
+        setObservation(null);
+        setMessage('Native plugin observation unavailable. No account or permission was changed.');
+      }
+    }
+    if(!isCurrent())return;
     try{
       const current=await (globalThis as any).__TAURI__.core.invoke('native_plugin_onboarding_current');
-      setOnboarding(acceptNativeOnboarding(current)?current:null);
-    }catch{setOnboarding(null)}
-    finally{setBusy(false)}
-  },[]);
-  useEffect(()=>{void refresh()},[refresh]);
+      if(isCurrent())setOnboarding(acceptNativeOnboarding(current)?current:null);
+    }catch{if(isCurrent())setOnboarding(null)}
+  }),[]);
+  useEffect(()=>{
+    void refresh();
+    return ()=>lifecycle.current.cancel({unmounted:true});
+  },[refresh]);
   const openProvider=async(id:string)=>{
     if(!nativeAvailable()){setVisit('Provider handoff requires installed native HEX.');return}
     setVisit('');
