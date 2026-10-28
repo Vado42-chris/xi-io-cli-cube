@@ -184,6 +184,46 @@ class CoreBundleNative(unittest.TestCase):
                         ):
                             pass
 
+    def test_journal_cap_denies_65th_apply_before_destination_or_journal_effect(self):
+        # The actual native request must not admit an operation that exceeds
+        # _bundle_attempts' hard 64-file inspection/reconciliation denominator.
+        with tempfile.TemporaryDirectory(prefix="xiio-native-core-") as d:
+            root = Path(d)
+            digest = self.valid_profile(root)
+            env = self.runtime_env(root)
+            attempts = [(n, {
+                "operation_id": "bundle-core-six-" + digest[:16] + "-apply-" + str(n),
+                "final_state": "failed",
+                "incomplete": False,
+                "journal_sha256": "a" * 64
+            }) for n in range(1, 65)]
+            not_installed = {"state": "NOT_INSTALLED", "receipt_count": 0,
+                             "first_red": None}
+            with patch.dict(os.environ, env, clear=False), \
+                 patch.object(installer_adapter, "HERE", root), \
+                 patch.object(installer_adapter, "_bundle_attempts", return_value=attempts), \
+                 patch.object(installer_adapter.child_bundle, "inspect_bundle_install",
+                              return_value=not_installed), \
+                 patch.object(installer_adapter.child_bundle, "install_bundle") as effect:
+                before = list((installer_adapter.root() / "operations").glob("*.jsonl"))
+                observed = installer_adapter.handle({"action": "bundle_inspect"})
+                self.assertEqual(observed["phase"], "RECONCILED_NOT_INSTALLED")
+                self.assertEqual(len(observed["attempts"]), 64)
+                self.assertEqual(observed["first_red"],
+                                 "BUNDLE_OPERATION_HISTORY_REVIEW_REQUIRED")
+                self.assertFalse(observed["installable"])
+                self.assertFalse(observed["retry_allowed"])
+                self.assertTrue(observed["do_not_retry"])
+                with self.assertRaisesRegex(Exception, "BUNDLE_OPERATION_HISTORY_REVIEW_REQUIRED"):
+                    installer_adapter._next_bundle_operation(installer_adapter.root(),
+                        {"profile_id": "core-six", "lock_sha256": digest})
+                with self.assertRaisesRegex(Exception, "BUNDLE_OPERATION_HISTORY_REVIEW_REQUIRED"):
+                    installer_adapter.handle({"action": "bundle_apply",
+                                              "lock_sha256": digest, "approved": True})
+                effect.assert_not_called()
+                self.assertEqual(list((installer_adapter.root() / "operations").glob("*.jsonl")),
+                                 before)
+
     def test_fixture_lock_never_becomes_native_prod_release(self):
         with tempfile.TemporaryDirectory(prefix="xiio-native-core-") as d:
             root = Path(d)
