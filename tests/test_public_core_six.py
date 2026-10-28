@@ -61,8 +61,26 @@ class PublicCoreRelease(unittest.TestCase):
         }
         self.lock = self.root / "core-release.lock.json"
         self.set_lock(lock)
-        self.contents["PROVENANCE.json"] = b'{"schema":"xiio.core-public-provenance/v1"}'
-        self.contents["SHA256SUMS"] = b"synthetic-checksum-index\n"
+        provenance = {
+            "schema": "xiio.cube.core-runtime-provenance/v1",
+            "release_tag": TAG, "runtime_only": True,
+            "products": [{
+                "role": role, "owner_repository": module.OWNERS[role],
+                "source_commit": "a" * 40,
+                "assets": [role + ".bin"],
+                "owner_review_url":
+                    "https://github.com/" + module.OWNERS[role] + "/issues/1",
+                "owner_review_state": "APPROVED_FOR_RUNTIME_DISTRIBUTION",
+            } for role in module.ROLES],
+        }
+        self.contents["PROVENANCE.json"] = json.dumps(provenance, sort_keys=True).encode()
+        self.update_checksum_index()
+
+    def update_checksum_index(self):
+        self.contents["SHA256SUMS"] = "".join(
+            module.sha(self.contents[name]) + "  " + name + "\n"
+            for name in sorted(self.contents) if name != "SHA256SUMS"
+        ).encode()
 
     def set_lock(self, lock):
         raw = json.dumps(lock, sort_keys=True).encode()
@@ -197,7 +215,9 @@ class PublicCoreRelease(unittest.TestCase):
             observed = module.published_metadata(local, self.release(), verify_bytes=True)
         self.assertEqual(observed["state"], "PUBLIC_RELEASE_BYTES_VERIFIED")
         self.assertEqual(observed["verified_assets"], 13)
-        self.assertEqual(set(calls), set(self.contents) - module.META_ASSETS)
+        self.assertEqual(set(calls), set(self.contents))
+        self.assertTrue(observed["release_provenance_verified"])
+        self.assertTrue(observed["release_checksum_index_verified"])
         self.assertEqual(observed["native_install_readback"], "NOT_VERIFIED")
 
     def test_tampered_download_refused_even_when_metadata_matches(self):
@@ -205,10 +225,44 @@ class PublicCoreRelease(unittest.TestCase):
         def fetch(url, dest, size, hosts):
             name = url.rsplit("/", 1)[-1]
             b = self.contents[name]
-            dest.write_bytes(bytes([b[0] ^ 1]) + b[1:])
+            dest.write_bytes(bytes([b[0] ^ 1]) + b[1:] if name == "bins.bin" else b)
         with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
             with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_BYTES_MISMATCH"):
                 module.published_metadata(local, self.release(), verify_bytes=True)
+
+    def test_provenance_must_cover_all_six_source_owners(self):
+        local = module.qualify_local(self.lock, TAG)
+        doc = json.loads(self.contents["PROVENANCE.json"])
+        doc["products"][0]["owner_repository"] = "someone/fake"
+        self.contents["PROVENANCE.json"] = json.dumps(doc).encode()
+        self.update_checksum_index()
+        def fetch(url, dest, size, hosts):
+            dest.write_bytes(self.contents[url.rsplit("/", 1)[-1]])
+        with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
+            with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_PROVENANCE_OWNER_UNVERIFIED"):
+                module.published_metadata(local, self.release(), verify_bytes=True)
+
+    def test_checksum_metadata_is_verified_not_just_named(self):
+        local = module.qualify_local(self.lock, TAG)
+        self.contents["SHA256SUMS"] = b"unrelated filename list\n"
+        def fetch(url, dest, size, hosts):
+            dest.write_bytes(self.contents[url.rsplit("/", 1)[-1]])
+        with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
+            with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_SHA256SUMS_INVALID"):
+                module.published_metadata(local, self.release(), verify_bytes=True)
+
+    def test_false_runtime_rights_state_is_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        doc = json.loads(self.contents["PROVENANCE.json"])
+        doc["products"][1]["owner_review_state"] = "PENDING"
+        self.contents["PROVENANCE.json"] = json.dumps(doc).encode()
+        self.update_checksum_index()
+        def fetch(url, dest, size, hosts):
+            dest.write_bytes(self.contents[url.rsplit("/", 1)[-1]])
+        with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
+            with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_PROVENANCE_OWNER_UNVERIFIED"):
+                module.published_metadata(local, self.release(), verify_bytes=True)
+
 
 
 if __name__ == "__main__":
