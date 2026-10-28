@@ -12,6 +12,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import stat
 import sys
 from tempfile import TemporaryDirectory
 from urllib.error import HTTPError, URLError
@@ -297,19 +298,80 @@ def _verify_release_provenance(qualified, data):
                 "PUBLIC_CORE_RELEASE_SHA256SUMS_MISMATCH")
 
 
+def qualify_staged(qualified, stage):
+    """Read-only prepublication gate for exact owner-provided runtime bytes.
+
+    This cannot prove owner rights, signing, user installation or online
+    availability. Reject every unlisted file and filesystem redirection.
+    """
+    stage = Path(stage).absolute()
+    require(stage.is_dir() and not stage.is_symlink(),
+            "CORE_STAGED_DIRECTORY_UNTRUSTED")
+    expected = qualified["expected_assets"]
+    allowed = set(expected) | META_ASSETS
+    try:
+        children = list(stage.iterdir())
+    except OSError:
+        raise Refused("CORE_STAGED_DIRECTORY_UNREADABLE") from None
+    require({x.name for x in children} == allowed and len(children) == len(allowed),
+            "CORE_STAGED_ASSETS_INCOMPLETE_OR_UNREVIEWED")
+    data = {}
+    for path in children:
+        require(ASSET.fullmatch(path.name) and not path.is_symlink(),
+                "CORE_STAGED_FILE_UNTRUSTED")
+        try:
+            st = path.lstat()
+        except OSError:
+            raise Refused("CORE_STAGED_FILE_UNREADABLE") from None
+        require(stat.S_ISREG(st.st_mode) and st.st_nlink == 1,
+                "CORE_STAGED_FILE_NOT_EXCLUSIVE_REGULAR")
+        max_size = expected[path.name][1] if path.name in expected else 131072
+        require(0 < st.st_size <= max_size,
+                "CORE_STAGED_FILE_SIZE_UNQUALIFIED")
+        try:
+            with path.open("rb") as handle:
+                raw = handle.read(max_size + 1)
+                second = handle.read(1)
+        except OSError:
+            raise Refused("CORE_STAGED_FILE_UNREADABLE") from None
+        require(not second and len(raw) == st.st_size,
+                "CORE_STAGED_FILE_CHANGED")
+        if path.name in expected:
+            require(len(raw) == expected[path.name][1] and
+                    sha(raw) == expected[path.name][0],
+                    "CORE_STAGED_BYTES_MISMATCH")
+        data[path.name] = raw
+    _verify_release_provenance(qualified, data)
+    return {**{k: v for k, v in qualified.items() if k != "expected_assets"},
+            "state": "STAGED_RELEASE_BYTES_VERIFIED_NOT_PUBLISHED",
+            "verified_assets": len(expected),
+            "expected_asset_count": len(expected),
+            "release_provenance_verified": True,
+            "release_checksum_index_verified": True,
+            "public_release_published": False,
+            "owner_distribution_approval": "SEPARATELY_REQUIRED",
+            "native_install_readback": "NOT_VERIFIED"}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
     parser.add_argument("--published", action="store_true",
                         help="Read PUBLIC Cube GitHub release metadata without authentication")
+    parser.add_argument("--staged-dir", type=Path, default=None,
+                        help="Check exact owner-provided runtime assets BEFORE public publication; never uploads")
     parser.add_argument("--verify-bytes", action="store_true",
                         help="Fetch ALL public release assets and reopen exact bytes")
     args = parser.parse_args()
     try:
         require(not args.verify_bytes or args.published,
                 "PUBLISHED_RELEASE_REQUIRED_FOR_BYTE_READBACK")
+        require(not (args.staged_dir is not None and args.published),
+                "CORE_STAGING_AND_PUBLISHED_MODES_EXCLUSIVE")
         local = qualify_local(args.lock, args.tag)
+        if args.staged_dir is not None:
+            local = qualify_staged(local, args.staged_dir)
         if args.published:
             local = published_metadata(local,
                      _fetch_public(API_PREFIX + args.tag),
