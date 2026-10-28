@@ -102,8 +102,8 @@ is unchanged. Tests: `test_install_preflight.py`, frontend
 
 The same adapter and native installer bundle now expose a launcher-only plan.
 `../cli-source/launcher-repair.install.mjs` is **unchanged** upstream
-`Vado42-chris/xi-io-cli@b56adb5cbf34bcd9102f46df297aa42395ef41eb`, SHA256
-`118a7df1e952602aaf9b9c93d4e8aae62c527f15150463e8b2cb0645da3ab137`.
+`Vado42-chris/xi-io-cli@0f2b444abbe8f7a99c5f4520b1222c568eba6dd1`, SHA256
+`61fd09c0d0de09fb2b3aec4e94b34d013cd35ddc60eb44f86443a5d2b5812a4d`.
 It is a separately named immutable resource, not a second installer engine or a
 replacement for the existing `--packaged-source` transport adaptation. Custody is
 in `launcher-repair.SOURCE.json`; adapter constants independently enforce both
