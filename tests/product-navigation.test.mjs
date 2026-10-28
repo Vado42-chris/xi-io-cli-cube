@@ -115,6 +115,20 @@ test('actual tablet rail and product controls share selected views across the Sh
       assert.doesNotMatch(diagnostics.textContent, /PASS|16:05/);
     }
     assert.equal(panel(), retainedPanel, 'switching tools does not remount the installer'); assert.ok(panel().closest('.hidden'));
+    // Real built frontend + ShadowRoot consumer, not a source-text-only assertion.
+    await click(rail('Maths')); selectedRail('Maths'); selectedProduct('5. Offline Maths');
+    const maths=shadow.querySelector('[data-hex-snap55-workbench]');
+    assert.ok(maths,'same existing window contains actual maths editor');
+    assert.ok(maths.querySelector('textarea').value.includes('"nowMs": "1793200000000"'));
+    assert.equal(maths.querySelector('[data-snap55-result]'),null);
+    await click(button('Calculate locally'));
+    const mathsResult=maths.querySelector('[data-snap55-result]');
+    assert.ok(mathsResult,'local button invokes the bundled SDK calculation');
+    assert.equal(maths.querySelector('[data-snap55-state]').textContent,'SOURCE_BOUND_NUMERIC');
+    assert.ok(Math.abs(Number(maths.querySelector('[data-snap55-r]').textContent)-(0.25*13/21+0.65*0.5+0.005))<1e-15);
+    assert.match(mathsResult.textContent,/provider_effect/);
+    assert.match(mathsResult.textContent,/authority_granted/);
+    assert.equal(w.__TAURI__,undefined,'maths does not require Tauri IPC or account enrollment');
     await click(rail('Onboarding')); selectedRail('Onboarding'); selectedProduct('4. Onboarding');
     assert.ok(shadow.textContent.includes('HEX Onboarding, Identity'));
     assert.equal(panel(), retainedPanel);

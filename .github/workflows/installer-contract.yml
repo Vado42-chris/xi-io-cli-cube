@@ -125,3 +125,105 @@ jobs:
           echo "RUNNING_SERVICES=NOT_TESTED"
           echo "FIRST_PARTY_SESSION_AND_WARD=UNBOUND"
           echo "CUSTOMER_TWO_WAY_CONNECTION=NOT_PROVEN"
+
+  maths-installed-window:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact HEX maths generation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Use Node 24.22.1 for reproducible frontend
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Qualify byte-identical maths and actual bundled DOM interaction
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test tests/snap55-desktop.test.mjs
+          npm run lint
+          npm run build
+          npm run test:interaction
+          grep -Rq 'data-hex-snap55-workbench' dist/assets
+      - name: Install native build and isolated GUI toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+          npm ci --prefix native/hex/carrier --no-audit --no-fund
+      - name: Build exact-source Tauri and Debian, no DEV9 carrier fallback
+        run: |
+          set -euo pipefail
+          npm run native:build
+          test -x native/hex/carrier/src-tauri/target/release/xi-io-hex-dev
+          shopt -s nullglob
+          debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          sha256sum "${debs[0]}" | tee maths-native-deb.sha256
+          dpkg-deb --contents "${debs[0]}" > maths-deb.contents
+          grep -F 'xi-io-hex-dev' maths-deb.contents >/dev/null
+      - name: Install actual candidate on disposable Linux and observe running window
+        run: |
+          set -euo pipefail
+          test "${GITHUB_ACTIONS:-}" = true
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          shopt -s nullglob
+          debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          sha256sum --check maths-native-deb.sha256
+          sudo dpkg -i "${debs[0]}"
+          dpkg-query -S /usr/bin/xi-io-hex-dev
+          test -x /usr/bin/xi-io-hex-dev
+          sha256sum /usr/bin/xi-io-hex-dev | tee maths-installed-elf.sha256
+          work="$(mktemp -d "${RUNNER_TEMP}/hex-maths-window.XXXXXXXX")"
+          mkdir -p "$work/home" "$work/config" "$work/data" "$work/state" "$work/cache" "$work/runtime" "$work/tmp"
+          chmod 0700 "$work"/{home,config,data,state,cache,runtime,tmp}
+          export MATHS_WINDOW_WORK="$work"
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash -euo pipefail -c '
+            export HOME="$MATHS_WINDOW_WORK/home"
+            export XDG_CONFIG_HOME="$MATHS_WINDOW_WORK/config"
+            export XDG_DATA_HOME="$MATHS_WINDOW_WORK/data"
+            export XDG_STATE_HOME="$MATHS_WINDOW_WORK/state"
+            export XDG_CACHE_HOME="$MATHS_WINDOW_WORK/cache"
+            export XDG_RUNTIME_DIR="$MATHS_WINDOW_WORK/runtime"
+            export TMPDIR="$MATHS_WINDOW_WORK/tmp"
+            export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1
+            /usr/bin/xi-io-hex-dev >"$MATHS_WINDOW_WORK/stdout.log" 2>"$MATHS_WINDOW_WORK/stderr.log" &
+            pid=$!
+            trap '\''kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true'\'' EXIT
+            for i in $(seq 1 80); do
+              kill -0 "$pid" || { cat "$MATHS_WINDOW_WORK/stderr.log"; exit 31; }
+              window=$(xdotool search --onlyvisible --pid "$pid" --name "^XI-IO HEX$" 2>/dev/null | head -n1 || true)
+              test -z "$window" || break
+              sleep 0.25
+            done
+            test -n "${window:-}" || { cat "$MATHS_WINDOW_WORK/stderr.log"; exit 32; }
+            test "$(xdotool getwindowpid "$window")" = "$pid"
+            test "$(xdotool getwindowname "$window")" = "XI-IO HEX"
+            scrot -z "$MATHS_WINDOW_WORK/installed-window.png"
+            test -s "$MATHS_WINDOW_WORK/installed-window.png"
+            test -e "$MATHS_WINDOW_WORK/home"
+          '
+          cp "$work/installed-window.png" maths-installed-window.png
+          cp "$work/stderr.log" maths-installed-window.stderr.log
+          sha256sum maths-installed-window.png | tee maths-installed-window.sha256
+          printf 'SOURCE=%s\nINSTALLED_WINDOW_OBSERVED=true\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nARIES_INSTALL=NOT_PERFORMED\n' "$GITHUB_SHA"
+      - name: Preserve package and source-bound hosted acceptance receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hex-snap55-hosted-native-${{ github.sha }}
+          path: |
+            native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb
+            maths-native-deb.sha256
+            maths-installed-elf.sha256
+            maths-installed-window.sha256
+            maths-installed-window.png
+            maths-installed-window.stderr.log
+            maths-deb.contents
+          if-no-files-found: warn
+          retention-days: 14
