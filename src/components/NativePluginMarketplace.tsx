@@ -50,15 +50,16 @@ export default function NativePluginMarketplace() {
   const [visit,setVisit]=useState('');
   const refresh=useCallback(async()=>{
     if(!nativeAvailable()){setObservation(null);setOnboarding(null);setMessage('Preview only. Open installed native HEX to inspect local connection receipts.');return}
-    setBusy(true);setMessage('');
+    setBusy(true);setMessage('');setOnboarding(null);
     try{
       const result=await (globalThis as any).__TAURI__.core.invoke('native_plugin_inspect');
       if(result?.schema!=='xiio.hex.plugin-local-inspection/v1'||
          result.credential_values_read!==false||result.effect_authority!==0||
          result.ward_admission!==false){
-        setObservation(null);setMessage('Installed plugin receipt did not pass local verification.');return;
+        setObservation(null);setMessage('Installed plugin receipt did not pass local verification.');
+      }else{
+        setObservation(result);
       }
-      setObservation(result);
     }catch{setObservation(null);setMessage('Native plugin observation unavailable. No account or permission was changed.');}
     try{
       const current=await (globalThis as any).__TAURI__.core.invoke('native_plugin_onboarding_current');
