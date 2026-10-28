@@ -17,7 +17,17 @@ function CubeProductContent({navigation, onNavigate, pluginsVisible}: {navigatio
     if (host.current) setRoot(host.current.shadowRoot || host.current.attachShadow({mode: 'open'}));
   }, []);
   return <div ref={host} className="h-full min-h-0" data-hex-product-content="accepted-cube">
-    {root && createPortal(<><style>{productStyles}</style>{pluginsVisible ? <div className="p-5" data-hex-plugin-native-panel="v1"><NativePluginMarketplace /></div> : <App embedded navigation={navigation} onNavigate={onNavigate} />}</>, root)}
+    {root && createPortal(<>
+      <style>{productStyles}</style>
+      {/* Keep the accepted installer consumer mounted when switching Plugins.
+          Unmounting App here erased reviewed plan, live busy/unknown status and
+          exact receipt selection. Hidden means non-interactive, not destroyed. */}
+      <div className={pluginsVisible ? 'hidden h-full min-h-0' : 'h-full min-h-0'}
+        aria-hidden={pluginsVisible} data-hex-installer-state-host="persistent">
+        <App embedded navigation={navigation} onNavigate={onNavigate} visible={!pluginsVisible} />
+      </div>
+      {pluginsVisible && <div className="p-5" data-hex-plugin-native-panel="v1"><NativePluginMarketplace /></div>}
+    </>, root)}
   </div>;
 }
 
