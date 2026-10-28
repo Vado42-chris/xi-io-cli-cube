@@ -10,6 +10,7 @@ on:
       - 'package-lock.json'
       - 'scripts/native-package.mjs'
       - 'scripts/build-flatpak.sh'
+      - 'scripts/verify-installed-flatpak-gui.sh'
       - 'tests/flatpak-builder-admission.test.mjs'
       - '.github/workflows/flatpak-candidate-qualification.yml'
   workflow_dispatch:
@@ -89,56 +90,14 @@ jobs:
           # No adapter was invoked so far. A native-IPC-produced file must be
           # absent BEFORE the GUI, otherwise the window test is contaminated.
           flatpak run --user --command=sh com.xiio.hex -c 'test ! -e "${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}/xi-io/installer/native-adapter.lock"'
+      - name: Verify isolated GUI acceptance script syntax before launch
+        run: |
+          set -euo pipefail
+          bash -n scripts/verify-installed-flatpak-gui.sh
       - name: Launch actual installed HEX native window under disposable Xvfb
         run: |
           set -euo pipefail
-          dbus-run-session -- xvfb-run -a bash -c '
-            set -euo pipefail
-            flatpak run --user com.xiio.hex > hex-window.log 2>&1 &
-            app_pid=$!
-            trap "kill $app_pid 2>/dev/null || true; wait $app_pid 2>/dev/null || true" EXIT
-            found=0
-            for attempt in $(seq 1 30); do
-              if xdotool search --onlyvisible --name "XI-IO HEX" >/dev/null 2>&1; then
-                found=1
-                break
-              fi
-              if ! kill -0 "$app_pid" 2>/dev/null; then
-                cat hex-window.log
-                echo HEX_NATIVE_WINDOW_EXITED_BEFORE_VISIBLE
-                exit 81
-              fi
-              sleep 1
-            done
-            if [ "$found" != 1 ]; then
-              cat hex-window.log
-              echo HEX_NATIVE_WINDOW_NOT_OBSERVED
-              exit 82
-            fi
-            echo HEX_INSTALLED_WINDOW_VISIBLE_ON_DISPOSABLE_LINUX
-            # Default guided first page mounts SetupPackageDisclosure, which
-            # invokes installer_request(inspect) through Tauri's native IPC.
-            # The Python adapter creates native-adapter.lock. This must be an
-            # independently observed effect, not our direct Python fixture.
-            ipc=0
-            for attempt in $(seq 1 15); do
-              if flatpak run --user --command=sh com.xiio.hex -c '\''test -f "${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}/xi-io/installer/native-adapter.lock"'\''; then
-                ipc=1; break
-              fi
-              sleep 1
-            done
-            if [ "$ipc" != 1 ]; then
-              cat hex-window.log
-              echo HEX_NATIVE_WINDOW_IPC_INSPECT_NOT_OBSERVED
-              exit 83
-            fi
-            echo HEX_TAURI_IPC_AUTO_INSPECT_NATIVE_PYTHON_LOCK_OBSERVED
-          '
-          # Independently call installed Python adapter only after the native
-          # window has produced the same state file via Tauri IPC.
-          echo '{"action":"inspect"}' | flatpak run --user --command=sh com.xiio.hex -c 'XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.var/app/com.xiio.hex/state}"; export XDG_STATE_HOME; exec /usr/bin/python3 -I -B /app/lib/xi-io-hex/adapter/installer_adapter.py' > sandbox-inspect.json
-          python3 -c 'import json; r=json.load(open("sandbox-inspect.json")); assert r.get("ok") is True and isinstance(r.get("result"),dict); print("NATIVE_PYTHON_ADAPTER_INSPECT_READBACK_PASS")'
-          echo "NATIVE_GUI_IPC_AND_ADAPTER_READBACK_PASS_NOT_ARIES_LOKI"
+          dbus-run-session -- xvfb-run -a bash scripts/verify-installed-flatpak-gui.sh
 
       - name: Publish inspectable exact candidate artifact, never claim an approved release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
