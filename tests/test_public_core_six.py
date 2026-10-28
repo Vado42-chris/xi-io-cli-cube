@@ -201,6 +201,75 @@ class PublicCoreRelease(unittest.TestCase):
         with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_UNREVIEWED_EXTRA_OR_MISSING_METADATA_ASSETS"):
             module.published_metadata(local, data)
 
+    def staging_dir(self):
+        stage = self.root / "staging"
+        stage.mkdir()
+        for name, contents in self.contents.items():
+            (stage / name).write_bytes(contents)
+        return stage
+
+    def test_prepublication_staged_bytes_verified_without_network_or_release(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        with patch.object(module.child_bundle, "_fetch_https",
+                          side_effect=AssertionError("NETWORK_NOT_ALLOWED")):
+            observed = module.qualify_staged(qualified, stage)
+        self.assertEqual(observed["state"], "STAGED_RELEASE_BYTES_VERIFIED_NOT_PUBLISHED")
+        self.assertEqual(observed["verified_assets"], 13)
+        self.assertFalse(observed["public_release_published"])
+        self.assertEqual(observed["owner_distribution_approval"], "SEPARATELY_REQUIRED")
+        self.assertEqual(observed["native_install_readback"], "NOT_VERIFIED")
+
+    def test_prepublication_missing_and_extra_payloads_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        (stage / "ward.bin").unlink()
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_ASSETS_INCOMPLETE_OR_UNREVIEWED"):
+            module.qualify_staged(qualified, stage)
+        (stage / "ward.bin").write_bytes(self.contents["ward.bin"])
+        (stage / "private-source.tar.gz").write_bytes(b"PRIVATE SOURCE MUST NOT PUBLISH")
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_ASSETS_INCOMPLETE_OR_UNREVIEWED"):
+            module.qualify_staged(qualified, stage)
+
+    def test_prepublication_tamper_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        b = self.contents["ibal.bin"]
+        (stage / "ibal.bin").write_bytes(bytes([b[0] ^ 1]) + b[1:])
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_BYTES_MISMATCH"):
+            module.qualify_staged(qualified, stage)
+
+    def test_prepublication_symlink_and_hardlink_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        file = stage / "inbox.bin"
+        file.unlink()
+        file.symlink_to(self.root / "inbox.json")
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_FILE_UNTRUSTED"):
+            module.qualify_staged(qualified, stage)
+        file.unlink()
+        file.write_bytes(self.contents["inbox.bin"])
+        outside = self.root / "inbox-hardlink"
+        outside.hardlink_to(file)
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_FILE_NOT_EXCLUSIVE_REGULAR"):
+            module.qualify_staged(qualified, stage)
+
+    def test_prepublication_unapproved_owner_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        provenance = json.loads((stage / "PROVENANCE.json").read_bytes())
+        provenance["products"][0]["owner_review_state"] = "PENDING"
+        (stage / "PROVENANCE.json").write_text(json.dumps(provenance))
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_PROVENANCE_OWNER_UNVERIFIED"):
+            module.qualify_staged(qualified, stage)
+
+    def test_prepublication_checksum_index_tamper_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        (stage / "SHA256SUMS").write_bytes(b"0" * 64 + b"  bins.bin\n")
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_SHA256SUMS_COVERAGE_INVALID"):
+            module.qualify_staged(qualified, stage)
+
     def test_all_public_bytes_reopened_and_verified(self):
         local = module.qualify_local(self.lock, TAG)
         calls = []
