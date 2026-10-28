@@ -16,8 +16,9 @@ export function createNativePluginOperationLifecycle(onBusy){
    try{return await operation(current);}
    finally{if(current())onBusy(false);}
   },
-  invalidate(){
+  cancel({unmounted=false}={}){
    revision++;
+   if(!unmounted)onBusy(false);
   },
  });
 }
