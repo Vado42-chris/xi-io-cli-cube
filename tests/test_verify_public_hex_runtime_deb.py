@@ -133,6 +133,27 @@ class RealDebContentGate(unittest.TestCase):
         with self.assertRaisesRegex(gate.Refused, "PRIVATE_RUNTIME_APPROVAL_UNVERIFIED"):
             gate.qualify(scan, self.approval)
 
+    def test_public_actions_candidate_upload_is_manual_owner_only(self):
+        workflow = (SOURCE.parents[1] / ".github/workflows/native-hex-plugin-candidate.yml")
+        text = workflow.read_text(encoding="utf-8")
+        marker = "      - name: Upload candidate package (not installed on Aries)"
+        self.assertEqual(text.count(marker), 1)
+        upload = text.split(marker, 1)[1].split("\n      - name: ", 1)[0]
+        self.assertIn("github.event_name == 'workflow_dispatch'", upload)
+        self.assertIn("inputs.publish_candidate_artifact == true", upload)
+        self.assertIn("github.actor == 'Vado42-chris'", upload)
+        self.assertIn("steps.runtime-distribution-review.outcome == 'success'", upload)
+        self.assertNotIn("always()", upload)
+
+    def test_unreviewed_upload_gate_is_separate_from_six_product_release(self):
+        workflow = (SOURCE.parents[1] / ".github/workflows/native-hex-plugin-candidate.yml")
+        text = workflow.read_text(encoding="utf-8")
+        self.assertIn("scripts/verify-public-hex-runtime-deb.py --deb", text)
+        self.assertIn("id: runtime-distribution-review", text)
+        self.assertIn("default: false", text)
+        self.assertNotIn("gh release create", text)
+        self.assertNotIn("gh release upload", text)
+
     def test_developer_only_tar_member_without_payload_blocked(self):
         scan = gate.scan_tar(bundle(BASE + [(ADAPTER + "test_native.py", b"do tests", tarfile.REGTYPE)]))
         self.assertEqual(scan["development_files"], [ADAPTER + "test_native.py"])
