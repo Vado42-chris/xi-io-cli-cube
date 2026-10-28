@@ -11,6 +11,7 @@ on:
       - 'scripts/native-package.mjs'
       - 'scripts/build-flatpak.sh'
       - 'scripts/verify-installed-flatpak-gui.sh'
+      - 'tests/verify-installed-flatpak-gui-shell.sh'
       - 'tests/flatpak-builder-admission.test.mjs'
       - '.github/workflows/flatpak-candidate-qualification.yml'
   workflow_dispatch:
@@ -27,6 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/verify-installed-flatpak-gui.sh
+          bash tests/verify-installed-flatpak-gui-shell.sh
           test -s scripts/verify-installed-flatpak-gui.sh
           ! grep -Eq "xvfb-run -a bash -c" scripts/verify-installed-flatpak-gui.sh
           echo FLATPAK_GUI_ACCEPTANCE_SYNTAX_PASS
