@@ -20,6 +20,8 @@ on:
       - 'tests/native-source-adoption.test.mjs'
       - 'tests/hex-plugin-catalog.test.mjs'
       - 'tests/native-release-identity.test.mjs'
+      - 'scripts/verify-public-hex-runtime-deb.py'
+      - 'tests/test_verify_public_hex_runtime_deb.py'
       - 'tests/native-plugin-ui-contract.test.mjs'
       - 'tests/native-plugin-operation-lifecycle.test.mjs'
       - 'tests/hex-plugins-install-state-regression.test.mjs'
@@ -46,6 +48,10 @@ jobs:
         with:
           node-version: '24.22.1'
           cache: npm
+      - name: Test bounded public runtime package guard without uploading source
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -p test_verify_public_hex_runtime_deb.py -v
       - name: Test plugin multi-account, authority and existing-window contracts
         run: |
           set -euo pipefail
@@ -121,8 +127,19 @@ jobs:
           mkdir -p hex-gui-proof
           printf '%s\n' "${GITHUB_SHA}" > hex-gui-proof/source-commit.txt
           xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof"
+      - name: Gate built Debian bytes before any public Actions artifact upload
+        id: runtime-distribution-review
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          # No approval file means a deliberate BLOCKED gate. Private-derived
+          # runtime source may not be uploaded just because tests passed.
+          PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify-public-hex-runtime-deb.py --deb "${debs[0]}"
       - name: Upload candidate package (not installed on Aries)
-        if: ${{ always() && steps.package-verification.outcome == 'success' }}
+        if: ${{ success() && steps.package-verification.outcome == 'success' && steps.runtime-distribution-review.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: hex-native-plugins-${{ github.sha }}
