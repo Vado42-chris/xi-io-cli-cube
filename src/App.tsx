@@ -275,7 +275,7 @@ const ROSETTA_LEXICON = [
 
 export type ProductNavigation = { perspective: PerspectiveMode; activeView: ActiveView };
 
-export default function App({ embedded = false, navigation, onNavigate }: { embedded?: boolean; navigation?: ProductNavigation; onNavigate?: (patch: Partial<ProductNavigation>) => void }) {
+export default function App({ embedded = false, navigation, onNavigate, visible = true }: { embedded?: boolean; navigation?: ProductNavigation; onNavigate?: (patch: Partial<ProductNavigation>) => void; visible?: boolean }) {
   // The tablet and product controls share the same views; standalone keeps its local state.
   const [localNavigation, setLocalNavigation] = useState<ProductNavigation>({perspective: 'client', activeView: 'catalog'});
   const {perspective, activeView} = navigation ?? localNavigation;
@@ -644,7 +644,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
     <div data-tablet-surface data-hex-workspace data-comfort={comfort} data-product-theme={theme} style={{'--workspace-plate-image': `url("${brandPlate}")`} as React.CSSProperties} className={`${embedded ? 'min-h-full' : 'min-h-screen'} transition-colors duration-200 selection:bg-workspace-focus/30 selection:text-workspace-focus ${
       isLight ? 'bg-workspace-canvas text-workspace-text' : 'bg-workspace-canvas text-workspace-text'
     }`}>
-      <TabletBackdrop />
+      <TabletBackdrop active={visible} />
       {/* HEX product workspace inside the shared tablet. */}
       <div className="hex-workspace-layout">
         <div className={`hex-workspace-frame ${embedded ? '' : 'border border-workspace-border'} transition-all duration-200`}>
@@ -1210,7 +1210,7 @@ export default function App({ embedded = false, navigation, onNavigate }: { embe
               {/* AUDITOR TAB 2: INSTALL & COMPILE GUIDE */}
               <div className={activeView === 'installer' ? 'block' : 'hidden'}>
                 <section className="space-y-6">
-                  <div className={['cli', 'bins', 'switchboard'].includes(selectedTarget) ? 'block' : 'hidden'}><NativeInstallerPanel /></div>
+                  <div className={['cli', 'bins', 'switchboard'].includes(selectedTarget) ? 'block' : 'hidden'}><NativeInstallerPanel active={visible && perspective === 'auditor' && activeView === 'installer'} /></div>
                   {!['cli', 'bins', 'switchboard'].includes(selectedTarget) && <section role="status" className="p-5 border border-workspace-border space-y-2">
                     <h3>{currentComponent.name}</h3><p>{currentComponent.statusDetail}</p><p>{currentComponent.prerequisites}</p>
                   </section>}
