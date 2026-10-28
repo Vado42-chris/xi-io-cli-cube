@@ -62,7 +62,8 @@ def payload_asset(url, tag):
             not parsed.fragment, "CORE_PAYLOAD_URL_UNSAFE")
     basename = url[len(RELEASE_ASSET_PREFIX + tag + "/"):]
     require(ASSET.fullmatch(basename) and basename not in (".", "..") and
-            not basename.startswith(".") and "%", " " not in basename,
+            not basename.startswith(".") and "%" not in basename and
+            " " not in basename,
             "CORE_PAYLOAD_ASSET_NAME_UNSAFE")
     return basename
 
