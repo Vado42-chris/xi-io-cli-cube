@@ -62,7 +62,7 @@ export default function NativePluginMarketplace() {
   const [message,setMessage]=useState('');
   const [visit,setVisit]=useState('');
   const lifecycle=useRef(createNativePluginOperationLifecycle(setBusy));
-  const refresh=useCallback(async()=>lifecycle.current.run(async isCurrent=>{
+  const refresh=useCallback(async()=>lifecycle.current.run(async (isCurrent:()=>boolean)=>{
     if(!nativeAvailable()){
       if(isCurrent()){
         setObservation(null);setOnboarding(null);
