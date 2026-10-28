@@ -3,7 +3,7 @@ mod protocol;
 mod transport;
 use protocol::InstallerRequest;
 use serde_json::{json, Value};
-use std::{path::PathBuf, sync::{Arc, Mutex}};
+use std::{path::{Path,PathBuf}, sync::{Arc, Mutex}};
 use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 fn bundled_origin(u: &url::Url) -> bool {
@@ -54,10 +54,77 @@ fn native_product_window(window:WebviewWindow, action:String, direction:Option<S
     result.map_err(|_|"WINDOW_ACTION_FAILED")?;
     Ok(json!({"maximized":window.is_maximized().map_err(|_|"WINDOW_STATE_UNREADABLE")?,"fullscreen":window.is_fullscreen().map_err(|_|"WINDOW_STATE_UNREADABLE")?}))
 }
+/// Read only the two pre-existing local private MCP receipts. The UI receives
+/// booleans/states, never tunnel IDs, secrets, email, IPs, or arbitrary paths.
+fn plugin_receipt(home:&Path, relative:&str) -> Option<Value> {
+    let root=home.canonicalize().ok()?;
+    let path=root.join(relative);
+    let meta=std::fs::symlink_metadata(&path).ok()?;
+    if !meta.is_file() || meta.file_type().is_symlink() || meta.len()>4096 || meta.len()<30 {return None}
+    #[cfg(unix)] {
+        use std::os::unix::fs::MetadataExt;
+        let owner=root.metadata().ok()?;
+        if meta.uid()!=owner.uid() || meta.mode() & 0o077 != 0 || meta.nlink()!=1 {return None}
+    }
+    let content=std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Value>(&content).ok()
+}
+#[tauri::command]
+fn native_plugin_inspect(app:tauri::AppHandle,window:WebviewWindow)->Result<Value,String>{
+    local_caller(&window)?;
+    let home=app.path().home_dir().map_err(|_|"HOME_UNAVAILABLE")?;
+    let aries=plugin_receipt(&home,".local/state/xi-io/agents/aries-private-mcp.current.json");
+    let tunnel=plugin_receipt(&home,".local/state/xi-io/tunnel/activation.current.json");
+    let aries_ok=aries.as_ref().map(|r|
+        r["schema"]=="xiio.mcp.aries-install/v1" &&
+        r["state"]=="ARIES_MCP_STDIO_INSTALLED_READBACK_VERIFIED" &&
+        r["host"]=="aries" &&
+        r["source_blob_sha"]=="1c6210d13fa19394b68de839b453bda8b0d99a2b" &&
+        r["ward_admission"]==false && r["protected_host_execution"]==false
+        && r["tools"].as_array().map(|v|v.iter().any(|x|x=="xiio.host.inspectAries")).unwrap_or(false)
+    ).unwrap_or(false);
+    let tunnel_ok=tunnel.as_ref().map(|r|
+        r["schema"]=="xiio.mcp.tunnel-activation/v1" &&
+        r["state"]=="TUNNEL_LOCAL_CLIENT_READY" &&
+        r["host"]=="aries" &&
+        r["mcp_tool"]=="xiio.host.inspectAries" &&
+        r["chatgpt_plugin_attached"]==false &&
+        r["ward_admission"]==false && r["protected_host_execution"]==false
+    ).unwrap_or(false);
+    Ok(json!({"schema":"xiio.hex.plugin-local-inspection/v1",
+        "aries_mcp":{"state":if aries_ok {"ARIES_MCP_STDIO_INSTALLED_READBACK_VERIFIED"} else {"NOT_VERIFIED"}},
+        "tunnel":{"state":if tunnel_ok {"TUNNEL_LOCAL_CLIENT_READY"} else {"NOT_VERIFIED"},
+                  "live_checked":false},
+        "chatgpt_plugin":"NOT_VERIFIED",
+        "credential_values_read":false,"ward_admission":false,
+        "effect_authority":0}))
+}
+
+/// Fixed allowlisted provider links only, initiated by a real local UI click.
+/// A provider login or OpenAI Platform session is never copied into HEX.
+#[tauri::command]
+fn native_plugin_open_provider(window:WebviewWindow,provider:String)->Result<Value,String>{
+    local_caller(&window)?;
+    let url=match provider.as_str(){
+        "chatgpt"=>"https://chatgpt.com/plugins",
+        "openai-platform"=>"https://platform.openai.com/",
+        "inbox"=>"http://127.0.0.1:8791/",
+        _=>return Err("PLUGIN_PROVIDER_NOT_REGISTERED".into()),
+    };
+    let status=std::process::Command::new("xdg-open").arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn().map_err(|_|"PROVIDER_BROWSER_LAUNCH_FAILED")?;
+    // Spawn means only accepted by the OS, never provider authorization.
+    Ok(json!({"state":"EXTERNAL_BROWSER_HANDOFF_ATTEMPTED",
+        "provider":provider,"spawned_pid":status.id(),
+        "authenticated":false,"plugin_attached":false}))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){
     tauri::Builder::default().manage(Arc::new(Mutex::new(())) as transport::Gate)
-        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,chooser::native_select_directory])
+        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,native_plugin_inspect,native_plugin_open_provider,chooser::native_select_directory])
         .setup(|app|{
             WebviewWindowBuilder::new(app,"hex",WebviewUrl::App("index.html".into()))
                 .title("XI-IO HEX").inner_size(1440.,900.).min_inner_size(720.,480.)
