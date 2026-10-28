@@ -27,6 +27,18 @@ type NativeOnboarding={
   native_browser_session_shared?:false;
 };
 function acceptNativeOnboarding(value:any):value is NativeOnboarding{
+  const keys=new Set(['schema','plane','state','next','first_red','authenticated',
+    'connection_choice','consent','services','provisioning','authority_granted',
+    'ward_admission','provider_effect','native_browser_session_shared']);
+  if(!value||typeof value!=='object'||Array.isArray(value)||
+     Object.keys(value).some(key=>!keys.has(key)))return false;
+  if(value.state==='AUTHORITY_UNAVAILABLE'&&
+     (value.next!=='RESTORE_FIRST_PARTY_SESSION_OWNER'||
+      typeof value.first_red!=='string'||
+      !/^[A-Z][A-Z0-9_]{3,100}$/.test(value.first_red)))return false;
+  if(value.state==='OWNER_SIGNIN_REQUIRED'&&
+     (value.next!=='XIIO_FIRST_PARTY_SIGN_IN'||
+      value.native_browser_session_shared!==false))return false;
   return value?.schema==='xiio.onboarding.current/v1'&&
     value?.plane==='XIIO_FIRST_PARTY'&&value.authenticated===false&&
     value.connection_choice==='NOT_ASKED'&&
