@@ -2,7 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {NativeProductWindowShell} from './shared/window-frame.mjs';
 import App, {type ProductNavigation} from './App';
-import {Compass, Grid, Download, Activity, History} from 'lucide-react';
+import {Compass, Grid, Download, Activity, History, Calculator} from 'lucide-react';
 import {nativeInstallerAvailable} from './lib/nativeInstaller.mjs';
 import productStyles from './index.css?inline';
 
@@ -34,6 +34,7 @@ export default function SharedProductHost() {
     {id: 'installer', label: 'Install', icon: Download},
     {id: 'status-dashboard', label: 'Status', icon: Activity},
     {id: 'rebaseline', label: 'Onboarding', icon: History},
+    {id: 'maths', label: 'Maths', icon: Calculator},
   ];
   const onTabChange = (id: string) => {
     if (id === 'setup') navigate({perspective: 'client'});
