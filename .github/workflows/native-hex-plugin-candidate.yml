@@ -11,6 +11,8 @@ on:
       - 'native/hex/**'
       - 'scripts/native-package.mjs'
       - 'scripts/verify-extracted-hex-gui.sh'
+      - 'scripts/verify-hex-capture.py'
+      - 'tests/hex-capture.test.py'
       - 'tests/extracted-hex-gui-harness.sh'
       - 'public/**'
       - 'index.html'
@@ -71,6 +73,13 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_bundle.py -v
           PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_core_bundle_native.py -v
           npm run test:source-adoption
+      - name: Qualify bounded GUI pixel checker on isolated runner
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          /usr/bin/python3 -B scripts/verify-hex-capture.py --check-decoder
+          /usr/bin/python3 -B -m unittest discover -s tests -p hex-capture.test.py -v
       - name: Check extracted GUI smoke harness without launching a desktop
         run: bash tests/extracted-hex-gui-harness.sh
       - name: Install exact frontend build dependencies
