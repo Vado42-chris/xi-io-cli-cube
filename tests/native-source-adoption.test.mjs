@@ -7,7 +7,7 @@ const json=p=>JSON.parse(read(p));
 test('editable native closure uses the root product build and fixed sibling resources',()=>{
  const config=json('native/hex/carrier/src-tauri/tauri.conf.json');
  assert.equal(config.build.frontendDist,'../frontend');
- assert.deepEqual(config.bundle.resources,{'../../adapter/':'adapter/','../../cli-source/':'cli-source/'});
+ assert.deepEqual(config.bundle.resources,{'../runtime-adapter/':'adapter/','../../cli-source/':'cli-source/'});
  assert.match(read('scripts/native-package.mjs'),/join\(root,'dist'\)/);
  assert.match(read('scripts/native-package.mjs'),/pruneBytecode\(adapter\)/);
  for(const p of ['src-tauri/src/protocol.rs','src-tauri/src/transport.rs','src-tauri/src/chooser.rs','src-tauri/Cargo.lock','package-lock.json'])assert.ok(existsSync(new URL('../native/hex/carrier/'+p,import.meta.url)));
