@@ -39,9 +39,41 @@ fn window_trace(window:&WebviewWindow, action:&str, direction:Option<&str>, stag
     let size=window.outer_size().ok().map(|p|json!({"width":p.width,"height":p.height}));
     eprintln!("HEX_NATIVE_WINDOW {}",json!({"time_ms":ms,"action":action,"direction":direction,"stage":stage,"command_result":result,"maximized":window.is_maximized().ok(),"fullscreen":window.is_fullscreen().ok(),"position":position,"size":size,"geometry_is_observation_not_drag_success":true}));
 }
+// Fixed numeric/boolean observation, not DOM content or execution authority.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct FrontendDiagnostic {
+    sample: u8,
+    errors: [u8; 5],
+    nodes: [[u16; 4]; 4],
+    root_children: bool,
+    document_visible: bool,
+    raf: bool,
+    shadow: bool,
+}
+impl FrontendDiagnostic {
+    fn valid(&self) -> bool {
+        self.sample < 3 && self.nodes.iter().all(|n|
+            n[0] <= 1 && n[1] <= 16384 && n[2] <= 16384 && n[3] <= 1
+            && (n[0] == 1 || n[1..].iter().all(|v| *v == 0)))
+    }
+}
+static FRONTEND_DIAGNOSTIC_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 #[tauri::command]
-fn native_product_window(window:WebviewWindow, action:String, direction:Option<String>) -> Result<Value,String> {
+fn native_product_window(window:WebviewWindow, action:String, direction:Option<String>, diagnostic:Option<FrontendDiagnostic>) -> Result<Value,String> {
     local_caller(&window)?;
+    if let Some(observation) = diagnostic {
+        if action != "state" || direction.is_some() || !observation.valid() {
+            return Err("INVALID_FRONTEND_DIAGNOSTIC".into());
+        }
+        use std::sync::atomic::Ordering;
+        // Saturating cap avoids floods and wraparound from repeated callers.
+        if FRONTEND_DIAGNOSTIC_COUNT.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
+            |count| (count < 3).then_some(count + 1)).is_ok() {
+            eprintln!("HEX_FRONTEND_DIAGNOSTIC {}", json!(observation));
+        }
+    }
     if action!="resize" && direction.is_some(){return Err("DIRECTION_ONLY_FOR_RESIZE".into())}
     if !["state","drag","minimize","maximize","close","resize"].contains(&action.as_str()){return Err("UNSUPPORTED_WINDOW_ACTION".into())}
     window_trace(&window,&action,direction.as_deref(),"before","not_attempted");
@@ -147,6 +179,17 @@ pub fn run(){
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn frontend_diagnostic_is_fixed_bounded_data() {
+        let value = json!({"sample":0,"errors":[0,0,0,0,0],"nodes":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+            "root_children":false,"document_visible":true,"raf":false,"shadow":false});
+        let read = |v:Value| serde_json::from_value::<FrontendDiagnostic>(v);
+        assert!(read(value.clone()).unwrap().valid());
+        let mut bad=value.clone(); bad["message"]=json!("not allowed"); assert!(read(bad).is_err());
+        let mut bad=value.clone(); bad["sample"]=json!(3); assert!(!read(bad).unwrap().valid());
+        let mut bad=value.clone(); bad["errors"][0]=json!(256); assert!(read(bad).is_err());
+        let mut bad=value.clone(); bad["nodes"][0]=json!([1,16385,1,1]); assert!(!read(bad).unwrap().valid());
+        let mut bad=value.clone(); bad["nodes"][0]=json!([0,1,1,1]); assert!(!read(bad).unwrap().valid());
+    }
     #[test] fn exact_local_origins_only() {
         for value in ["tauri://localhost/index.html", "http://tauri.localhost/index.html"] {
             assert!(bundled_origin(&url::Url::parse(value).unwrap()));

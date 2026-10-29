@@ -27,6 +27,35 @@ class Diagnostic(unittest.TestCase):
         self.log = self.root / 'stderr'
         self.log.write_text('secret password raw stderr\nHEX_NATIVE_WINDOW ' + json.dumps({'action':'close','stage':'dispatch','command_result':'accepted','secret':'NEVER_EMIT'})+'\n')
         self.owner = '100'; self.mapped = '42'; self.x = 0
+    def frontend(self):
+        return {'sample': 1, 'errors': [1, 0, 0, 0, 0],
+                'nodes': [[1, 1440, 900, 1], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+                'root_children': False, 'document_visible': True, 'raf': False, 'shadow': False}
+    def test_frontend_fixed_schema_preserved_but_not_promoted_to_paint(self):
+        row = self.frontend()
+        self.log.write_text('HEX_FRONTEND_DIAGNOSTIC ' + json.dumps(row) + '\n')
+        result = self.snap()
+        self.assertEqual(result['window_commands']['frontend_observations'], [row])
+        self.assertFalse(result['renderer_load_verified'])
+        self.assertTrue(result['window_commands']['frontend_observations_are_not_pixel_proof'])
+    def test_frontend_rejects_secrets_wrong_types_and_out_of_range(self):
+        mutations = []
+        for key, value in [('message', 'SECRET'), ('sample', 3), ('sample', True),
+                           ('errors', [256, 0, 0, 0, 0]), ('errors', [0]),
+                           ('nodes', [[1, 0, 0, 2]] * 4), ('nodes', [[1, 16385, 0, 0]] * 4),
+                           ('nodes', [[0, 1, 0, 0]] * 4), ('shadow', 'SECRET')]:
+            row = self.frontend(); row[key] = value; mutations.append(row)
+        self.log.write_text(''.join('HEX_FRONTEND_DIAGNOSTIC ' + json.dumps(row) + '\n' for row in mutations))
+        result = self.snap()
+        self.assertEqual(result['window_commands']['frontend_observations'], [])
+        self.assertNotIn('SECRET', json.dumps(result))
+    def test_frontend_sample_count_and_line_size_bounded(self):
+        row = self.frontend()
+        self.log.write_text(('HEX_FRONTEND_DIAGNOSTIC ' + json.dumps(row) + '\n') * 20)
+        self.assertEqual(len(self.snap()['window_commands']['frontend_observations']), 3)
+        row['extra'] = 'x' * 5000
+        self.log.write_text('HEX_FRONTEND_DIAGNOSTIC ' + json.dumps(row) + '\n')
+        self.assertEqual(self.snap()['window_commands']['frontend_observations'], [])
     def node(self, pid, parent, start, kind, children='', state='S'):
         path = self.proc / str(pid)
         (path / 'task' / str(pid)).mkdir(parents=True)

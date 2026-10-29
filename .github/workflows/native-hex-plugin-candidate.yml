@@ -14,6 +14,7 @@ on:
       - 'scripts/verify-hex-capture.py'
       - 'scripts/diagnose-hex-window.py'
       - 'tests/hex-window-diagnostic.test.py'
+      - 'tests/frontend-diagnostic.test.mjs'
       - 'tests/hex-capture.test.py'
       - 'tests/extracted-hex-gui-harness.sh'
       - 'tests/hex-gui-deadline.test.py'
@@ -63,7 +64,7 @@ jobs:
           node-version: '24.22.1'
           cache: npm
       - name: Reject unsafe upload gates and Debian argument drift before native builds
-        run: node --test tests/native-ci-artifact-guards.test.mjs
+        run: node --test tests/native-ci-artifact-guards.test.mjs tests/frontend-diagnostic.test.mjs
       - name: Test bounded public runtime package guard without uploading source
         run: |
           set -euo pipefail

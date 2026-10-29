@@ -60,8 +60,33 @@ def children(proc, pid):
             'scan_truncated': bool(queue), 'absence_proves_never_loaded': False}
 
 
+def frontend_observation(item):
+    keys = {'sample', 'errors', 'nodes', 'root_children', 'document_visible', 'raf', 'shadow'}
+    if not isinstance(item, dict) or set(item) != keys:
+        return None
+    integer = lambda x, high: type(x) is int and 0 <= x <= high
+    if not integer(item['sample'], 2):
+        return None
+    if any(type(item[k]) is not bool for k in ('root_children', 'document_visible', 'raf', 'shadow')):
+        return None
+    errors, nodes = item['errors'], item['nodes']
+    if not isinstance(errors, list) or len(errors) != 5 or not all(integer(x, 255) for x in errors):
+        return None
+    if not isinstance(nodes, list) or len(nodes) != 4:
+        return None
+    for n in nodes:
+        if not isinstance(n, list) or len(n) != 4:
+            return None
+        if not all(integer(x, maximum) for x, maximum in zip(n, (1, 16384, 16384, 1))):
+            return None
+        if n[0] == 0 and any(n[1:]):
+            return None
+    return item  # Exact keys, primitive bounded values only; no strings.
+
+
 def events(path):
     counts = collections.Counter()
+    frontend = []
     # Bounded tail only; unrelated lines, unknown values and fields are discarded.
     with path.open('rb') as f:
         size = f.seek(0, 2)
@@ -70,6 +95,14 @@ def events(path):
     if size > 65536:
         lines = lines[1:]
     for line in lines:
+        if line.startswith(b'HEX_FRONTEND_DIAGNOSTIC ') and len(line) <= 4096:
+            try:
+                item = frontend_observation(json.loads(line[len(b'HEX_FRONTEND_DIAGNOSTIC '):]))
+                if item is not None and len(frontend) < 3:
+                    frontend.append(item)
+            except (ValueError, TypeError):
+                pass
+            continue
         if not line.startswith(b'HEX_NATIVE_WINDOW ') or len(line) > 4096:
             continue
         try:
@@ -80,7 +113,9 @@ def events(path):
         except (ValueError, AttributeError, TypeError):
             pass
     return {'known_command_event_counts': dict(counts), 'tail_bytes_limit': 65536,
-            'renderer_load_events_available': False}
+            'renderer_load_events_available': False,
+            'frontend_observations': frontend,
+            'frontend_observations_are_not_pixel_proof': True}
 
 
 def geometry(text, display):
