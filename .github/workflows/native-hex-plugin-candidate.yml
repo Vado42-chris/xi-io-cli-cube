@@ -1,0 +1,258 @@
+name: XI-IO HEX native Plugins candidate (fresh source)
+on:
+  push:
+    branches: [fix/native-hex-plugin-catalog-20261028, fix/hex27-reuse-core-bundle-20261028]
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'native/hex/carrier/package.json'
+      - 'native/hex/carrier/package-lock.json'
+      - 'src/**'
+      - 'native/hex/**'
+      - 'scripts/native-package.mjs'
+      - 'scripts/verify-extracted-hex-gui.sh'
+      - 'scripts/journal-hex-gui-observation.py'
+      - 'tests/gui-operation-receipt.test.py'
+      - 'scripts/verify-hex-capture.py'
+      - 'scripts/diagnose-hex-window.py'
+      - 'tests/hex-window-diagnostic.test.py'
+      - 'tests/frontend-diagnostic.test.mjs'
+      - 'tests/hex-capture.test.py'
+      - 'tests/extracted-hex-gui-harness.sh'
+      - 'tests/hex-gui-deadline.test.py'
+      - 'tests/gui-render-budget.test.py'
+      - 'tests/native-ci-artifact-guards.test.mjs'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - 'tests/core-bundle-interaction.test.mjs'
+      - 'tests/native-source-adoption.test.mjs'
+      - 'tests/hex-plugin-catalog.test.mjs'
+      - 'tests/native-release-identity.test.mjs'
+      - 'tests/native-runtime-adapter-stage.test.mjs'
+      - 'scripts/verify-public-hex-runtime-deb.py'
+      - 'tests/test_verify_public_hex_runtime_deb.py'
+      - 'tests/native-plugin-ui-contract.test.mjs'
+      - 'tests/native-plugin-operation-lifecycle.test.mjs'
+      - 'tests/hex-plugins-install-state-regression.test.mjs'
+      - 'tests/product-navigation.test.mjs'
+      - '.github/workflows/native-hex-plugin-candidate.yml'
+  workflow_dispatch:
+    inputs:
+      publish_candidate_artifact:
+        description: 'Explicit owner-reviewed private-derived runtime candidate upload (not a GitHub Release)'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hex-native-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-source:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - name: Reject unsafe upload gates and Debian argument drift before native builds
+        run: |
+          node --test tests/native-ci-artifact-guards.test.mjs tests/frontend-diagnostic.test.mjs
+          PYTHONDONTWRITEBYTECODE=1 python3 -B tests/gui-operation-receipt.test.py
+      - name: Test bounded public runtime package guard without uploading source
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -p test_verify_public_hex_runtime_deb.py -v
+      - name: Test plugin multi-account, authority and existing-window contracts
+        run: |
+          set -euo pipefail
+          node --test tests/hex-plugin-catalog.test.mjs tests/native-plugin-ui-contract.test.mjs tests/native-plugin-operation-lifecycle.test.mjs tests/hex-plugins-install-state-regression.test.mjs
+      - name: Refuse mislabeled DEV9 carrier and unqualified core release
+        run: node --test tests/native-release-identity.test.mjs
+      - name: Qualify existing six-product bundle kernel and source adoption
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_bundle.py -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_core_bundle_native.py -v
+          npm run test:source-adoption
+      - name: Qualify bounded GUI pixel checker on isolated runner
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          /usr/bin/python3 -I -B tests/hex-window-diagnostic.test.py
+          /usr/bin/python3 -B scripts/verify-hex-capture.py --check-decoder
+          /usr/bin/python3 -I -B tests/hex-capture.test.py -v
+          /usr/bin/python3 -I -B tests/hex-gui-deadline.test.py -v
+          /usr/bin/python3 -I -B tests/gui-render-budget.test.py -v
+      - name: Check extracted GUI smoke harness without launching a desktop
+        run: |
+          bash tests/extracted-hex-gui-harness.sh
+          GUI_HARNESS_RENDER_MODE=webkit-default bash tests/extracted-hex-gui-harness.sh
+      - name: Install exact frontend build dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check TypeScript and source-owned frontend
+        run: |
+          npm run lint
+          npm run build
+          npm run test:interaction
+          node --test tests/native-runtime-adapter-stage.test.mjs
+          test -f dist/index.html
+          grep -Rq 'data-native-hex-plugins' dist/assets
+          echo FRESH_PLUGIN_FRONTEND_INCLUDED
+      - name: Install isolated native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+      - name: Fetch locked Tauri build CLI
+        run: npm ci --prefix native/hex/carrier --no-audit --no-fund
+      - name: Build exact source generation (no historical DEV9 binary)
+        run: npm run native:build
+      - name: Verify fresh Debian package and native launchable ELF
+        id: package-verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          file native/hex/carrier/src-tauri/target/release/xi-io-hex-dev
+          test -x native/hex/carrier/src-tauri/target/release/xi-io-hex-dev
+          dpkg-deb --contents "${debs[0]}" > hex-native-plugins.contents
+          grep -q 'xi-io-hex-dev' hex-native-plugins.contents
+          # The GUI is not an accepted product installation without these
+          # exact packaged core producer and native IPC resources.
+          grep -Fq 'adapter/child_bundle.py' hex-native-plugins.contents
+          grep -Fq 'adapter/kernel/xiio_installer/transaction.py' hex-native-plugins.contents
+          grep -Fq 'adapter/installer_adapter.py' hex-native-plugins.contents
+          # Independently inspect the actual Debian payload even on ordinary
+          # source pushes. This is runtime-content evidence, not publication.
+          python3 -B - "${debs[0]}" <<'PY'
+          import importlib.util, pathlib, subprocess, sys
+          source = pathlib.Path("scripts/verify-public-hex-runtime-deb.py")
+          spec = importlib.util.spec_from_file_location("hex_runtime_gate", source)
+          gate = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(gate)
+          p = subprocess.run(["dpkg-deb","--fsys-tarfile",sys.argv[1]],
+                             capture_output=True, check=True, timeout=30)
+          scan = gate.scan_tar(p.stdout)
+          assert scan["adapter_count"] == 15, "REDUCED_ADAPTER_COUNT_MISMATCH"
+          assert not scan["development_files"], "DEVELOPMENT_FILE_IN_DEBIAN"
+          assert not scan["unsafe_files"], "UNSAFE_SOURCE_MEMBER_IN_DEBIAN"
+          assert scan["cli_files"], "REQUIRED_CLI_RUNTIME_MISSING"
+          print("DEBIAN_STAGED_ADAPTER_RUNTIME_15_OF_15")
+          print("DEVELOPMENT_RESOURCES_EXCLUDED")
+          print("PRIVATE_CLI_DISTRIBUTION_APPROVAL_STILL_REQUIRED")
+          PY
+          grep -Rq 'bundle_inspect' src/components/NativeInstallerPanel.tsx
+          printf '%s  %s\n' "$(sha256sum "${debs[0]}" | cut -d' ' -f1)" "${debs[0]}" > hex-native-plugins.sha256
+          echo PACKAGE_SOURCE_HEAD="${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+          cat hex-native-plugins.sha256 >> "$GITHUB_STEP_SUMMARY"
+      - name: Observe extracted package native window in isolated Xvfb
+        run: |
+          set -euo pipefail
+          test "$(id -u)" != 0
+          test "${RUNNER_ENVIRONMENT}" = github-hosted
+          sha256sum --check hex-native-plugins.sha256
+          shopt -s nullglob
+          debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          payload="$(mktemp -d "$RUNNER_TEMP/hex-gui-payload.XXXXXXXX")"
+          dpkg-deb --extract "${debs[0]}" "$payload"
+          # Native inspect on the *extracted package*, not the source tree.
+          # Without qualified six-owner release payloads, refuse installation.
+          adapter="$payload/usr/lib/XI-IO HEX DEV/adapter/installer_adapter.py"
+          test -f "$adapter"
+          printf '{"action":"bundle_inspect"}\n' | /usr/bin/python3 -I -B "$adapter" > hex-bundle-inspect.json
+          python3 -c 'import json; r=json.load(open("hex-bundle-inspect.json")); assert r["ok"] is True; assert r["result"]["phase"] in ("BLOCKED_RELEASE_PROFILE_UNPUBLISHED","REVIEW_REQUIRED","RECONCILED_NOT_INSTALLED","INSTALLED_BYTES_VERIFIED"); assert r["result"].get("authority_granted") is False; print(r["result"]["phase"])'
+          mkdir -p hex-gui-proof
+          printf '%s\n' "${GITHUB_SHA}" > hex-gui-proof/source-commit.txt
+          # Compare one already-built ELF, not different generations. Both modes
+          # retain isolated HOME/XDG, sandbox defaults and the same pixel gate.
+          elf_sha=$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)
+          set +e
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- python3 -I -B scripts/journal-hex-gui-observation.py "$payload" "$PWD/hex-gui-proof/original" original "$GITHUB_SHA" "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          original_status=$?
+          set -e
+          test "$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = "$elf_sha"
+          set +e
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- python3 -I -B scripts/journal-hex-gui-observation.py "$payload" "$PWD/hex-gui-proof/webkit-default" webkit-default "$GITHUB_SHA" "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          default_status=$?
+          set -e
+          test "$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = "$elf_sha"
+          python3 -I -B - "$GITHUB_SHA" "$elf_sha" "$original_status" "$default_status" <<'PYCODE'
+          import json, pathlib, re, sys
+          source, elf, original, default = sys.argv[1:]
+          assert re.fullmatch('[0-9a-f]{40}', source) and re.fullmatch('[0-9a-f]{64}', elf)
+          modes = {"original": int(original), "webkit-default": int(default)}
+          result = {"schema": "xiio.hex.render-comparison/v1", "source_commit": source,
+                    "native_elf_sha256": elf, "same_elf_before_after": True,
+                    "mode_exit_codes": modes, "qualification_environment": "webkit-default",
+                    "qualification_passed": modes["webkit-default"] == 0,
+                    "original_environment_qualified": modes["original"] == 0,
+                    "semantic_ui_verified": False, "installed_package": False}
+          pathlib.Path('hex-gui-proof/mode-results.json').write_text(json.dumps(result, indent=2)+'\n')
+          print(json.dumps(result, sort_keys=True))
+          PYCODE
+          # No either-passed fallback: only the explicitly named default mode
+          # qualifies this experiment. The original mode remains separately red.
+          test "$default_status" -eq 0
+      - name: Preserve bounded native GUI observations without candidate binary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hex-native-gui-proof-${{ github.sha }}
+          # Exact allowlist only: fresh isolated profile capture, bounded checker
+          # and diagnostic JSON, source identity. Never upload logs or profiles.
+          path: |
+            hex-gui-proof/original/window.png
+            hex-gui-proof/original/window-visual.json
+            hex-gui-proof/original/window-diagnostic.json
+            hex-gui-proof/original/operation-inspection.json
+            hex-gui-proof/webkit-default/window.png
+            hex-gui-proof/webkit-default/window-visual.json
+            hex-gui-proof/webkit-default/window-diagnostic.json
+            hex-gui-proof/webkit-default/operation-inspection.json
+            hex-gui-proof/mode-results.json
+            hex-gui-proof/source-commit.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Gate built Debian bytes before any public Actions artifact upload
+        id: runtime_distribution_review
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_candidate_artifact == true && github.actor == 'Vado42-chris' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          # No approval file means a deliberate BLOCKED gate. Private-derived
+          # runtime source may not be uploaded just because tests passed.
+          PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify-public-hex-runtime-deb.py --deb "${debs[0]}"
+      - name: Upload candidate package (not installed on Aries)
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.publish_candidate_artifact == true && github.actor == 'Vado42-chris' && steps.package-verification.outcome == 'success' && steps.runtime_distribution_review.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hex-native-plugins-${{ github.sha }}
+          path: |
+            native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb
+            hex-native-plugins.sha256
+            hex-gui-proof/*.png
+            hex-gui-proof/*.json
+            hex-gui-proof/*.log
+            hex-bundle-inspect.json
+            hex-gui-proof/source-commit.txt
+          if-no-files-found: error
+          retention-days: 14

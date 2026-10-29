@@ -1,9 +1,10 @@
 mod chooser;
 mod protocol;
 mod transport;
+mod plugin_onboarding;
 use protocol::InstallerRequest;
 use serde_json::{json, Value};
-use std::{path::PathBuf, sync::{Arc, Mutex}};
+use std::{path::{Path,PathBuf}, sync::{Arc, Mutex}};
 use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 fn bundled_origin(u: &url::Url) -> bool {
@@ -38,9 +39,41 @@ fn window_trace(window:&WebviewWindow, action:&str, direction:Option<&str>, stag
     let size=window.outer_size().ok().map(|p|json!({"width":p.width,"height":p.height}));
     eprintln!("HEX_NATIVE_WINDOW {}",json!({"time_ms":ms,"action":action,"direction":direction,"stage":stage,"command_result":result,"maximized":window.is_maximized().ok(),"fullscreen":window.is_fullscreen().ok(),"position":position,"size":size,"geometry_is_observation_not_drag_success":true}));
 }
+// Fixed numeric/boolean observation, not DOM content or execution authority.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct FrontendDiagnostic {
+    sample: u8,
+    errors: [u8; 5],
+    nodes: [[u16; 4]; 4],
+    root_children: bool,
+    document_visible: bool,
+    raf: bool,
+    shadow: bool,
+}
+impl FrontendDiagnostic {
+    fn valid(&self) -> bool {
+        self.sample < 3 && self.nodes.iter().all(|n|
+            n[0] <= 1 && n[1] <= 16384 && n[2] <= 16384 && n[3] <= 1
+            && (n[0] == 1 || n[1..].iter().all(|v| *v == 0)))
+    }
+}
+static FRONTEND_DIAGNOSTIC_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 #[tauri::command]
-fn native_product_window(window:WebviewWindow, action:String, direction:Option<String>) -> Result<Value,String> {
+fn native_product_window(window:WebviewWindow, action:String, direction:Option<String>, diagnostic:Option<FrontendDiagnostic>) -> Result<Value,String> {
     local_caller(&window)?;
+    if let Some(observation) = diagnostic {
+        if action != "state" || direction.is_some() || !observation.valid() {
+            return Err("INVALID_FRONTEND_DIAGNOSTIC".into());
+        }
+        use std::sync::atomic::Ordering;
+        // Saturating cap avoids floods and wraparound from repeated callers.
+        if FRONTEND_DIAGNOSTIC_COUNT.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
+            |count| (count < 3).then_some(count + 1)).is_ok() {
+            eprintln!("HEX_FRONTEND_DIAGNOSTIC {}", json!(observation));
+        }
+    }
     if action!="resize" && direction.is_some(){return Err("DIRECTION_ONLY_FOR_RESIZE".into())}
     if !["state","drag","minimize","maximize","close","resize"].contains(&action.as_str()){return Err("UNSUPPORTED_WINDOW_ACTION".into())}
     window_trace(&window,&action,direction.as_deref(),"before","not_attempted");
@@ -54,10 +87,86 @@ fn native_product_window(window:WebviewWindow, action:String, direction:Option<S
     result.map_err(|_|"WINDOW_ACTION_FAILED")?;
     Ok(json!({"maximized":window.is_maximized().map_err(|_|"WINDOW_STATE_UNREADABLE")?,"fullscreen":window.is_fullscreen().map_err(|_|"WINDOW_STATE_UNREADABLE")?}))
 }
+/// Read only the two pre-existing local private MCP receipts. The UI receives
+/// booleans/states, never tunnel IDs, secrets, email, IPs, or arbitrary paths.
+fn plugin_receipt(home:&Path, relative:&str) -> Option<Value> {
+    let root=home.canonicalize().ok()?;
+    let path=root.join(relative);
+    let meta=std::fs::symlink_metadata(&path).ok()?;
+    if !meta.is_file() || meta.file_type().is_symlink() || meta.len()>4096 || meta.len()<30 {return None}
+    #[cfg(unix)] {
+        use std::os::unix::fs::MetadataExt;
+        let owner=root.metadata().ok()?;
+        if meta.uid()!=owner.uid() || meta.mode() & 0o077 != 0 || meta.nlink()!=1 {return None}
+    }
+    let content=std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Value>(&content).ok()
+}
+#[tauri::command]
+fn native_plugin_inspect(app:tauri::AppHandle,window:WebviewWindow)->Result<Value,String>{
+    local_caller(&window)?;
+    let home=app.path().home_dir().map_err(|_|"HOME_UNAVAILABLE")?;
+    let aries=plugin_receipt(&home,".local/state/xi-io/agents/aries-private-mcp.current.json");
+    let tunnel=plugin_receipt(&home,".local/state/xi-io/tunnel/activation.current.json");
+    let aries_ok=aries.as_ref().map(|r|
+        r["schema"]=="xiio.mcp.aries-install/v1" &&
+        r["state"]=="ARIES_MCP_STDIO_INSTALLED_READBACK_VERIFIED" &&
+        r["host"]=="aries" &&
+        r["source_blob_sha"]=="1c6210d13fa19394b68de839b453bda8b0d99a2b" &&
+        r["ward_admission"]==false && r["protected_host_execution"]==false
+        && r["tools"].as_array().map(|v|v.iter().any(|x|x=="xiio.host.inspectAries")).unwrap_or(false)
+    ).unwrap_or(false);
+    let tunnel_ok=tunnel.as_ref().map(|r|
+        r["schema"]=="xiio.mcp.tunnel-activation/v1" &&
+        r["state"]=="TUNNEL_LOCAL_CLIENT_READY" &&
+        r["host"]=="aries" &&
+        r["mcp_tool"]=="xiio.host.inspectAries" &&
+        r["chatgpt_plugin_attached"]==false &&
+        r["ward_admission"]==false && r["protected_host_execution"]==false
+    ).unwrap_or(false);
+    Ok(json!({"schema":"xiio.hex.plugin-local-inspection/v1",
+        "aries_mcp":{"state":if aries_ok {"ARIES_MCP_STDIO_INSTALLED_READBACK_VERIFIED"} else {"NOT_VERIFIED"}},
+        "tunnel":{"state":if tunnel_ok {"TUNNEL_LOCAL_CLIENT_READY"} else {"NOT_VERIFIED"},
+                  "live_checked":false},
+        "chatgpt_plugin":"NOT_VERIFIED",
+        "credential_values_read":false,"ward_admission":false,
+        "effect_authority":0}))
+}
+
+/// Inspect existing XI-IO first-party onboarding through installed HEX on
+/// fixed local loopback. The native WebView does not share browser cookies or
+/// bearer credentials: even a response claiming signed-in is not promoted.
+#[tauri::command]
+fn native_plugin_onboarding_current(window:WebviewWindow)->Result<Value,String>{
+    local_caller(&window)?;
+    Ok(plugin_onboarding::read_current())
+}
+
+/// Fixed allowlisted provider links only, initiated by a real local UI click.
+/// A provider login or OpenAI Platform session is never copied into HEX.
+#[tauri::command]
+fn native_plugin_open_provider(window:WebviewWindow,provider:String)->Result<Value,String>{
+    local_caller(&window)?;
+    let url=match provider.as_str(){
+        "chatgpt"=>"https://chatgpt.com/plugins",
+        "openai-platform"=>"https://platform.openai.com/",
+        "inbox"=>"http://127.0.0.1:8791/",
+        _=>return Err("PLUGIN_PROVIDER_NOT_REGISTERED".into()),
+    };
+    let status=std::process::Command::new("xdg-open").arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn().map_err(|_|"PROVIDER_BROWSER_LAUNCH_FAILED")?;
+    // Spawn means only accepted by the OS, never provider authorization.
+    Ok(json!({"state":"EXTERNAL_BROWSER_HANDOFF_ATTEMPTED",
+        "provider":provider,"spawned_pid":status.id(),
+        "authenticated":false,"plugin_attached":false}))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){
     tauri::Builder::default().manage(Arc::new(Mutex::new(())) as transport::Gate)
-        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,chooser::native_select_directory])
+        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,native_plugin_inspect,native_plugin_onboarding_current,native_plugin_open_provider,chooser::native_select_directory])
         .setup(|app|{
             WebviewWindowBuilder::new(app,"hex",WebviewUrl::App("index.html".into()))
                 .title("XI-IO HEX").inner_size(1440.,900.).min_inner_size(720.,480.)
@@ -70,6 +179,17 @@ pub fn run(){
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn frontend_diagnostic_is_fixed_bounded_data() {
+        let value = json!({"sample":0,"errors":[0,0,0,0,0],"nodes":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
+            "root_children":false,"document_visible":true,"raf":false,"shadow":false});
+        let read = |v:Value| serde_json::from_value::<FrontendDiagnostic>(v);
+        assert!(read(value.clone()).unwrap().valid());
+        let mut bad=value.clone(); bad["message"]=json!("not allowed"); assert!(read(bad).is_err());
+        let mut bad=value.clone(); bad["sample"]=json!(3); assert!(!read(bad).unwrap().valid());
+        let mut bad=value.clone(); bad["errors"][0]=json!(256); assert!(read(bad).is_err());
+        let mut bad=value.clone(); bad["nodes"][0]=json!([1,16385,1,1]); assert!(!read(bad).unwrap().valid());
+        let mut bad=value.clone(); bad["nodes"][0]=json!([0,1,1,1]); assert!(!read(bad).unwrap().valid());
+    }
     #[test] fn exact_local_origins_only() {
         for value in ["tauri://localhost/index.html", "http://tauri.localhost/index.html"] {
             assert!(bundled_origin(&url::Url::parse(value).unwrap()));

@@ -13,3 +13,5 @@ native/hex/carrier/src-tauri/target/
 __pycache__/
 *.pyc
 native/hex/carrier/src-tauri/gen/
+native/hex/carrier/runtime-adapter/
+native/hex/carrier/.runtime-adapter-stage-*/

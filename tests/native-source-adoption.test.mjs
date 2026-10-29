@@ -7,14 +7,21 @@ const json=p=>JSON.parse(read(p));
 test('editable native closure uses the root product build and fixed sibling resources',()=>{
  const config=json('native/hex/carrier/src-tauri/tauri.conf.json');
  assert.equal(config.build.frontendDist,'../frontend');
- assert.deepEqual(config.bundle.resources,{'../../adapter/':'adapter/','../../cli-source/':'cli-source/'});
+ assert.deepEqual(config.bundle.resources,{'../runtime-adapter/':'adapter/','../../cli-source/':'cli-source/'});
  assert.match(read('scripts/native-package.mjs'),/join\(root,'dist'\)/);
  assert.match(read('scripts/native-package.mjs'),/pruneBytecode\(adapter\)/);
  for(const p of ['src-tauri/src/protocol.rs','src-tauri/src/transport.rs','src-tauri/src/chooser.rs','src-tauri/Cargo.lock','package-lock.json'])assert.ok(existsSync(new URL('../native/hex/carrier/'+p,import.meta.url)));
 });
 test('new native bindings and regressions are explicit CI denominators',()=>{
  const scripts=json('package.json').scripts,ci=read('.github/workflows/installer-contract.yml');
- for(const name of ['test:bindings','test:source-adoption','test:interaction','native:check'])assert.ok(ci.includes('npm run '+name),name);
+ for(const name of ['test:bindings','test:source-adoption','test:interaction'])assert.ok(ci.includes('npm run '+name),name);
+ // native:build includes native:check's Python and cargo test gates before
+ // packaging; asserting only the old command would reject stronger CI.
+ assert.ok(ci.includes('npm run native:check') || ci.includes('npm run native:build'),'native validation required');
+ const nativePackage=read('scripts/native-package.mjs');
+ assert.match(nativePackage,/if\(mode!=='stage'\)/);
+ assert.match(nativePackage,/run\('cargo',\['test'/);
+ assert.match(nativePackage,/pruneBytecode\(adapter\)/);
  for(const name of ['local-journey','installer-readiness','installer-availability','native-directory'])assert.ok(scripts['test:bindings'].includes(name+'.test.mjs'));
  assert.ok(scripts['test:bindings'].includes('native/hex/adapter/local_steps/local_ai_status.test.mjs'));
  assert.ok(scripts['test:interaction'].includes('native-frame-interaction.test.mjs'));
@@ -85,4 +92,34 @@ test('current seven-file payload and historical repair verifier keep separate ex
  assert.equal(repair.verification_resource.path,'launcher-repair.runtime-integrity.mjs');
  assert.equal(createHash('sha256').update(read(base+repair.verification_resource.path)).digest('hex'),repair.verification_resource.sha256);
  assert.notEqual(repair.verification_resource.sha256,payload.files['src/runtime-integrity.mjs'].sha256);
+});
+
+
+test('uncertain core bundle blocks apply but keeps read-only reconciliation reachable',()=>{
+ const panel=read('src/components/NativeInstallerPanel.tsx');
+ assert.match(panel,/busyRef\.current \|\| \(coreUnknown && request\.action === 'bundle_apply'\)/);
+ assert.match(panel,/action:'bundle_inspect'/);
+ assert.doesNotMatch(panel,/disabled=\{busy \|\| coreUnknown\}[\s\S]{0,180}bundle_inspect/);
+ assert.match(panel,/setCoreUnknown\(\(result\?\.do_not_retry === true && result\?\.phase !== 'INSTALLED_BYTES_VERIFIED'\)/);
+});
+
+// HEX's six-product base is the installer, not a CLI-only add-on. The native
+// Install view must remain reachable for any of the six selected products.
+test('native HEX six-product installer remains visible across every selected suite product',()=>{
+ const app=read('src/App.tsx');
+ const panel=read('src/components/NativeInstallerPanel.tsx');
+ const rust=read('native/hex/carrier/src-tauri/src/protocol.rs');
+ const adapter=read('native/hex/adapter/installer_adapter.py');
+ assert.match(app,/NativeInstallerPanel active=\{visible && perspective === 'auditor' && activeView === 'installer'\}/);
+ assert.doesNotMatch(app,/\['cli', 'bins', 'switchboard'\]\.includes\(selectedTarget\)[^\n]+<NativeInstallerPanel/);
+ for(const action of ['bundle_inspect','bundle_apply']){
+   assert.ok(panel.includes(action));
+   assert.ok(rust.includes('"' + action + '"'));
+   assert.ok(adapter.includes(action));
+ }
+ assert.match(panel,/if \(!active\)[\s\S]{0,160}setCoreApproved\(false\)/);
+ assert.match(panel,/disabled=\{busy \|\| !active \|\| !coreApproved\}/);
+ assert.match(adapter,/BUNDLE_RELEASE_PROFILE_UNPUBLISHED/);
+ assert.match(adapter,/BUNDLE_EXACT_REVIEW_AND_APPROVAL_REQUIRED/);
+ assert.match(panel,/XI-IO core baseline/);
 });

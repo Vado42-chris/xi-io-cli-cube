@@ -85,7 +85,11 @@ test('actual tablet rail and product controls share selected views across the Sh
       assert.doesNotMatch(card.textContent, /Aries|Loki|54509965|verified socket|mutual TLS|409|qualified CLI|D-Bus|background monitors/i);
       await click(card);
       assert.equal(panel(), componentPanel, 'product selection retains actual installer recovery state');
-      assert.equal(Boolean(panel().closest('.hidden')), !['cli', 'bins', 'switchboard'].includes(id));
+      // HEX installs the same six-product baseline regardless of which
+      // catalog card opened the Install tab. Product-specific detail remains
+      // explanatory and cannot hide the actual native bundle installer.
+      assert.equal(Boolean(panel().closest('.hidden')), false, 'core installer remains available for ' + id);
+      assert.match(panel().textContent, /XI-IO core baseline/);
       const reference = [...shadow.querySelectorAll('details')].find(el => el.querySelector('summary')?.textContent.includes('Historical CLI developer reference'));
       assert.ok(reference && !reference.open, 'unrelated old CLI commands are closed historical reference');
       assert.match(reference.textContent, /not the current release or evidence of what is installed/);
