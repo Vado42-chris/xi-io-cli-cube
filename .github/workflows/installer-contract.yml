@@ -156,6 +156,7 @@ jobs:
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
           node --test tests/snap55-desktop.test.mjs
+          python3 -I -B tests/installed-snap55.test.py
           npm run lint
           npm run build
           npm run test:interaction
@@ -164,7 +165,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11 python3-pil
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11 python3-pil at-spi2-core gir1.2-atspi-2.0 python3-gi
           rustup toolchain install 1.99.1 --profile minimal
           rustup default 1.99.1
           npm ci --prefix native/hex/carrier --no-audit --no-fund
@@ -196,6 +197,8 @@ jobs:
           mkdir -p "$work/home" "$work/config" "$work/data" "$work/state" "$work/cache" "$work/runtime" "$work/tmp"
           chmod 0700 "$work"/{home,config,data,state,cache,runtime,tmp}
           export MATHS_WINDOW_WORK="$work"
+          export MATHS_ELF_SHA256="$(cut -d ' ' -f1 maths-installed-elf.sha256)"
+          trap 'for item in maths-interaction.json maths-numeric.png maths-unknown.png; do test ! -f "$work/$item" || cp "$work/$item" "$GITHUB_WORKSPACE/$item"; done' EXIT
           xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash -euo pipefail -c '
             export HOME="$MATHS_WINDOW_WORK/home"
             export XDG_CONFIG_HOME="$MATHS_WINDOW_WORK/config"
@@ -205,6 +208,8 @@ jobs:
             export XDG_RUNTIME_DIR="$MATHS_WINDOW_WORK/runtime"
             export TMPDIR="$MATHS_WINDOW_WORK/tmp"
             export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1
+            # Activate only this disposable session accessibility bus; no user settings.
+            timeout --signal=KILL 5s gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null
             /usr/bin/xi-io-hex-dev >"$MATHS_WINDOW_WORK/stdout.log" 2>"$MATHS_WINDOW_WORK/stderr.log" &
             pid=$!
             trap '\''kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true'\'' EXIT
@@ -256,13 +261,17 @@ jobs:
               tail -n 10 "$MATHS_WINDOW_WORK/visual.err" >&2 2>/dev/null || true
               exit 36
             fi
+            # Keep the already-qualified initial paint even if semantic readback fails.
+            cp "$MATHS_WINDOW_WORK/installed-window.png" "$GITHUB_WORKSPACE/maths-installed-window.png"
+            cp "$MATHS_WINDOW_WORK/visual.json" "$GITHUB_WORKSPACE/maths-installed-window-visual.json"
+            timeout --signal=KILL 110s python3 -I -B "$GITHUB_WORKSPACE/scripts/verify-installed-snap55.py" "$pid" "$window" "$MATHS_ELF_SHA256" "$GITHUB_SHA" "$MATHS_WINDOW_WORK"
             test -e "$MATHS_WINDOW_WORK/home"
           '
           cp "$work/installed-window.png" maths-installed-window.png
           cp "$work/visual.json" maths-installed-window-visual.json
           cp "$work/stderr.log" maths-installed-window.stderr.log
           sha256sum maths-installed-window.png | tee maths-installed-window.sha256
-          printf 'SOURCE=%s\nINSTALLED_WINDOW_OBSERVED=true\nVISIBLE_PIXELS_OBSERVED=true\nSEMANTIC_UI_VERIFIED=false\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nARIES_INSTALL=NOT_PERFORMED\n' "$GITHUB_SHA"
+          printf 'SOURCE=%s\nINSTALLED_WINDOW_OBSERVED=true\nVISIBLE_PIXELS_OBSERVED=true\nSEMANTIC_UI_VERIFIED=true\nNATIVE_MATHS_CLICK_READBACK=VERIFIED\nARIES_INSTALL=NOT_PERFORMED\n' "$GITHUB_SHA"
       - name: Preserve bounded maths/source observations without candidate binary
         if: always()
         uses: actions/upload-artifact@v4
@@ -275,6 +284,9 @@ jobs:
             maths-installed-window.png
             maths-installed-window-visual.json
             maths-installed-window-visual.err
+            maths-interaction.json
+            maths-numeric.png
+            maths-unknown.png
           if-no-files-found: warn
           retention-days: 14
       - name: Gate maths Debian against SAME public runtime distribution policy
@@ -297,3 +309,4 @@ jobs:
             maths-native-deb.sha256
           if-no-files-found: error
           retention-days: 14
+

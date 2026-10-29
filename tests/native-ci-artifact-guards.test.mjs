@@ -166,3 +166,15 @@ test('both retry paths explicitly replace the exact PNG reopened by the checker'
   assert.ok(!native.includes('unittest discover -s tests -p '+file));
  }
  });
+
+
+test('installed Maths evidence explicitly excludes raw profiles, AX trees and private binaries',()=>{
+ const proof=step(maths,'Preserve bounded maths/source observations without candidate binary');
+ const paths=proof.match(/\n          path: \|\n((?:            [^\n]+\n)+)/)[1].trim().split('\n').map(x=>x.trim());
+ assert.deepEqual(paths,['maths-native-deb.sha256','maths-installed-elf.sha256','maths-installed-window.sha256','maths-installed-window.png','maths-installed-window-visual.json','maths-installed-window-visual.err','maths-interaction.json','maths-numeric.png','maths-unknown.png']);
+ const observe=step(maths,'Install actual candidate on disposable Linux and observe running window');
+ assert.match(observe,/timeout --signal=KILL 110s python3 -I -B/);
+ assert.match(observe,/verify-installed-snap55\.py/);
+ assert.doesNotMatch(observe,/execute_script|evaluate_javascript|--remote-debugging/);
+ assert.equal((observe.match(/\/usr\/bin\/xi-io-hex-dev >/g)||[]).length,1);
+});
