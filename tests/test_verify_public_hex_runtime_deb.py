@@ -143,6 +143,8 @@ class RealDebContentGate(unittest.TestCase):
         self.assertIn("inputs.publish_candidate_artifact == true", upload)
         self.assertIn("github.actor == 'Vado42-chris'", upload)
         self.assertIn("steps.runtime_distribution_review.outcome == 'success'", upload)
+        self.assertNotIn("adapter/test_core_bundle_native.py' hex-native-plugins.contents", text)
+        self.assertIn("adapter/kernel/xiio_installer/transaction.py' hex-native-plugins.contents", text)
         self.assertNotIn("always()", upload)
 
     def test_maths_package_has_no_unconditional_binary_artifact_upload(self):
@@ -174,7 +176,7 @@ class RealDebContentGate(unittest.TestCase):
         workflow = (SOURCE.parents[1] / ".github/workflows/native-hex-plugin-candidate.yml")
         text = workflow.read_text(encoding="utf-8")
         self.assertIn("scripts/verify-public-hex-runtime-deb.py --deb", text)
-        self.assertIn("id: runtime-distribution-review", text)
+        self.assertIn("id: runtime_distribution_review", text)
         self.assertIn("default: false", text)
         self.assertNotIn("gh release create", text)
         self.assertNotIn("gh release upload", text)
