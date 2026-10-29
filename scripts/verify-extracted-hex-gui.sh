@@ -2,6 +2,8 @@
 # Reuses PR23's Xvfb native-window observation, without installation or clicks.
 # Run inside an isolated Xvfb/DBus session on the disposable build runner.
 set -Eeuo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+[[ -f "$root/scripts/verify-hex-capture.py" ]] || { echo HEX_CAPTURE_CHECKER_MISSING >&2; exit 69; }
 [[ $# == 2 ]] || { echo 'USAGE: verify-extracted-hex-gui.sh EXTRACTED_ROOT PROOF_DIR' >&2; exit 64; }
 payload=$(realpath -- "$1")
 mkdir -p -- "$2"
@@ -72,23 +74,34 @@ for attempt in $(seq 1 60); do
   sleep 0.25
 done
 [[ -n "$window" ]] || fail 82 HEX_EXTRACTED_WINDOW_NOT_OBSERVED
-sleep 2
-same_process || fail 83 HEX_EXTRACTED_PROCESS_IDENTITY_CHANGED_BEFORE_CAPTURE
-[[ "$(xdotool getwindowpid "$window")" == "$app_pid" ]] || fail 84 HEX_WINDOW_OWNER_CHANGED
-[[ "$(xdotool getwindowname "$window")" == 'XI-IO HEX' ]] || fail 84 HEX_WINDOW_TITLE_CHANGED
-scrot -z "$proof/window.png" || fail 85 HEX_CAPTURE_FAILED
-python3 -I -B - "$proof/window.png" <<'PY'
-import pathlib,struct,sys
-b=pathlib.Path(sys.argv[1]).read_bytes()
-assert len(b)>24 and b[:8]==b'\x89PNG\r\n\x1a\n' and b[12:16]==b'IHDR', 'PNG_CAPTURE_INVALID'
-w,h=struct.unpack('>II',b[16:24]); assert w>0 and h>0, 'PNG_DIMENSIONS_INVALID'
-PY
+# Bound prepaint retries: a window handle is not a rendered application.
+# Keep every observation on the exact same validated child PID + window.
+# Reject blank, uniform, transparent and cursor-only PNGs.
+visible=''
+for attempt in $(seq 1 12); do
+  same_process || fail 83 HEX_EXTRACTED_PROCESS_IDENTITY_CHANGED_BEFORE_CAPTURE
+  [[ "$(xdotool getwindowpid "$window")" == "$app_pid" ]] || fail 84 HEX_WINDOW_OWNER_CHANGED
+  [[ "$(xdotool getwindowname "$window")" == 'XI-IO HEX' ]] || fail 84 HEX_WINDOW_TITLE_CHANGED
+  if scrot -z "$proof/window.png"; then
+    if python3 -I -B "$root/scripts/verify-hex-capture.py" "$proof/window.png" > "$proof/window-visual.json" 2> "$proof/window-visual.err"; then
+      visible=yes
+      break
+    fi
+  fi
+  sleep 0.35
+done
+[[ "$visible" == yes ]] || fail 85 HEX_CAPTURE_BLANK_OR_PREPAINT
 [[ "$(cat "$profile/home/sentinel.txt")" == 'isolated sentinel' ]] || fail 86 HEX_PROFILE_SENTINEL_CHANGED
 same_process || fail 83 HEX_EXTRACTED_PROCESS_IDENTITY_CHANGED_AFTER_CAPTURE
 python3 -I -B - "$proof" "$exe" "$app_pid" "$window" "$app_identity" <<'PY'
 import hashlib,json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); exe=pathlib.Path(sys.argv[2]); shot=p/'window.png'
+visual=json.loads((p/'window-visual.json').read_text())
+assert visual['schema']=='xiio.hex.capture-nonblank/v1'
+assert visual['screenshot_sha256']==hashlib.sha256(shot.read_bytes()).hexdigest(), 'CAPTURE_CHANGED_AFTER_QUALIFICATION'
+assert visual['semantic_ui_verified'] is False
 r={'schema':'xiio.hex.extracted-package-gui-smoke/v1','state':'EXTRACTED_PACKAGE_GUI_SMOKE',
+   'visual_quality':visual, 'visible_pixels_observed':True,
    'pid':int(sys.argv[3]),'process_identity':sys.argv[5],
    'window_id':sys.argv[4],'window_title':'XI-IO HEX',
    'native_elf_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),
