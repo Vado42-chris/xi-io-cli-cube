@@ -20,6 +20,7 @@ on:
       - 'tests/native-source-adoption.test.mjs'
       - 'tests/hex-plugin-catalog.test.mjs'
       - 'tests/native-release-identity.test.mjs'
+      - 'tests/native-runtime-adapter-stage.test.mjs'
       - 'scripts/verify-public-hex-runtime-deb.py'
       - 'tests/test_verify_public_hex_runtime_deb.py'
       - 'tests/native-plugin-ui-contract.test.mjs'
@@ -79,6 +80,7 @@ jobs:
           npm run lint
           npm run build
           npm run test:interaction
+          node --test tests/native-runtime-adapter-stage.test.mjs
           test -f dist/index.html
           grep -Rq 'data-native-hex-plugins' dist/assets
           echo FRESH_PLUGIN_FRONTEND_INCLUDED
