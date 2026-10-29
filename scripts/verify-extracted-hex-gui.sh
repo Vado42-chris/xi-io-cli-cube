@@ -84,19 +84,36 @@ done
 # Bound prepaint retries: a window handle is not a rendered application.
 # Keep every observation on the exact same validated child PID + window.
 # Reject blank, uniform, transparent and cursor-only PNGs.
+# All capture tools share the remaining observation budget, including decoding.
+capture_command() {
+  local budget=$1 remaining=$((deadline - SECONDS)); shift
+  (( remaining > 0 )) || return 124
+  (( budget <= remaining )) || budget=$remaining
+  timeout --signal=KILL "${budget}s" "$@"
+}
 visible=''
 for attempt in $(seq 1 12); do
   (( SECONDS < deadline )) || fail 82 HEX_GUI_OBSERVATION_DEADLINE
   same_process || fail 83 HEX_EXTRACTED_PROCESS_IDENTITY_CHANGED_BEFORE_CAPTURE
-  [[ "$(timeout -k 1 2 xdotool getwindowpid "$window")" == "$app_pid" ]] || fail 84 HEX_WINDOW_OWNER_CHANGED
-  [[ "$(timeout -k 1 2 xdotool getwindowname "$window")" == 'XI-IO HEX' ]] || fail 84 HEX_WINDOW_TITLE_CHANGED
-  if timeout -k 1 3 scrot -z "$proof/window.png"; then
-    if python3 -I -B "$root/scripts/verify-hex-capture.py" "$proof/window.png" > "$proof/window-visual.json" 2> "$proof/window-visual.err"; then
+  [[ "$(capture_command 2 xdotool getwindowpid "$window")" == "$app_pid" ]] || fail 84 HEX_WINDOW_OWNER_CHANGED
+  [[ "$(capture_command 2 xdotool getwindowname "$window")" == 'XI-IO HEX' ]] || fail 84 HEX_WINDOW_TITLE_CHANGED
+  if capture_command 3 scrot -z "$proof/window.png"; then
+    if capture_command 3 python3 -I -B "$root/scripts/verify-hex-capture.py" "$proof/window.png" > "$proof/window-visual.json" 2> "$proof/window-visual.err"; then
+      (( SECONDS < deadline )) || fail 82 HEX_GUI_OBSERVATION_DEADLINE
       visible=yes
       break
     fi
   fi
-  sleep 0.35
+  # Spread remaining attempts across the actual budget, reserving up to 3 seconds for
+  # the last capture/check. Fast black frames must not exhaust all 12 in seconds.
+  slots=$((12 - attempt))
+  remaining=$((deadline - SECONDS))
+  if (( slots > 0 && remaining > 3 )); then
+    delay=$(((remaining - 3) / slots))
+    if (( delay > 0 )); then
+      capture_command "$remaining" sleep "$delay" || fail 82 HEX_GUI_OBSERVATION_DEADLINE
+    fi
+  fi
 done
 [[ "$visible" == yes ]] || fail 85 HEX_CAPTURE_BLANK_OR_PREPAINT
 [[ "$(cat "$profile/home/sentinel.txt")" == 'isolated sentinel' ]] || fail 86 HEX_PROFILE_SENTINEL_CHANGED
