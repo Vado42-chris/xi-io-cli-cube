@@ -93,8 +93,31 @@ class GateTests(unittest.TestCase):
         with patch.object(GATE.os, 'readlink', side_effect=['net:[1]', 'net:[1]']):
             with self.assertRaisesRegex(GATE.GateFailure, 'OFFLINE_NAMESPACE_MISSING'):
                 GATE.require_isolated_network()
-        with patch.object(GATE.os, 'readlink', side_effect=['net:[2]', 'net:[1]']):
+        with patch.object(GATE.os, 'readlink', side_effect=['net:[2]', 'net:[1]']), \
+             patch.object(GATE.os, 'listdir', return_value=['lo']):
             self.assertEqual(GATE.require_isolated_network(), 'net:[2]')
+
+    def test_offline_interface_presence_fails(self):
+        with patch.object(GATE.os, 'readlink', side_effect=['net:[2]', 'net:[1]']), \
+             patch.object(GATE.os, 'listdir', return_value=['lo','eth0']):
+            with self.assertRaisesRegex(GATE.GateFailure, 'OFFLINE_INTERFACE_PRESENT'):
+                GATE.require_isolated_network()
+
+    def test_signed_out_home_must_be_isolated(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            for directory in ('home', 'config', 'data', 'state', 'cache', 'runtime'):
+                (root / directory).mkdir()
+            env = {'MATHS_WINDOW_WORK': str(root), 'HOME': str(root / 'home'),
+                   'XDG_CONFIG_HOME': str(root / 'config'),
+                   'XDG_DATA_HOME': str(root / 'data'),
+                   'XDG_STATE_HOME': str(root / 'state'),
+                   'XDG_CACHE_HOME': str(root / 'cache'),
+                   'XDG_RUNTIME_DIR': str(root / 'runtime')}
+            GATE.require_isolated_profile(env)
+            env['HOME'] = str(root)
+            with self.assertRaisesRegex(GATE.GateFailure, 'MATHS_SIGNED_OUT_PROFILE_UNVERIFIED'):
+                GATE.require_isolated_profile(env)
 
     def test_source_sha_must_be_exact(self):
         for value in ('', 'a'*39, 'z'*40, 'a'*41):
@@ -117,7 +140,8 @@ class GateTests(unittest.TestCase):
             psha = root / 'pkg.sha256'; psha.write_text(GATE.sha256(package) + ' pkg.deb\n')
             esha = root / 'elf.sha256'; esha.write_text(GATE.sha256(exe) + ' elf\n')
             visual = root / 'missing.json'; receipt = root / 'receipt.json'
-            with patch.object(GATE, 'require_isolated_network', return_value='net:[test]'):
+            with patch.object(GATE, 'require_isolated_network', return_value='net:[test]'), \
+                 patch.object(GATE, 'require_isolated_profile'):
                 code = GATE.main([
                     '--source', 'a'*40, '--package', str(package), '--package-sha-file', str(psha),
                     '--executable', str(exe), '--elf-sha-file', str(esha),
