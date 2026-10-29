@@ -23,7 +23,7 @@
       "appimage"
     ],
     "resources": {
-      "../../adapter/": "adapter/",
+      "../runtime-adapter/": "adapter/",
       "../../cli-source/": "cli-source/"
     },
     "linux": {
