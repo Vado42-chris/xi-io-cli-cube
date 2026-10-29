@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_candidate_artifact:
+        description: 'Explicit owner-reviewed public HEX candidate upload, not a release or installation'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -212,18 +218,35 @@ jobs:
           cp "$work/stderr.log" maths-installed-window.stderr.log
           sha256sum maths-installed-window.png | tee maths-installed-window.sha256
           printf 'SOURCE=%s\nINSTALLED_WINDOW_OBSERVED=true\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nARIES_INSTALL=NOT_PERFORMED\n' "$GITHUB_SHA"
-      - name: Preserve package and source-bound hosted acceptance receipts
+      - name: Preserve bounded maths/source observations without candidate binary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hex-snap55-hosted-native-${{ github.sha }}
+          name: hex-snap55-hosted-proof-${{ github.sha }}
           path: |
-            native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb
             maths-native-deb.sha256
             maths-installed-elf.sha256
             maths-installed-window.sha256
             maths-installed-window.png
-            maths-installed-window.stderr.log
-            maths-deb.contents
           if-no-files-found: warn
+          retention-days: 14
+      - name: Gate maths Debian against SAME public runtime distribution policy
+        id: maths_distribution_review
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_candidate_artifact == true && github.actor == 'Vado42-chris' }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          sha256sum --check maths-native-deb.sha256
+          PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify-public-hex-runtime-deb.py --deb "${debs[0]}"
+      - name: Upload exact owner-approved maths candidate only on explicit manual dispatch
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.publish_candidate_artifact == true && github.actor == 'Vado42-chris' && steps.maths_distribution_review.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hex-snap55-owner-reviewed-candidate-${{ github.sha }}
+          path: |
+            native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb
+            maths-native-deb.sha256
+          if-no-files-found: error
           retention-days: 14
