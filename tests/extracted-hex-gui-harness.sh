@@ -55,7 +55,10 @@ else:
     if case=='cursor':
         ImageDraw.Draw(picture).rectangle((20,20,30,40),fill='white')
     elif case not in ('black','white') and not (case=='delayed_paint' and count<3):
-        ImageDraw.Draw(picture).rectangle((100,100,700,500),fill='white')
+        painter=ImageDraw.Draw(picture)
+        painter.rectangle((100,100,700,500),fill=(240,240,240))
+        for i,shade in enumerate((24,48,72,96,120,144,168,192)):
+            painter.rectangle((125,125+33*i,660,140+33*i),fill=(shade,shade,shade))
 picture.save(path)
 PY
 SH

@@ -17,6 +17,14 @@ CAPTURE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CAPTURE)
 
 
+def paint_fixture_ui(image):
+    painter = ImageDraw.Draw(image)
+    painter.rectangle((100, 100, 700, 500), fill=(240, 240, 240))
+    for i, shade in enumerate((24, 48, 72, 96, 120, 144, 168, 192)):
+        painter.rectangle((125, 125 + 33*i, 660, 140 + 33*i),
+                          fill=(shade, shade, shade))
+
+
 class Capture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -54,16 +62,34 @@ class Capture(unittest.TestCase):
 
     def test_deliberately_painted_visual_is_observed_not_accepted_semantically(self):
         image = Image.new("RGB", (800, 600), "black")
-        ImageDraw.Draw(image).rectangle((100, 100, 700, 500), fill="white")
+        paint_fixture_ui(image)
         image.save(self.file)
         result = CAPTURE.inspect(self.file)
         self.assertEqual(result["schema"], "xiio.hex.capture-nonblank/v1")
         self.assertEqual(result["width"], 800)
         self.assertEqual(result["height"], 600)
         self.assertGreater(result["non_dominant_luma_pixels"], 10000)
+        self.assertGreater(result["distinct_visible_luma_bins"], 8)
         self.assertEqual(result["screenshot_sha256"], hashlib.sha256(self.file.read_bytes()).hexdigest())
         self.assertFalse(result["semantic_ui_verified"])
         self.assertFalse(result["selected_window_pixels_verified"])
+
+    def test_exact_false_green_two_color_window_is_rejected(self):
+        # 1600x1000 hosted artefact: 1,296,000 pale + 304,000 black pixels,
+        # no controls or text; it passed the earlier minority-pixel threshold.
+        image = Image.new("RGB", (1600, 1000), "black")
+        ImageDraw.Draw(image).rectangle((0, 0, 1349, 959),
+                                       fill=(246, 245, 244))
+        image.save(self.file)
+        self.rejected("PNG_FLAT_FRAME_NO_UI_TEXTURE")
+
+    def test_three_flat_painted_bands_are_not_application_ui(self):
+        image = Image.new("RGB", (800, 600), "black")
+        painter = ImageDraw.Draw(image)
+        painter.rectangle((50, 50, 750, 300), fill=(100, 100, 100))
+        painter.rectangle((50, 301, 750, 550), fill=(200, 200, 200))
+        image.save(self.file)
+        self.rejected("PNG_FLAT_FRAME_NO_UI_TEXTURE")
 
     def test_malformed_truncated_and_empty(self):
         self.image()
@@ -105,7 +131,7 @@ class Capture(unittest.TestCase):
 
     def test_visible_capture_byte_hash_distinguishes_generations(self):
         a = Image.new("RGB", (800, 600), "black")
-        ImageDraw.Draw(a).rectangle((100, 100, 700, 500), fill="white")
+        paint_fixture_ui(a)
         a.save(self.file)
         first = CAPTURE.inspect(self.file)["screenshot_sha256"]
         ImageDraw.Draw(a).rectangle((200, 200, 600, 400), fill="#777777")

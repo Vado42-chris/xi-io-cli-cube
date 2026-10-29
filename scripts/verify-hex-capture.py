@@ -54,12 +54,19 @@ def inspect(file):
     minority = pixels - max(histogram)
     if minority * 200 <= pixels:
         raise ValueError("PNG_BLANK_OR_PREPAINT")
+    # A flat two-tone rectangle is still an unpainted window. A prior
+    # physical hosted screenshot had exactly two luma bins and falsely passed.
+    # This is a low-complexity rejection, NOT semantic application acceptance.
+    visible_bins = sum(1 for count in histogram if count)
+    if visible_bins < 8:
+        raise ValueError("PNG_FLAT_FRAME_NO_UI_TEXTURE")
     return {
         "schema": "xiio.hex.capture-nonblank/v1",
         "width": w,
         "height": h,
         "screenshot_sha256": hashlib.sha256(raw).hexdigest(),
         "non_dominant_luma_pixels": minority,
+        "distinct_visible_luma_bins": visible_bins,
         "capture_scope": "entire-isolated-display",
         "selected_window_pixels_verified": False,
         "semantic_ui_verified": False,
