@@ -111,6 +111,25 @@ jobs:
           grep -Fq 'adapter/child_bundle.py' hex-native-plugins.contents
           grep -Fq 'adapter/kernel/xiio_installer/transaction.py' hex-native-plugins.contents
           grep -Fq 'adapter/installer_adapter.py' hex-native-plugins.contents
+          # Independently inspect the actual Debian payload even on ordinary
+          # source pushes. This is runtime-content evidence, not publication.
+          python3 -B - "\${debs[0]}" <<'PY'
+          import importlib.util, pathlib, subprocess, sys
+          source = pathlib.Path("scripts/verify-public-hex-runtime-deb.py")
+          spec = importlib.util.spec_from_file_location("hex_runtime_gate", source)
+          gate = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(gate)
+          p = subprocess.run(["dpkg-deb","--fsys-tarfile",sys.argv[1]],
+                             capture_output=True, check=True, timeout=30)
+          scan = gate.scan_tar(p.stdout)
+          assert scan["adapter_count"] == 15, "REDUCED_ADAPTER_COUNT_MISMATCH"
+          assert not scan["development_files"], "DEVELOPMENT_FILE_IN_DEBIAN"
+          assert not scan["unsafe_files"], "UNSAFE_SOURCE_MEMBER_IN_DEBIAN"
+          assert scan["cli_files"], "REQUIRED_CLI_RUNTIME_MISSING"
+          print("DEBIAN_STAGED_ADAPTER_RUNTIME_15_OF_15")
+          print("DEVELOPMENT_RESOURCES_EXCLUDED")
+          print("PRIVATE_CLI_DISTRIBUTION_APPROVAL_STILL_REQUIRED")
+          PY
           grep -Rq 'bundle_inspect' src/components/NativeInstallerPanel.tsx
           printf '%s  %s\n' "$(sha256sum "${debs[0]}" | cut -d' ' -f1)" "${debs[0]}" > hex-native-plugins.sha256
           echo PACKAGE_SOURCE_HEAD="${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
