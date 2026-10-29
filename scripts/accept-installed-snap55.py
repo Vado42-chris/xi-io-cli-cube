@@ -213,14 +213,14 @@ def click_control(node, code):
 
 
 def set_editor(editor, source, window):
+    # Xvfb has no window manager; EWMH windowactivate/getactivewindow may lie.
+    # Focus the exact X11 window with XSetInputFocus, THEN the real editor.
+    invoke_xdotool('windowfocus', '--sync', str(window))
     try:
         if not editor.queryComponent().grabFocus():
             fail('MATHS_EDITOR_NOT_FOCUSABLE')
     except (AttributeError, RuntimeError, NotImplementedError):
         fail('MATHS_EDITOR_NOT_FOCUSABLE')
-    invoke_xdotool('windowactivate', '--sync', str(window))
-    if invoke_xdotool('getactivewindow') != str(window):
-        fail('MATHS_WINDOW_FOCUS_CHANGED')
     invoke_xdotool('key', '--clearmodifiers', 'ctrl+a')
     # Real X11 keyboard events; AT-SPI EditText may claim success without React
     # input events. Never use a DOM setter or calculator to spoof interaction.
