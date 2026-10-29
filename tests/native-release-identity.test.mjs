@@ -26,7 +26,7 @@ test('one distinct DEV10 identity across the actual source-built Debian carrier'
 });
 
 test('the exact native payload keeps only existing adapter and CLI resources',()=>{
-  assert.deepEqual(Object.keys(config.bundle.resources).sort(),['../../adapter/','../../cli-source/']);
+  assert.deepEqual(Object.keys(config.bundle.resources).sort(),['../../cli-source/','../runtime-adapter/']);
   assert.equal(config.bundle.active,true);
   assert.ok(config.bundle.targets.includes('deb'));
   assert.match(config.bundle.longDescription,/six exact owner-published payloads/);
