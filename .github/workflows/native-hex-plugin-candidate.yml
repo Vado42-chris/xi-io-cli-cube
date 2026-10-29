@@ -134,7 +134,7 @@ jobs:
           printf '%s\n' "${GITHUB_SHA}" > hex-gui-proof/source-commit.txt
           xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof"
       - name: Gate built Debian bytes before any public Actions artifact upload
-        id: runtime-distribution-review
+        id: runtime_distribution_review
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_candidate_artifact == true && github.actor == 'Vado42-chris' }}
         shell: bash
         run: |
@@ -146,7 +146,7 @@ jobs:
           # runtime source may not be uploaded just because tests passed.
           PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify-public-hex-runtime-deb.py --deb "${debs[0]}"
       - name: Upload candidate package (not installed on Aries)
-        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.publish_candidate_artifact == true && github.actor == 'Vado42-chris' && steps.package-verification.outcome == 'success' && steps.runtime-distribution-review.outcome == 'success' }}
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.publish_candidate_artifact == true && github.actor == 'Vado42-chris' && steps.package-verification.outcome == 'success' && steps.runtime_distribution_review.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: hex-native-plugins-${{ github.sha }}
