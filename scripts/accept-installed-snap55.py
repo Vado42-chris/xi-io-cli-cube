@@ -63,7 +63,25 @@ def require_isolated_network(proc=pathlib.Path('/proc')):
         fail('OFFLINE_NAMESPACE_UNVERIFIED')
     if own == host:
         fail('OFFLINE_NAMESPACE_MISSING')
+    try:
+        interfaces = set(os.listdir('/sys/class/net'))
+    except OSError:
+        fail('OFFLINE_INTERFACES_UNVERIFIED')
+    if interfaces != {'lo'}:
+        fail('OFFLINE_INTERFACE_PRESENT')
     return own
+
+
+def require_isolated_profile(env=os.environ):
+    try:
+        root = pathlib.Path(env['MATHS_WINDOW_WORK']).resolve(strict=True)
+        for name, directory in [('HOME', 'home'), ('XDG_CONFIG_HOME', 'config'),
+                                ('XDG_DATA_HOME', 'data'), ('XDG_STATE_HOME', 'state'),
+                                ('XDG_CACHE_HOME', 'cache'), ('XDG_RUNTIME_DIR', 'runtime')]:
+            if pathlib.Path(env[name]).resolve(strict=True) != root / directory:
+                fail('MATHS_SIGNED_OUT_PROFILE_UNVERIFIED')
+    except (KeyError, OSError, ValueError):
+        fail('MATHS_SIGNED_OUT_PROFILE_UNVERIFIED')
 
 
 def validate_hex_sha(value, label):
@@ -276,7 +294,7 @@ def main(argv=None, interact=installed_interaction):
     args = parser.parse_args(argv)
     receipt = pathlib.Path(args.receipt)
     result = {'schema': SOURCE_SCHEMA, 'state': 'FAILED', 'native_interaction_verified': False,
-              'signed_out': True, 'offline': True, 'private_data_used': False,
+              'signed_out': False, 'offline': False, 'private_data_used': False,
               'provider_effect': False, 'ward_grant': False, 'source_commit': args.source,
               'network_namespace_verified': False,
               'package_sha256': None, 'installed_executable_sha256': None,
@@ -291,6 +309,9 @@ def main(argv=None, interact=installed_interaction):
         validate_hex_sha(args.source, 'SOURCE_COMMIT_INVALID')
         require_isolated_network()
         result['network_namespace_verified'] = True
+        result['offline'] = True
+        require_isolated_profile()
+        result['signed_out'] = True
         result['package_sha256'] = sha256(args.package)
         result['installed_executable_sha256'] = sha256(args.executable)
         validate_hash_file(args.package_sha_file, result['package_sha256'], 'PACKAGE_HASH_MISMATCH')
