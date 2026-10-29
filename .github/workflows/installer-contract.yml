@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded PR pushes rather than spending multiple 45-minute Rust builds.
+concurrency:
+  group: xiio-cube-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   source-contract:
     runs-on: ubuntu-latest
@@ -26,6 +31,8 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24.22.1'
+      - name: Reject unsafe binary upload gates before source build
+        run: node --test tests/native-ci-artifact-guards.test.mjs
       - name: Run source/parser regressions and explicitly labeled simulations
         run: |
           npm test
