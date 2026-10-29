@@ -107,7 +107,7 @@ jobs:
           # The GUI is not an accepted product installation without these
           # exact packaged core producer and native IPC resources.
           grep -Fq 'adapter/child_bundle.py' hex-native-plugins.contents
-          grep -Fq 'adapter/test_core_bundle_native.py' hex-native-plugins.contents
+          grep -Fq 'adapter/kernel/xiio_installer/transaction.py' hex-native-plugins.contents
           grep -Fq 'adapter/installer_adapter.py' hex-native-plugins.contents
           grep -Rq 'bundle_inspect' src/components/NativeInstallerPanel.tsx
           printf '%s  %s\n' "$(sha256sum "${debs[0]}" | cut -d' ' -f1)" "${debs[0]}" > hex-native-plugins.sha256
