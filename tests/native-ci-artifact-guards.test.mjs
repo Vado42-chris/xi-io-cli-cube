@@ -51,7 +51,12 @@ test('extracted and installed GUI refuse blank screenshot false-success',()=>{
  assert.match(extract,/HEX_CAPTURE_BLANK_OR_PREPAINT/);
  assert.match(extract,/verify-hex-capture\.py/);
  assert.match(extract,/deadline=\$\(\(SECONDS \+ 60\)\)/);
- assert.match(extract,/timeout -k 1 3 scrot/);
+ assert.match(extract,/capture_command 3 scrot/);
+ assert.match(extract,/capture_command 3 python3 -I -B/);
+ assert.match(extract,/timeout --signal=KILL/);
+ assert.match(extract,/local budget=\$1 remaining=\$\(\(deadline - SECONDS\)\)/);
+ assert.match(extract,/slots=\$\(\(12 - attempt\)\)/);
+ assert.match(extract,/HEX_GUI_OBSERVATION_DEADLINE/);
  assert.match(maths,/HEX_INSTALLED_WINDOW_BLANK_OR_PREPAINT/);
  assert.match(maths,/verify-hex-capture\.py/);
  assert.match(maths,/maths-installed-window-visual\.json/);
