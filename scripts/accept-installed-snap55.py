@@ -10,6 +10,7 @@ from fractions import Fraction
 import hashlib
 import json
 import math
+import os
 import pathlib
 import re
 import subprocess
@@ -50,6 +51,19 @@ def fail(code):
 
 def sha256(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+
+
+def require_isolated_network(proc=pathlib.Path('/proc')):
+    # The native process, AT-SPI and Xvfb must run in a fresh network namespace
+    # without an external interface. Signed-out home alone is not offline proof.
+    try:
+        own = os.readlink(proc / 'self' / 'ns' / 'net')
+        host = os.readlink(proc / '1' / 'ns' / 'net')
+    except OSError:
+        fail('OFFLINE_NAMESPACE_UNVERIFIED')
+    if own == host:
+        fail('OFFLINE_NAMESPACE_MISSING')
+    return own
 
 
 def validate_hex_sha(value, label):
@@ -264,6 +278,7 @@ def main(argv=None, interact=installed_interaction):
     result = {'schema': SOURCE_SCHEMA, 'state': 'FAILED', 'native_interaction_verified': False,
               'signed_out': True, 'offline': True, 'private_data_used': False,
               'provider_effect': False, 'ward_grant': False, 'source_commit': args.source,
+              'network_namespace_verified': False,
               'package_sha256': None, 'installed_executable_sha256': None,
               'visual_receipt_sha256': None, 'cases': [
                   {'input': json.loads(fixed_input(a, b)),
@@ -274,6 +289,8 @@ def main(argv=None, interact=installed_interaction):
               ], 'failure': None}
     try:
         validate_hex_sha(args.source, 'SOURCE_COMMIT_INVALID')
+        require_isolated_network()
+        result['network_namespace_verified'] = True
         result['package_sha256'] = sha256(args.package)
         result['installed_executable_sha256'] = sha256(args.executable)
         validate_hash_file(args.package_sha_file, result['package_sha256'], 'PACKAGE_HASH_MISMATCH')
