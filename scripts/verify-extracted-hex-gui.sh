@@ -49,7 +49,12 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-fail() { printf '%s\n' "$2" >&2; tail -n 80 "$proof/window-stderr.log" >&2 || true; exit "$1"; }
+fail() {
+  printf '%s\n' "$2" >&2
+  # Checker owns the error classification; do not publish arbitrary app stderr.
+  tail -n 15 "$proof/window-visual.err" >&2 2>/dev/null || true
+  exit "$1"
+}
 env -i PATH="$PATH" LANG=C.UTF-8 HOME="$profile/home" \
   XDG_CONFIG_HOME="$profile/config" XDG_DATA_HOME="$profile/data" \
   XDG_STATE_HOME="$profile/state" XDG_CACHE_HOME="$profile/cache" \

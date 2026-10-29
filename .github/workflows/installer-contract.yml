@@ -230,7 +230,15 @@ jobs:
               fi
               sleep 0.35
             done
-            test "$painted" = 1 || { echo HEX_INSTALLED_WINDOW_BLANK_OR_PREPAINT; exit 36; }
+            if [ "$painted" != 1 ]; then
+              # Public CI, isolated user profile only. Preserve the rejected
+              # screenshot and checker code for independent hostile review.
+              cp "$MATHS_WINDOW_WORK/installed-window.png" "$GITHUB_WORKSPACE/maths-installed-window.png" 2>/dev/null || true
+              cp "$MATHS_WINDOW_WORK/visual.err" "$GITHUB_WORKSPACE/maths-installed-window-visual.err" 2>/dev/null || true
+              echo HEX_INSTALLED_WINDOW_BLANK_OR_PREPAINT >&2
+              tail -n 10 "$MATHS_WINDOW_WORK/visual.err" >&2 2>/dev/null || true
+              exit 36
+            fi
             test -e "$MATHS_WINDOW_WORK/home"
           '
           cp "$work/installed-window.png" maths-installed-window.png
@@ -249,6 +257,7 @@ jobs:
             maths-installed-window.sha256
             maths-installed-window.png
             maths-installed-window-visual.json
+            maths-installed-window-visual.err
           if-no-files-found: warn
           retention-days: 14
       - name: Gate maths Debian against SAME public runtime distribution policy
