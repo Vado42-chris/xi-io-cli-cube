@@ -142,8 +142,33 @@ class RealDebContentGate(unittest.TestCase):
         self.assertIn("github.event_name == 'workflow_dispatch'", upload)
         self.assertIn("inputs.publish_candidate_artifact == true", upload)
         self.assertIn("github.actor == 'Vado42-chris'", upload)
-        self.assertIn("steps.runtime-distribution-review.outcome == 'success'", upload)
+        self.assertIn("steps.runtime_distribution_review.outcome == 'success'", upload)
         self.assertNotIn("always()", upload)
+
+    def test_maths_package_has_no_unconditional_binary_artifact_upload(self):
+        workflow = (SOURCE.parents[1] / ".github/workflows/installer-contract.yml")
+        text = workflow.read_text(encoding="utf-8")
+        marker = "      - name: Preserve bounded maths/source observations without candidate binary"
+        self.assertEqual(text.count(marker), 1)
+        old = text.split(marker, 1)[1].split("      - name: Gate maths Debian", 1)[0]
+        self.assertIn("if: always()", old)
+        self.assertNotIn(".deb", old)
+        self.assertNotIn("maths-deb.contents", old)
+        manual = text.split("      - name: Upload exact owner-approved maths candidate", 1)[1]
+        self.assertIn("github.event_name == 'workflow_dispatch'", manual)
+        self.assertIn("inputs.publish_candidate_artifact == true", manual)
+        self.assertIn("github.actor == 'Vado42-chris'", manual)
+        self.assertIn("steps.maths_distribution_review.outcome == 'success'", manual)
+        self.assertNotIn("if: always()", manual)
+
+    def test_both_binary_upload_paths_share_one_package_content_policy(self):
+        main = (SOURCE.parents[1] / ".github/workflows/native-hex-plugin-candidate.yml").read_text()
+        maths = (SOURCE.parents[1] / ".github/workflows/installer-contract.yml").read_text()
+        for workflow in (main, maths):
+            self.assertIn("scripts/verify-public-hex-runtime-deb.py --deb", workflow)
+            self.assertIn("publish_candidate_artifact", workflow)
+            self.assertIn("github.actor == 'Vado42-chris'", workflow)
+            self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
 
     def test_unreviewed_upload_gate_is_separate_from_six_product_release(self):
         workflow = (SOURCE.parents[1] / ".github/workflows/native-hex-plugin-candidate.yml")
