@@ -51,6 +51,16 @@ cleanup() {
 trap cleanup EXIT
 fail() {
   printf '%s\n' "$2" >&2
+  # Separate maximum 5-second read-only diagnostic budget; never changes gate exit.
+  if [[ -n "$app_identity" ]]; then
+    local diagnostic
+    diagnostic=$(timeout --signal=KILL 5 /usr/bin/python3 -I -B "$root/scripts/diagnose-hex-window.py" \
+      "$app_pid" "$app_identity" "${window:-}" "$proof/window-stderr.log" 2>/dev/null) || \
+      diagnostic='{"classification":"DIAGNOSTIC_UNAVAILABLE"}'
+    # Emit only the helper's bounded, allowlisted JSON, never the application log.
+    printf '%s\n' "$diagnostic" > "$proof/window-diagnostic.json"
+    printf 'HEX_GUI_DIAGNOSTIC %s\n' "$diagnostic" >&2
+  fi
   # Checker owns the error classification; do not publish arbitrary app stderr.
   tail -n 15 "$proof/window-visual.err" >&2 2>/dev/null || true
   exit "$1"

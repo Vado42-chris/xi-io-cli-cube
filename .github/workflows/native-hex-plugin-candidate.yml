@@ -12,6 +12,8 @@ on:
       - 'scripts/native-package.mjs'
       - 'scripts/verify-extracted-hex-gui.sh'
       - 'scripts/verify-hex-capture.py'
+      - 'scripts/diagnose-hex-window.py'
+      - 'tests/hex-window-diagnostic.test.py'
       - 'tests/hex-capture.test.py'
       - 'tests/extracted-hex-gui-harness.sh'
       - 'tests/hex-gui-deadline.test.py'
@@ -83,6 +85,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y python3-pil
+          /usr/bin/python3 -I -B tests/hex-window-diagnostic.test.py
           /usr/bin/python3 -B scripts/verify-hex-capture.py --check-decoder
           /usr/bin/python3 -B -m unittest discover -s tests -p hex-capture.test.py -v
           /usr/bin/python3 -B -m unittest discover -s tests -p hex-gui-deadline.test.py -v
