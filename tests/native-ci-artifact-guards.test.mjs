@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {readFileSync} from 'node:fs';
+import {readFileSync,mkdtempSync,mkdirSync,writeFileSync,rmSync,existsSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
 const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
 const native=read('.github/workflows/native-hex-plugin-candidate.yml');
@@ -17,9 +19,13 @@ function step(content,name){
 }
 const selected='"'+'$'+'{debs[0]}"';
 const proofPaths=[
- 'hex-gui-proof/window.png',
- 'hex-gui-proof/window-visual.json',
- 'hex-gui-proof/window-diagnostic.json',
+ 'hex-gui-proof/original/window.png',
+ 'hex-gui-proof/original/window-visual.json',
+ 'hex-gui-proof/original/window-diagnostic.json',
+ 'hex-gui-proof/webkit-default/window.png',
+ 'hex-gui-proof/webkit-default/window-visual.json',
+ 'hex-gui-proof/webkit-default/window-diagnostic.json',
+ 'hex-gui-proof/mode-results.json',
  'hex-gui-proof/source-commit.txt',
 ];
 function assertBoundedNativeProof(content){
@@ -40,8 +46,8 @@ test('automatic native proof upload contains only exact isolated pixel and sanit
    'hex-gui-proof/window-stderr.log','hex-gui-proof/profile.secret/home',
    'native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb',
    'native/hex/cli-source/','hex-bundle-inspect.json']){
-   const mutation=native.replace('            hex-gui-proof/window.png\n',
-     '            hex-gui-proof/window.png\n            '+unsafe+'\n');
+   const mutation=native.replace('            hex-gui-proof/original/window.png\n',
+     '            hex-gui-proof/original/window.png\n            '+unsafe+'\n');
    assert.throws(()=>assertBoundedNativeProof(mutation),undefined,unsafe);
  }
  assert.ok(native.includes('printf \'%s\\n\' "${GITHUB_SHA}" > hex-gui-proof/source-commit.txt'));
@@ -95,4 +101,54 @@ test('extracted and installed GUI refuse blank screenshot false-success',()=>{
  assert.match(maths,/verify-hex-capture\.py/);
  assert.match(maths,/maths-installed-window-visual\.json/);
  assert.ok(native.includes('python3-pil')&&maths.includes('python3-pil'));
+});
+
+test('one exact ELF is compared without silent either-mode acceptance',()=>{
+ const observe=step(native,'Observe extracted package native window in isolated Xvfb');
+ assert.equal((observe.match(/xvfb-run -a/g)||[]).length,2);
+ assert.match(observe,/hex-gui-proof\/original" original/);
+ assert.match(observe,/hex-gui-proof\/webkit-default" webkit-default/);
+ assert.equal((observe.match(/\" = "\$elf_sha"/g)||[]).length,2);
+ assert.match(observe,/test "\$default_status" -eq 0/);
+ assert.doesNotMatch(observe,/original_status.*\|\|.*default_status/);
+ assert.match(observe,/"qualification_environment": "webkit-default"/);
+ assert.match(extract,/case "\$render_mode" in/);
+ assert.match(extract,/HEX_RENDER_MODE_UNSUPPORTED/);
+ assert.match(extract,/GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 "\$\{webkit_environment\[@\]\}"/);
+});
+test('unknown rendering mode is rejected before accessing a payload or profile',()=>{
+ const result=spawnSync('bash',[new URL('../scripts/verify-extracted-hex-gui.sh',import.meta.url).pathname,
+   '/nonexistent-payload','/nonexistent-proof','unreviewed-mode'],{encoding:'utf8',timeout:2000});
+ assert.equal(result.status,64);assert.match(result.stderr,/HEX_RENDER_MODE_UNSUPPORTED/);
+});
+
+test('actual comparison shell preserves both outcomes and refuses changed ELF/default failure',()=>{
+ const observe=step(native,'Observe extracted package native window in isolated Xvfb');
+ const section=observe.slice(observe.indexOf('          elf_sha=')).split('\n').map(line=>line.replace(/^          /,'')).join('\n');
+ for(const [original,normal,mutate,expected] of [[85,0,false,0],[0,85,false,1],[0,0,true,1]]){
+  const dir=mkdtempSync(join(tmpdir(),'hex-mode-test-'));
+  try {
+   mkdirSync(join(dir,'bin'));mkdirSync(join(dir,'payload/usr/bin'),{recursive:true});mkdirSync(join(dir,'hex-gui-proof'));
+   writeFileSync(join(dir,'payload/usr/bin/xi-io-hex-dev'),'SYNTHETIC_ELF_SENTINEL');
+   writeFileSync(join(dir,'bin/xvfb-run'),`#!/bin/bash
+mode=\"\${@: -1}\"
+printf '%s\\n' \"$mode\" >> \"$MODE_CALLS\"
+if [[ \"$MUTATE_ELF\" == yes && \"$mode\" == original ]]; then printf changed >> \"$PAYLOAD_FILE\"; fi
+if [[ \"$mode\" == original ]]; then exit \"$ORIGINAL_STATUS\"; else exit \"$DEFAULT_STATUS\"; fi
+`,{mode:0o755});
+   const result=spawnSync('bash',['-euo','pipefail','-c','payload="$PWD/payload"\n'+section],
+    {cwd:dir,encoding:'utf8',timeout:5000,env:{...process.env,PATH:join(dir,'bin')+':'+process.env.PATH,
+      GITHUB_SHA:'a'.repeat(40),ORIGINAL_STATUS:String(original),DEFAULT_STATUS:String(normal),
+      MUTATE_ELF:mutate?'yes':'no',PAYLOAD_FILE:join(dir,'payload/usr/bin/xi-io-hex-dev'),MODE_CALLS:join(dir,'calls')}});
+   assert.equal(result.status,expected,result.stdout+result.stderr);
+   if(mutate){assert.equal(existsSync(join(dir,'hex-gui-proof/mode-results.json')),false);assert.equal(readFileSync(join(dir,'calls'),'utf8'),'original\n');}
+   else {
+    const receipt=JSON.parse(readFileSync(join(dir,'hex-gui-proof/mode-results.json'),'utf8'));
+    assert.deepEqual(receipt.mode_exit_codes,{original,'webkit-default':normal});
+    assert.equal(receipt.qualification_environment,'webkit-default');assert.equal(receipt.qualification_passed,normal===0);
+    assert.equal(receipt.original_environment_qualified,original===0);
+    assert.equal(receipt.semantic_ui_verified,false);assert.equal(receipt.installed_package,false);
+   }
+  } finally {rmSync(dir,{recursive:true,force:true});}
+ }
 });

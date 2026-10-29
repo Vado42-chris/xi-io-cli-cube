@@ -91,12 +91,14 @@ for case in $cases; do
   mkdir "$work/$case"
   set +e
   env PATH="$work/bin:/usr/bin:/bin" MOCK_ROOT="$work" MOCK_CASE="$case" MOCK_PYTHON_BIN="$real_python" DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=unix:path=/fake \
-    WEBKIT_DISABLE_DMABUF_RENDERER=0 WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 WEBKIT_FORCE_SANDBOX=0 \
-    bash "$root/scripts/verify-extracted-hex-gui.sh" "$work/payload" "$work/$case" > "$work/$case/test.log" 2>&1
+    WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 WEBKIT_FORCE_SANDBOX=0 \
+    bash "$root/scripts/verify-extracted-hex-gui.sh" "$work/payload" "$work/$case" "${GUI_HARNESS_RENDER_MODE:-original}" > "$work/$case/test.log" 2>&1
   status=$?
   set -e
   if [[ "$case" != early_exit ]]; then
-    grep -qx 'RENDER_ENV:x11:1:1:1' "$work/$case/window-stdout.log"
+    expected='RENDER_ENV:x11:1:1:1'
+    [[ "${GUI_HARNESS_RENDER_MODE:-original}" != webkit-default ]] || expected='RENDER_ENV:x11:1:unset:unset'
+    grep -qx "$expected" "$work/$case/window-stdout.log"
     grep -qx 'SANDBOX_ENV:unset:unset' "$work/$case/window-stdout.log"
   fi
   if [[ "$case" == ok || "$case" == delayed_paint ]]; then
@@ -105,6 +107,7 @@ for case in $cases; do
     "$real_python" - "$work/$case/run-manifest.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))
+assert r['render_mode'] == __import__('os').environ.get('GUI_HARNESS_RENDER_MODE','original')
 assert r['visible_pixels_observed'] is True
 assert r['visual_quality']['semantic_ui_verified'] is False
 assert r['visual_quality']['selected_window_pixels_verified'] is False

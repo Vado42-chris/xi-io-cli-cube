@@ -92,7 +92,9 @@ jobs:
           /usr/bin/python3 -B -m unittest discover -s tests -p hex-gui-deadline.test.py -v
           /usr/bin/python3 -B -m unittest discover -s tests -p gui-render-budget.test.py -v
       - name: Check extracted GUI smoke harness without launching a desktop
-        run: bash tests/extracted-hex-gui-harness.sh
+        run: |
+          bash tests/extracted-hex-gui-harness.sh
+          GUI_HARNESS_RENDER_MODE=webkit-default bash tests/extracted-hex-gui-harness.sh
       - name: Install exact frontend build dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Check TypeScript and source-owned frontend
@@ -173,7 +175,36 @@ jobs:
           python3 -c 'import json; r=json.load(open("hex-bundle-inspect.json")); assert r["ok"] is True; assert r["result"]["phase"] in ("BLOCKED_RELEASE_PROFILE_UNPUBLISHED","REVIEW_REQUIRED","RECONCILED_NOT_INSTALLED","INSTALLED_BYTES_VERIFIED"); assert r["result"].get("authority_granted") is False; print(r["result"]["phase"])'
           mkdir -p hex-gui-proof
           printf '%s\n' "${GITHUB_SHA}" > hex-gui-proof/source-commit.txt
-          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof"
+          # Compare one already-built ELF, not different generations. Both modes
+          # retain isolated HOME/XDG, sandbox defaults and the same pixel gate.
+          elf_sha=$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)
+          set +e
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof/original" original
+          original_status=$?
+          set -e
+          test "$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = "$elf_sha"
+          set +e
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof/webkit-default" webkit-default
+          default_status=$?
+          set -e
+          test "$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = "$elf_sha"
+          python3 -I -B - "$GITHUB_SHA" "$elf_sha" "$original_status" "$default_status" <<'PYCODE'
+          import json, pathlib, re, sys
+          source, elf, original, default = sys.argv[1:]
+          assert re.fullmatch('[0-9a-f]{40}', source) and re.fullmatch('[0-9a-f]{64}', elf)
+          modes = {"original": int(original), "webkit-default": int(default)}
+          result = {"schema": "xiio.hex.render-comparison/v1", "source_commit": source,
+                    "native_elf_sha256": elf, "same_elf_before_after": True,
+                    "mode_exit_codes": modes, "qualification_environment": "webkit-default",
+                    "qualification_passed": modes["webkit-default"] == 0,
+                    "original_environment_qualified": modes["original"] == 0,
+                    "semantic_ui_verified": False, "installed_package": False}
+          pathlib.Path('hex-gui-proof/mode-results.json').write_text(json.dumps(result, indent=2)+'\n')
+          print(json.dumps(result, sort_keys=True))
+          PYCODE
+          # No either-passed fallback: only the explicitly named default mode
+          # qualifies this experiment. The original mode remains separately red.
+          test "$default_status" -eq 0
       - name: Preserve bounded native GUI observations without candidate binary
         if: always()
         uses: actions/upload-artifact@v4
@@ -182,9 +213,13 @@ jobs:
           # Exact allowlist only: fresh isolated profile capture, bounded checker
           # and diagnostic JSON, source identity. Never upload logs or profiles.
           path: |
-            hex-gui-proof/window.png
-            hex-gui-proof/window-visual.json
-            hex-gui-proof/window-diagnostic.json
+            hex-gui-proof/original/window.png
+            hex-gui-proof/original/window-visual.json
+            hex-gui-proof/original/window-diagnostic.json
+            hex-gui-proof/webkit-default/window.png
+            hex-gui-proof/webkit-default/window-visual.json
+            hex-gui-proof/webkit-default/window-diagnostic.json
+            hex-gui-proof/mode-results.json
             hex-gui-proof/source-commit.txt
           if-no-files-found: warn
           retention-days: 14

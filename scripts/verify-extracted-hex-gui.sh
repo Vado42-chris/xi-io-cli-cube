@@ -4,7 +4,14 @@
 set -Eeuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [[ -f "$root/scripts/verify-hex-capture.py" ]] || { echo HEX_CAPTURE_CHECKER_MISSING >&2; exit 69; }
-[[ $# == 2 ]] || { echo 'USAGE: verify-extracted-hex-gui.sh EXTRACTED_ROOT PROOF_DIR' >&2; exit 64; }
+[[ $# == 2 || $# == 3 ]] || { echo 'USAGE: verify-extracted-hex-gui.sh EXTRACTED_ROOT PROOF_DIR [original|webkit-default]' >&2; exit 64; }
+render_mode=${3:-original}
+webkit_environment=()
+case "$render_mode" in
+  original) webkit_environment=(WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1);;
+  webkit-default) ;; # Preserve X11/software GL; remove BOTH independent overrides.
+  *) echo HEX_RENDER_MODE_UNSUPPORTED >&2; exit 64;;
+esac
 payload=$(realpath -- "$1")
 mkdir -p -- "$2"
 proof=$(realpath -- "$2")
@@ -65,19 +72,17 @@ fail() {
   tail -n 15 "$proof/window-visual.err" >&2 2>/dev/null || true
   exit "$1"
 }
-# Xvfb has no hardware presentation path. Keep this workaround confined to the
-# disposable runner, not the shipped application or any installed user profile.
-# DMABUF transport is a separate WebKitGTK path from accelerated compositing:
-# https://v2.tauri.app/develop/debug/linux-graphics/
-# A successful IPC call does not prove that either path presented real pixels.
+# WebKitGTK 2.50.4 treats either disable override as a reason to refuse the
+# accelerated backing store. webkit-default tests its normal software-GL path;
+# env -i prevents inherited rendering/sandbox overrides from changing either mode.
+# No setting is changed in the shipped app or any installed user profile.
 env -i PATH="$PATH" LANG=C.UTF-8 HOME="$profile/home" \
   XDG_CONFIG_HOME="$profile/config" XDG_DATA_HOME="$profile/data" \
   XDG_STATE_HOME="$profile/state" XDG_CACHE_HOME="$profile/cache" \
   XDG_RUNTIME_DIR="$profile/runtime" TMPDIR="$profile/tmp" \
   DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-}" \
   DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-  GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 \
-  WEBKIT_DISABLE_DMABUF_RENDERER=1 \
+  GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 "${webkit_environment[@]}" \
   "$exe" > "$proof/window-stdout.log" 2> "$proof/window-stderr.log" &
 app_pid=$!
 app_identity=$(process_identity "$app_pid") || fail 81 HEX_EXTRACTED_PROCESS_IDENTITY_UNAVAILABLE
@@ -134,7 +139,7 @@ done
 [[ "$visible" == yes ]] || fail 85 HEX_CAPTURE_BLANK_OR_PREPAINT
 [[ "$(cat "$profile/home/sentinel.txt")" == 'isolated sentinel' ]] || fail 86 HEX_PROFILE_SENTINEL_CHANGED
 same_process || fail 83 HEX_EXTRACTED_PROCESS_IDENTITY_CHANGED_AFTER_CAPTURE
-python3 -I -B - "$proof" "$exe" "$app_pid" "$window" "$app_identity" <<'PY'
+python3 -I -B - "$proof" "$exe" "$app_pid" "$window" "$app_identity" "$render_mode" <<'PY'
 import hashlib,json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); exe=pathlib.Path(sys.argv[2]); shot=p/'window.png'
 visual=json.loads((p/'window-visual.json').read_text())
@@ -142,7 +147,7 @@ assert visual['schema']=='xiio.hex.capture-nonblank/v1'
 assert visual['screenshot_sha256']==hashlib.sha256(shot.read_bytes()).hexdigest(), 'CAPTURE_CHANGED_AFTER_QUALIFICATION'
 assert visual['semantic_ui_verified'] is False
 r={'schema':'xiio.hex.extracted-package-gui-smoke/v1','state':'EXTRACTED_PACKAGE_GUI_SMOKE',
-   'visual_quality':visual, 'visible_pixels_observed':True,
+   'visual_quality':visual, 'visible_pixels_observed':True, 'render_mode':sys.argv[6],
    'pid':int(sys.argv[3]),'process_identity':sys.argv[5],
    'window_id':sys.argv[4],'window_title':'XI-IO HEX',
    'native_elf_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),
