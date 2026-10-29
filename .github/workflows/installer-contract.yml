@@ -200,7 +200,14 @@ jobs:
           mkdir -p "$work/home" "$work/config" "$work/data" "$work/state" "$work/cache" "$work/runtime" "$work/tmp"
           chmod 0700 "$work"/{home,config,data,state,cache,runtime,tmp}
           export MATHS_WINDOW_WORK="$work"
-          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash -euo pipefail -c '
+          # Fresh network namespace covers the actual installed carrier and WebKit
+          # children, not just the no-login Python calculator. If unavailable, FAIL.
+          sudo unshare --net -- runuser -u "$(id -un)" -- env \
+            MATHS_WINDOW_WORK="$MATHS_WINDOW_WORK" \
+            MATHS_SOURCE_SHA="$MATHS_SOURCE_SHA" \
+            MATHS_DEB_PATH="$MATHS_DEB_PATH" \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash -euo pipefail -c '
             export HOME="$MATHS_WINDOW_WORK/home"
             export XDG_CONFIG_HOME="$MATHS_WINDOW_WORK/config"
             export XDG_DATA_HOME="$MATHS_WINDOW_WORK/data"
