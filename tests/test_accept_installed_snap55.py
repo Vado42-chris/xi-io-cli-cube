@@ -113,7 +113,7 @@ class GateTests(unittest.TestCase):
                 '--source', 'a'*40, '--package', str(package), '--package-sha-file', str(psha),
                 '--executable', str(exe), '--elf-sha-file', str(esha),
                 '--visual', str(visual), '--receipt', str(receipt), '--window', '123'],
-                interact=lambda _: self.fail('the live GUI cannot be called without valid proof'))
+                interact=lambda *_: self.fail('the live GUI cannot be called without valid proof'))
             self.assertEqual(code, 88)
             data = json.loads(receipt.read_text())
             self.assertEqual(data['state'], 'FAILED')
