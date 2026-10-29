@@ -5,6 +5,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 GATE = SourceFileLoader('hex_maths_accept', str(pathlib.Path(__file__).parents[1]
     / 'scripts' / 'accept-installed-snap55.py')).load_module()
@@ -88,6 +89,13 @@ class GateTests(unittest.TestCase):
                         lambda n: n.name == 'SNAP 5.5 input JSON',
                         'MATHS_EDITOR_MISSING', 'MATHS_EDITOR_AMBIGUOUS')
 
+    def test_offline_namespace_must_be_distinct(self):
+        with patch.object(GATE.os, 'readlink', side_effect=['net:[1]', 'net:[1]']):
+            with self.assertRaisesRegex(GATE.GateFailure, 'OFFLINE_NAMESPACE_MISSING'):
+                GATE.require_isolated_network()
+        with patch.object(GATE.os, 'readlink', side_effect=['net:[2]', 'net:[1]']):
+            self.assertEqual(GATE.require_isolated_network(), 'net:[2]')
+
     def test_source_sha_must_be_exact(self):
         for value in ('', 'a'*39, 'z'*40, 'a'*41):
             with self.subTest(value=value), self.assertRaises(GATE.GateFailure):
@@ -109,11 +117,12 @@ class GateTests(unittest.TestCase):
             psha = root / 'pkg.sha256'; psha.write_text(GATE.sha256(package) + ' pkg.deb\n')
             esha = root / 'elf.sha256'; esha.write_text(GATE.sha256(exe) + ' elf\n')
             visual = root / 'missing.json'; receipt = root / 'receipt.json'
-            code = GATE.main([
-                '--source', 'a'*40, '--package', str(package), '--package-sha-file', str(psha),
-                '--executable', str(exe), '--elf-sha-file', str(esha),
-                '--visual', str(visual), '--receipt', str(receipt), '--window', '123'],
-                interact=lambda *_: self.fail('the live GUI cannot be called without valid proof'))
+            with patch.object(GATE, 'require_isolated_network', return_value='net:[test]'):
+                code = GATE.main([
+                    '--source', 'a'*40, '--package', str(package), '--package-sha-file', str(psha),
+                    '--executable', str(exe), '--elf-sha-file', str(esha),
+                    '--visual', str(visual), '--receipt', str(receipt), '--window', '123'],
+                    interact=lambda *_: self.fail('the live GUI cannot be called without valid proof'))
             self.assertEqual(code, 88)
             data = json.loads(receipt.read_text())
             self.assertEqual(data['state'], 'FAILED')
