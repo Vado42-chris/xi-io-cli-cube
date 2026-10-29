@@ -65,6 +65,11 @@ fail() {
   tail -n 15 "$proof/window-visual.err" >&2 2>/dev/null || true
   exit "$1"
 }
+# Xvfb has no hardware presentation path. Keep this workaround confined to the
+# disposable runner, not the shipped application or any installed user profile.
+# DMABUF transport is a separate WebKitGTK path from accelerated compositing:
+# https://v2.tauri.app/develop/debug/linux-graphics/
+# A successful IPC call does not prove that either path presented real pixels.
 env -i PATH="$PATH" LANG=C.UTF-8 HOME="$profile/home" \
   XDG_CONFIG_HOME="$profile/config" XDG_DATA_HOME="$profile/data" \
   XDG_STATE_HOME="$profile/state" XDG_CACHE_HOME="$profile/cache" \
@@ -72,6 +77,7 @@ env -i PATH="$PATH" LANG=C.UTF-8 HOME="$profile/home" \
   DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-}" \
   DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
   GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 \
+  WEBKIT_DISABLE_DMABUF_RENDERER=1 \
   "$exe" > "$proof/window-stdout.log" 2> "$proof/window-stderr.log" &
 app_pid=$!
 app_identity=$(process_identity "$app_pid") || fail 81 HEX_EXTRACTED_PROCESS_IDENTITY_UNAVAILABLE

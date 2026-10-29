@@ -173,6 +173,20 @@ jobs:
           mkdir -p hex-gui-proof
           printf '%s\n' "${GITHUB_SHA}" > hex-gui-proof/source-commit.txt
           xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof"
+      - name: Preserve bounded native GUI observations without candidate binary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hex-native-gui-proof-${{ github.sha }}
+          # Exact allowlist only: fresh isolated profile capture, bounded checker
+          # and diagnostic JSON, source identity. Never upload logs or profiles.
+          path: |
+            hex-gui-proof/window.png
+            hex-gui-proof/window-visual.json
+            hex-gui-proof/window-diagnostic.json
+            hex-gui-proof/source-commit.txt
+          if-no-files-found: warn
+          retention-days: 14
       - name: Gate built Debian bytes before any public Actions artifact upload
         id: runtime_distribution_review
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_candidate_artifact == true && github.actor == 'Vado42-chris' }}

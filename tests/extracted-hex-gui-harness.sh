@@ -10,6 +10,8 @@ real_python=$(command -v python3)
 
 cat > "$work/payload/usr/bin/xi-io-hex-dev" <<'SH'
 #!/bin/sh
+printf 'RENDER_ENV:%s:%s:%s:%s\n' "${GDK_BACKEND-unset}" "${LIBGL_ALWAYS_SOFTWARE-unset}" "${WEBKIT_DISABLE_COMPOSITING_MODE-unset}" "${WEBKIT_DISABLE_DMABUF_RENDERER-unset}"
+printf 'SANDBOX_ENV:%s:%s\n' "${WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS-unset}" "${WEBKIT_FORCE_SANDBOX-unset}"
 exec /bin/sleep 60
 SH
 cat > "$work/bin/xdotool" <<'SH'
@@ -89,9 +91,14 @@ for case in $cases; do
   mkdir "$work/$case"
   set +e
   env PATH="$work/bin:/usr/bin:/bin" MOCK_ROOT="$work" MOCK_CASE="$case" MOCK_PYTHON_BIN="$real_python" DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS=unix:path=/fake \
+    WEBKIT_DISABLE_DMABUF_RENDERER=0 WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 WEBKIT_FORCE_SANDBOX=0 \
     bash "$root/scripts/verify-extracted-hex-gui.sh" "$work/payload" "$work/$case" > "$work/$case/test.log" 2>&1
   status=$?
   set -e
+  if [[ "$case" != early_exit ]]; then
+    grep -qx 'RENDER_ENV:x11:1:1:1' "$work/$case/window-stdout.log"
+    grep -qx 'SANDBOX_ENV:unset:unset' "$work/$case/window-stdout.log"
+  fi
   if [[ "$case" == ok || "$case" == delayed_paint ]]; then
     [ "$status" -eq 0 ] || { cat "$work/$case/test.log"; exit 1; }
     test -s "$work/$case/run-manifest.json"

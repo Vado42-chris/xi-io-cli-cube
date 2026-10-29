@@ -16,6 +16,36 @@ function step(content,name){
  return content.slice(at,end<0?content.length:end);
 }
 const selected='"'+'$'+'{debs[0]}"';
+const proofPaths=[
+ 'hex-gui-proof/window.png',
+ 'hex-gui-proof/window-visual.json',
+ 'hex-gui-proof/window-diagnostic.json',
+ 'hex-gui-proof/source-commit.txt',
+];
+function assertBoundedNativeProof(content){
+ const proof=step(content,'Preserve bounded native GUI observations without candidate binary');
+ assert.match(proof,/if: always\(\)/);
+ assert.match(proof,/uses: actions\/upload-artifact@v4/);
+ const block=proof.match(/\n          path: \|\n((?:            [^\n]+\n)+)/);
+ assert.ok(block,'PROOF_EXPLICIT_PATH_LIST_REQUIRED');
+ assert.deepEqual(block[1].trim().split('\n').map(x=>x.trim()),proofPaths);
+ assert.equal((proof.match(/\n          path:/g)||[]).length,1);
+ assert.doesNotMatch(proof,/include-hidden-files:\s*true/);
+}
+
+test('automatic native proof upload contains only exact isolated pixel and sanitized evidence paths',()=>{
+ assertBoundedNativeProof(native);
+ // Reject broad globs, raw logs, profile data, source/runtime and binary payloads.
+ for(const unsafe of ['hex-gui-proof/**','hex-gui-proof/*.json',
+   'hex-gui-proof/window-stderr.log','hex-gui-proof/profile.secret/home',
+   'native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb',
+   'native/hex/cli-source/','hex-bundle-inspect.json']){
+   const mutation=native.replace('            hex-gui-proof/window.png\n',
+     '            hex-gui-proof/window.png\n            '+unsafe+'\n');
+   assert.throws(()=>assertBoundedNativeProof(mutation),undefined,unsafe);
+ }
+ assert.ok(native.includes('printf \'%s\\n\' "${GITHUB_SHA}" > hex-gui-proof/source-commit.txt'));
+});
 
 test('native package review receives selected filename, not literal bash syntax',()=>{
  const line=native.split('\n').find(x=>x.includes('python3 -B - ')&&x.includes("<<'PY'"));
