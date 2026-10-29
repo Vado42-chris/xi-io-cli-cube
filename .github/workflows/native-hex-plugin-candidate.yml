@@ -113,7 +113,7 @@ jobs:
           grep -Fq 'adapter/installer_adapter.py' hex-native-plugins.contents
           # Independently inspect the actual Debian payload even on ordinary
           # source pushes. This is runtime-content evidence, not publication.
-          python3 -B - "\${debs[0]}" <<'PY'
+          python3 -B - "${debs[0]}" <<'PY'
           import importlib.util, pathlib, subprocess, sys
           source = pathlib.Path("scripts/verify-public-hex-runtime-deb.py")
           spec = importlib.util.spec_from_file_location("hex_runtime_gate", source)
