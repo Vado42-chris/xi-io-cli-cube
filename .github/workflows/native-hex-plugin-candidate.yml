@@ -11,6 +11,8 @@ on:
       - 'native/hex/**'
       - 'scripts/native-package.mjs'
       - 'scripts/verify-extracted-hex-gui.sh'
+      - 'scripts/journal-hex-gui-observation.py'
+      - 'tests/gui-operation-receipt.test.py'
       - 'scripts/verify-hex-capture.py'
       - 'scripts/diagnose-hex-window.py'
       - 'tests/hex-window-diagnostic.test.py'
@@ -64,7 +66,9 @@ jobs:
           node-version: '24.22.1'
           cache: npm
       - name: Reject unsafe upload gates and Debian argument drift before native builds
-        run: node --test tests/native-ci-artifact-guards.test.mjs tests/frontend-diagnostic.test.mjs
+        run: |
+          node --test tests/native-ci-artifact-guards.test.mjs tests/frontend-diagnostic.test.mjs
+          PYTHONDONTWRITEBYTECODE=1 python3 -B tests/gui-operation-receipt.test.py
       - name: Test bounded public runtime package guard without uploading source
         run: |
           set -euo pipefail
@@ -88,9 +92,9 @@ jobs:
           sudo apt-get install -y python3-pil
           /usr/bin/python3 -I -B tests/hex-window-diagnostic.test.py
           /usr/bin/python3 -B scripts/verify-hex-capture.py --check-decoder
-          /usr/bin/python3 -B -m unittest discover -s tests -p hex-capture.test.py -v
-          /usr/bin/python3 -B -m unittest discover -s tests -p hex-gui-deadline.test.py -v
-          /usr/bin/python3 -B -m unittest discover -s tests -p gui-render-budget.test.py -v
+          /usr/bin/python3 -I -B tests/hex-capture.test.py -v
+          /usr/bin/python3 -I -B tests/hex-gui-deadline.test.py -v
+          /usr/bin/python3 -I -B tests/gui-render-budget.test.py -v
       - name: Check extracted GUI smoke harness without launching a desktop
         run: |
           bash tests/extracted-hex-gui-harness.sh
@@ -179,12 +183,12 @@ jobs:
           # retain isolated HOME/XDG, sandbox defaults and the same pixel gate.
           elf_sha=$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)
           set +e
-          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof/original" original
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- python3 -I -B scripts/journal-hex-gui-observation.py "$payload" "$PWD/hex-gui-proof/original" original "$GITHUB_SHA" "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           original_status=$?
           set -e
           test "$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = "$elf_sha"
           set +e
-          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash scripts/verify-extracted-hex-gui.sh "$payload" "$PWD/hex-gui-proof/webkit-default" webkit-default
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- python3 -I -B scripts/journal-hex-gui-observation.py "$payload" "$PWD/hex-gui-proof/webkit-default" webkit-default "$GITHUB_SHA" "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           default_status=$?
           set -e
           test "$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = "$elf_sha"
@@ -216,9 +220,11 @@ jobs:
             hex-gui-proof/original/window.png
             hex-gui-proof/original/window-visual.json
             hex-gui-proof/original/window-diagnostic.json
+            hex-gui-proof/original/operation-inspection.json
             hex-gui-proof/webkit-default/window.png
             hex-gui-proof/webkit-default/window-visual.json
             hex-gui-proof/webkit-default/window-diagnostic.json
+            hex-gui-proof/webkit-default/operation-inspection.json
             hex-gui-proof/mode-results.json
             hex-gui-proof/source-commit.txt
           if-no-files-found: warn

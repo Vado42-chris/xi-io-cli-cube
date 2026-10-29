@@ -230,7 +230,9 @@ jobs:
               kill -0 "$pid" || { echo HEX_GUI_PROCESS_EXITED; exit 31; }
               test "$(capture_command 2 xdotool getwindowpid "$window")" = "$pid"
               test "$(capture_command 2 xdotool getwindowname "$window")" = "XI-IO HEX"
-              if capture_command 3 scrot -z "$MATHS_WINDOW_WORK/installed-window.png" &&
+              # scrot 1.7 needs -o or retries save suffixed files while
+              # the checker keeps reopening the first prepaint image.
+              if capture_command 3 scrot -z -o "$MATHS_WINDOW_WORK/installed-window.png" &&
                  capture_command 3 python3 -I -B "$GITHUB_WORKSPACE/scripts/verify-hex-capture.py" "$MATHS_WINDOW_WORK/installed-window.png" > "$MATHS_WINDOW_WORK/visual.json" 2> "$MATHS_WINDOW_WORK/visual.err"; then
                 (( SECONDS < deadline )) || { echo HEX_GUI_OBSERVATION_DEADLINE; exit 32; }
                 painted=1

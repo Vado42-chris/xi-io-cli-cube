@@ -31,6 +31,18 @@ esac
 SH
 cat > "$work/bin/scrot" <<'SH'
 #!/bin/sh
+# Match real scrot 1.7: existing output is renamed unless -o was passed.
+overwrite=no
+output=''
+for argument in "$@"; do
+  case "$argument" in
+    -o|--overwrite) overwrite=yes;;
+    -z|--silent) ;;
+    -*) exit 64;;
+    *) output=$argument;;
+  esac
+done
+[ -n "$output" ] || exit 64
 [ "$MOCK_CASE" != missing_capture ] || exit 0
 if [ "$MOCK_CASE" = capture_hang ]; then
   printf '%s\n' "$$" > "$MOCK_ROOT/capture-child.pid"
@@ -41,11 +53,18 @@ count=0
 [ ! -f "$count_file" ] || count=$(cat "$count_file")
 count=$((count + 1))
 printf '%s' "$count" > "$count_file"
-"$MOCK_PYTHON_BIN" - "$2" "$MOCK_CASE" "$count" <<'PY'
+"$MOCK_PYTHON_BIN" - "$output" "$MOCK_CASE" "$count" "$overwrite" <<'PY'
 from PIL import Image, ImageDraw
 from pathlib import Path
 import sys
 path,case,count=Path(sys.argv[1]),sys.argv[2],int(sys.argv[3])
+if path.exists() and sys.argv[4] != 'yes':
+    # Real scrot returns success with a new name; checking the old path is stale.
+    for counter in range(999):
+        renamed=path.with_name(f'{path.stem}_{counter:03}{path.suffix}')
+        if not renamed.exists():
+            path=renamed
+            break
 if case=='malformed':
     path.write_bytes(b'not PNG')
     sys.exit(0)
@@ -118,6 +137,7 @@ PY
   fi
   if [ "$case" = delayed_paint ]; then
     [ "$(cat "$work/capture-count-$case")" -eq 3 ]
+    test ! -e "$work/$case/window_000.png"
   fi
   if [[ "$case" == black || "$case" == white || "$case" == cursor || "$case" == transparent || "$case" == malformed ]]; then
     [ "$(cat "$work/capture-count-$case")" -eq 12 ]

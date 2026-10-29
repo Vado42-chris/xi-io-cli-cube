@@ -35,6 +35,25 @@ class Deadlines(unittest.TestCase):
             self.assertLess(time.monotonic() - start, max_seconds)
             return result.stdout
 
+    def test_scrot_without_overwrite_rechecks_stale_prepaint_and_is_rejected(self):
+        # Faithful scrot1.7 mock saves later frames to window_000.png unless -o.
+        # The former production command must fail even when later captures paint.
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory)
+            shutil.copytree(ROOT / 'scripts', dest / 'scripts')
+            (dest / 'tests').mkdir()
+            shutil.copyfile(ROOT / 'tests/extracted-hex-gui-harness.sh',
+                            dest / 'tests/extracted-hex-gui-harness.sh')
+            source = ROOT / 'scripts/verify-extracted-hex-gui.sh'
+            text = source.read_text()
+            self.assertEqual(text.count('scrot -z -o '), 1)
+            (dest / 'scripts/verify-extracted-hex-gui.sh').write_text(text.replace('scrot -z -o ', 'scrot -z '))
+            result = subprocess.run(['bash', str(dest / 'tests/extracted-hex-gui-harness.sh')],
+                env={**os.environ, 'GUI_HARNESS_CASES': 'delayed_paint'},
+                capture_output=True, text=True, timeout=12)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('HEX_CAPTURE_BLANK_OR_PREPAINT', result.stdout + result.stderr)
+
     def test_discovery_hang_does_not_run_without_a_deadline(self):
         result = self.run_case(
             'discovery_hang',

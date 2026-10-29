@@ -22,9 +22,11 @@ const proofPaths=[
  'hex-gui-proof/original/window.png',
  'hex-gui-proof/original/window-visual.json',
  'hex-gui-proof/original/window-diagnostic.json',
+ 'hex-gui-proof/original/operation-inspection.json',
  'hex-gui-proof/webkit-default/window.png',
  'hex-gui-proof/webkit-default/window-visual.json',
  'hex-gui-proof/webkit-default/window-diagnostic.json',
+ 'hex-gui-proof/webkit-default/operation-inspection.json',
  'hex-gui-proof/mode-results.json',
  'hex-gui-proof/source-commit.txt',
 ];
@@ -131,14 +133,14 @@ test('actual comparison shell preserves both outcomes and refuses changed ELF/de
    mkdirSync(join(dir,'bin'));mkdirSync(join(dir,'payload/usr/bin'),{recursive:true});mkdirSync(join(dir,'hex-gui-proof'));
    writeFileSync(join(dir,'payload/usr/bin/xi-io-hex-dev'),'SYNTHETIC_ELF_SENTINEL');
    writeFileSync(join(dir,'bin/xvfb-run'),`#!/bin/bash
-mode=\"\${@: -1}\"
+mode=\"\${@: -3:1}\"
 printf '%s\\n' \"$mode\" >> \"$MODE_CALLS\"
 if [[ \"$MUTATE_ELF\" == yes && \"$mode\" == original ]]; then printf changed >> \"$PAYLOAD_FILE\"; fi
 if [[ \"$mode\" == original ]]; then exit \"$ORIGINAL_STATUS\"; else exit \"$DEFAULT_STATUS\"; fi
 `,{mode:0o755});
    const result=spawnSync('bash',['-euo','pipefail','-c','payload="$PWD/payload"\n'+section],
     {cwd:dir,encoding:'utf8',timeout:5000,env:{...process.env,PATH:join(dir,'bin')+':'+process.env.PATH,
-      GITHUB_SHA:'a'.repeat(40),ORIGINAL_STATUS:String(original),DEFAULT_STATUS:String(normal),
+      GITHUB_SHA:'a'.repeat(40),GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',ORIGINAL_STATUS:String(original),DEFAULT_STATUS:String(normal),
       MUTATE_ELF:mutate?'yes':'no',PAYLOAD_FILE:join(dir,'payload/usr/bin/xi-io-hex-dev'),MODE_CALLS:join(dir,'calls')}});
    assert.equal(result.status,expected,result.stdout+result.stderr);
    if(mutate){assert.equal(existsSync(join(dir,'hex-gui-proof/mode-results.json')),false);assert.equal(readFileSync(join(dir,'calls'),'utf8'),'original\n');}
@@ -152,3 +154,15 @@ if [[ \"$mode\" == original ]]; then exit \"$ORIGINAL_STATUS\"; else exit \"$DEF
   } finally {rmSync(dir,{recursive:true,force:true});}
  }
 });
+
+test('both retry paths explicitly replace the exact PNG reopened by the checker',()=>{
+ assert.match(extract,/capture_command 3 scrot -z -o "\$proof\/window\.png"/);
+ assert.match(maths,/capture_command 3 scrot -z -o "\$MATHS_WINDOW_WORK\/installed-window\.png"/);
+});
+
+ test('hyphenated Python qualification suites execute directly rather than empty discovery',()=>{
+ for(const file of ['hex-capture.test.py','hex-gui-deadline.test.py','gui-render-budget.test.py']) {
+  assert.ok(native.includes('/usr/bin/python3 -I -B tests/'+file+' -v'));
+  assert.ok(!native.includes('unittest discover -s tests -p '+file));
+ }
+ });

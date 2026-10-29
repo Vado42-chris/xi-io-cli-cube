@@ -118,7 +118,9 @@ for attempt in $(seq 1 12); do
   same_process || fail 83 HEX_EXTRACTED_PROCESS_IDENTITY_CHANGED_BEFORE_CAPTURE
   [[ "$(capture_command 2 xdotool getwindowpid "$window")" == "$app_pid" ]] || fail 84 HEX_WINDOW_OWNER_CHANGED
   [[ "$(capture_command 2 xdotool getwindowname "$window")" == 'XI-IO HEX' ]] || fail 84 HEX_WINDOW_TITLE_CHANGED
-  if capture_command 3 scrot -z "$proof/window.png"; then
+  # scrot 1.7 otherwise renames retries to window_000.png, leaving the
+  # checker stuck on the first prepaint frame. Replace only this proof image.
+  if capture_command 3 scrot -z -o "$proof/window.png"; then
     if capture_command 3 python3 -I -B "$root/scripts/verify-hex-capture.py" "$proof/window.png" > "$proof/window-visual.json" 2> "$proof/window-visual.err"; then
       (( SECONDS < deadline )) || fail 82 HEX_GUI_OBSERVATION_DEADLINE
       visible=yes
