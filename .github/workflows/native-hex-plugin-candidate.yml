@@ -15,6 +15,7 @@ on:
       - 'tests/hex-capture.test.py'
       - 'tests/extracted-hex-gui-harness.sh'
       - 'tests/hex-gui-deadline.test.py'
+      - 'tests/gui-render-budget.test.py'
       - 'tests/native-ci-artifact-guards.test.mjs'
       - 'public/**'
       - 'index.html'
@@ -85,6 +86,7 @@ jobs:
           /usr/bin/python3 -B scripts/verify-hex-capture.py --check-decoder
           /usr/bin/python3 -B -m unittest discover -s tests -p hex-capture.test.py -v
           /usr/bin/python3 -B -m unittest discover -s tests -p hex-gui-deadline.test.py -v
+          /usr/bin/python3 -B -m unittest discover -s tests -p gui-render-budget.test.py -v
       - name: Check extracted GUI smoke harness without launching a desktop
         run: bash tests/extracted-hex-gui-harness.sh
       - name: Install exact frontend build dependencies
