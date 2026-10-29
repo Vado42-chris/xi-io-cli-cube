@@ -1,7 +1,7 @@
 name: XI-IO HEX native Plugins candidate (fresh source)
 on:
   push:
-    branches: [fix/native-hex-plugin-catalog-20261028, fix/hex27-reuse-core-bundle-20261028]
+    branches: [fix/native-hex-plugin-catalog-20261028, fix/hex27-reuse-core-bundle-20261028, delivery/hex-owner-enveloped-20261029]
     paths:
       - 'package.json'
       - 'package-lock.json'
@@ -61,6 +61,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'
@@ -160,6 +161,130 @@ jobs:
           printf '%s  %s\n' "$(sha256sum "${debs[0]}" | cut -d' ' -f1)" "${debs[0]}" > hex-native-plugins.sha256
           echo PACKAGE_SOURCE_HEAD="${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
           cat hex-native-plugins.sha256 >> "$GITHUB_STEP_SUMMARY"
+      # Owner-only transport fallback: PRIVATE DERIVED RUNTIME NEVER enters
+      # a public Actions artifact as plaintext. Reuse the SAME native build,
+      # source/runtime guard and original installer. This is not a release.
+      # The disposable recipient public certificate is NOT an account identity.
+      - name: Encrypt exact verified Debian for private owner retrieval
+        id: owner-envelope
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/delivery/hex-owner-enveloped-20261029' && steps.package-verification.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Vado42-chris/xi-io-cli-cube'
+          test "$GITHUB_ACTOR" = 'Vado42-chris'
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(id -u)" -ne 0
+          test "$(git rev-parse HEAD^)" = 'ffa1ac2be2377d4716c8597f8e84b63fbb7a9a4b'
+          test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/native-hex-plugin-candidate.yml'
+          scratch="$(mktemp -d "$RUNNER_TEMP/hex-private-plaintext.XXXXXXXX")"
+          trap 'rm -rf "$scratch"' EXIT
+          mkdir -m 700 "$scratch/clear"
+          export CLEAR="$scratch/clear" BASE_SOURCE='ffa1ac2be2377d4716c8597f8e84b63fbb7a9a4b'
+          python3 -I -B - <<'PY'
+          import hashlib, json, os, pathlib, re, shutil, subprocess
+          from pathlib import Path
+          clear=Path(os.environ['CLEAR'])
+          root=Path.cwd()
+          debs=list(root.glob('native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb'))
+          assert len(debs)==1, 'EXACT_ONE_FRESH_DEB_REQUIRED'
+          original=debs[0]
+          assert original.is_file() and not original.is_symlink()
+          package=clear/original.name
+          shutil.copyfile(original,package)
+          def sha(p):
+              assert p.is_file() and not p.is_symlink()
+              h=hashlib.sha256()
+              with p.open('rb') as f:
+                  for chunk in iter(lambda:f.read(1048576),b''):
+                      h.update(chunk)
+              return h.hexdigest()
+          assert sha(package)==sha(original), 'DEBIAN_COPY_MISMATCH'
+          def cmd(*args):
+              return subprocess.check_output(args,text=True,timeout=30).strip()
+          assert cmd('dpkg-deb','--field',str(package),'Package')=='xi-io-hex-dev'
+          assert cmd('dpkg-deb','--field',str(package),'Version')=='0.1.0-dev.10'
+          assert cmd('dpkg-deb','--field',str(package),'Architecture')=='amd64'
+          control=cmd('dpkg-deb','--field',str(package))
+          (clear/'DEBIAN.control').write_text(control+'\n')
+          staged=root/'native/hex/carrier/frontend'
+          assert (staged/'index.html').is_file()
+          frontend={str(p.relative_to(staged)):sha(p) for p in sorted(staged.rglob('*')) if p.is_file() or p.is_symlink()}
+          locks=['package-lock.json','native/hex/carrier/package-lock.json','native/hex/carrier/src-tauri/Cargo.lock']
+          receipt={
+              'schema':'xiio.hex.owner-private-build-custody/v1',
+              'source_repository':'Vado42-chris/xi-io-cli-cube',
+              'baseline_candidate_revision':os.environ['BASE_SOURCE'],
+              'source_commit':os.environ['GITHUB_SHA'],
+              'source_tree':cmd('git','rev-parse','HEAD^{tree}'),
+              'source_difference':['.github/workflows/native-hex-plugin-candidate.yml'],
+              'build_command':'npm run native:build',
+              'build_runner':'github-hosted ubuntu-22.04',
+              'package_filename':package.name,
+              'package_sha256':sha(package),
+              'package_bytes':package.stat().st_size,
+              'native_elf_sha256':sha(root/'native/hex/carrier/src-tauri/target/release/xi-io-hex-dev'),
+              'embedded_frontend_sha256':frontend,
+              'lockfile_sha256':{p:sha(root/p) for p in locks},
+              'node_version':cmd('node','--version'),
+              'rustc_version':cmd('rustc','--version'),
+              'github_run_id':os.environ['GITHUB_RUN_ID'],
+              'github_run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+              'qualification_state':'UNQUALIFIED_PENDING_INSTALLED_INTERACTION',
+              'private_owner_transport':True,
+              'public_distribution_approved':False,
+              'aries_install_verified':False,
+              'loki_services_verified':False,
+          }
+          (clear/'PROVENANCE.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          items=[package,clear/'DEBIAN.control',clear/'PROVENANCE.json']
+          (clear/'SHA256SUMS').write_text(''.join(f'{sha(p)}  {p.name}\n' for p in items))
+          subprocess.run(['sha256sum','--check','--strict','SHA256SUMS'],cwd=clear,check=True,stdout=subprocess.DEVNULL)
+          print('CURRENT_DEBIAN_PRIVATE_ENVELOPE_PREPARED')
+          print('PACKAGE_SHA256='+receipt['package_sha256'])
+          PY
+          cat > "$scratch/recipient.pem" <<'XIIO_PUBLIC_CERT'
+          -----BEGIN CERTIFICATE-----
+          MIIEQzCCAqugAwIBAgIUcs63YEjgVvi0V6a13kEdFHcYBt4wDQYJKoZIhvcNAQEL
+          BQAwMTEvMC0GA1UEAwwmWElJTyBUZW1wb3JhcnkgT3duZXIgRGVsaXZlcnkgMjAy
+          NjEwMjkwHhcNMjYxMDI5MTk1NDIxWhcNMjYxMDMxMTk1NDIxWjAxMS8wLQYDVQQD
+          DCZYSUlPIFRlbXBvcmFyeSBPd25lciBEZWxpdmVyeSAyMDI2MTAyOTCCAaIwDQYJ
+          KoZIhvcNAQEBBQADggGPADCCAYoCggGBAJ6M8YxqS1YBTXSY8zQL4cyDN3q5wZjk
+          EINOgobCA2OV647F5wjfFKOrAvtPPkvZq8jqQsmzJV5Jz5dKl+xkzLOY5A25n4ov
+          1bXbA5tNSVBwA8LlqsO/+8HaoHfjubsLkQolTqw8s35qzuHUKeTv41j8vNYcQikX
+          KbwwaOrZszqJKnasLGGqcCql0dCb6Rvk1AE2IjdyE/LZVD0dqEqb4jlxsndYT5A+
+          d7s1DxUJdz72/H6u6ereUffWLpguwSm+0jTQ1lTmWLdw4IrT6MpDfDVa2DqUWTFP
+          6azMXY78SFQIqFlQpyAlHuzoZD9qFKnNzF+Wl48L/eE0giA9RFLd7z2/lMrEqtau
+          lX21CUJaqgmaxfERxkzxUuuIQRE/OxlwqNGzwQY2LnOEXt0eWwkMkiQPV9C9EDNS
+          blY8p1rZoszaBNBR51rSHENmgcJqBvTc0H9HAjRCBCvzbhkccwQcWMwDpsIurWQm
+          5b/mrbFLnDig6U2QTAynxZQ9tTXSuwhH0QIDAQABo1MwUTAdBgNVHQ4EFgQU+PHI
+          ZI61uh8egLkHmge2vgdfKXUwHwYDVR0jBBgwFoAU+PHIZI61uh8egLkHmge2vgdf
+          KXUwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAYEALU2rtDaqeGCM
+          g6Hz7UILr72FTRdRT244HQg1guF1NByQFgdV6fqcc+QARG+19Jin+0sPVDmJjM5J
+          moCBTGcNScO4Fuwga2jfR75HToushjs0rIM0glXxarU5eD6e3M24L7Wt2KDQjWol
+          nBJod88RQ86BXqOdyg+/kCOGJMFraUsmpom6bbUKot4/w/h2LxgDgBlOIEIDdSJI
+          mqIo22JpUtUnQmCTJpXQCnlfgvUzMXAU9hzH9IHxkzJpxHDXvphJHA4DQAjQRlSG
+          wcfXGhanUl72ILKvuBGWVRrX7QSoPaRnupA10842JYapUjnX0gOHwHSqEPfqYfgG
+          CXlpWeDF+GCDOvXXuvuE5C5rgxOUECgp+rg6omDJyvlmSgGHjyRXS1IraNirTXd5
+          E6eWwDWKmUjEevAnwloLrXMB3hwY/c9a/uaJzQ3QLJGaIJs/x6nX5zuiaJ/4ceWl
+          WcdIBZeMOakjqsf87nKQ29GdESvoyZrKKPyiJfHvDxfhUYAReFUP
+          -----END CERTIFICATE-----
+          XIIO_PUBLIC_CERT
+          tar -C "$scratch/clear" -cf "$scratch/payload.tar" .
+          mkdir -m 700 "$RUNNER_TEMP/hex-owner-envelope"
+          openssl cms -encrypt -aes256 -binary -in "$scratch/payload.tar" -outform DER -out "$RUNNER_TEMP/hex-owner-envelope/owner-candidate.p7m" "$scratch/recipient.pem"
+          openssl cms -cmsout -print -inform DER -in "$RUNNER_TEMP/hex-owner-envelope/owner-candidate.p7m" >/dev/null
+          test -s "$RUNNER_TEMP/hex-owner-envelope/owner-candidate.p7m"
+          echo ENCRYPTED_CANDIDATE_SHA256="$(sha256sum "$RUNNER_TEMP/hex-owner-envelope/owner-candidate.p7m" | cut -d' ' -f1)"
+          echo NO_PLAINTEXT_DEBIAN_PUBLIC_ARTIFACT
+      - name: Retain only encrypted owner candidate, even if later native UI fails
+        if: ${{ steps.owner-envelope.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hex-owner-encrypted-${{ github.sha }}
+          path: ${{ runner.temp }}/hex-owner-envelope/*.p7m
+          if-no-files-found: error
+          retention-days: 14
       - name: Observe extracted package native window in isolated Xvfb
         run: |
           set -euo pipefail
