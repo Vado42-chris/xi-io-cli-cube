@@ -11,7 +11,7 @@ proof=$(realpath -- "$2")
 exe="$payload/usr/bin/xi-io-hex-dev"
 [[ -f "$exe" && -x "$exe" && ! -L "$exe" ]] || { echo HEX_EXTRACTED_ELF_MISSING >&2; exit 65; }
 [[ -n "${DISPLAY:-}" && -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] || { echo ISOLATED_GUI_SESSION_REQUIRED >&2; exit 66; }
-for tool in xdotool scrot python3; do command -v "$tool" >/dev/null || { echo "GUI_TOOL_MISSING:$tool" >&2; exit 69; }; done
+for tool in xdotool scrot python3 timeout; do command -v "$tool" >/dev/null || { echo "GUI_TOOL_MISSING:$tool" >&2; exit 69; }; done
 profile=$(mktemp -d "$proof/profile.XXXXXXXX")
 chmod 0700 "$profile"
 for name in home config data state cache runtime tmp; do mkdir -m 0700 "$profile/$name"; done
@@ -61,13 +61,15 @@ env -i PATH="$PATH" LANG=C.UTF-8 HOME="$profile/home" \
 app_pid=$!
 app_identity=$(process_identity "$app_pid") || fail 81 HEX_EXTRACTED_PROCESS_IDENTITY_UNAVAILABLE
 window=''
-for attempt in $(seq 1 60); do
+deadline=$((SECONDS + 60))
+for attempt in $(seq 1 120); do
+  (( SECONDS < deadline )) || fail 82 HEX_GUI_OBSERVATION_DEADLINE
   same_process || fail 81 HEX_EXTRACTED_PROCESS_IDENTITY_CHANGED_OR_EXITED
-  matches=$(xdotool search --onlyvisible --pid "$app_pid" --name '^XI-IO HEX$' 2>/dev/null || true)
+  matches=$(timeout -k 1 2 xdotool search --onlyvisible --pid "$app_pid" --name '^XI-IO HEX$' 2>/dev/null || true)
   while IFS= read -r candidate; do
     [[ "$candidate" =~ ^[0-9]+$ ]] || continue
-    [[ "$(xdotool getwindowpid "$candidate" 2>/dev/null)" == "$app_pid" ]] || continue
-    [[ "$(xdotool getwindowname "$candidate" 2>/dev/null)" == 'XI-IO HEX' ]] || continue
+    [[ "$(timeout -k 1 2 xdotool getwindowpid "$candidate" 2>/dev/null)" == "$app_pid" ]] || continue
+    [[ "$(timeout -k 1 2 xdotool getwindowname "$candidate" 2>/dev/null)" == 'XI-IO HEX' ]] || continue
     window="$candidate"; break
   done <<< "$matches"
   [[ -z "$window" ]] || break
@@ -79,10 +81,11 @@ done
 # Reject blank, uniform, transparent and cursor-only PNGs.
 visible=''
 for attempt in $(seq 1 12); do
+  (( SECONDS < deadline )) || fail 82 HEX_GUI_OBSERVATION_DEADLINE
   same_process || fail 83 HEX_EXTRACTED_PROCESS_IDENTITY_CHANGED_BEFORE_CAPTURE
-  [[ "$(xdotool getwindowpid "$window")" == "$app_pid" ]] || fail 84 HEX_WINDOW_OWNER_CHANGED
-  [[ "$(xdotool getwindowname "$window")" == 'XI-IO HEX' ]] || fail 84 HEX_WINDOW_TITLE_CHANGED
-  if scrot -z "$proof/window.png"; then
+  [[ "$(timeout -k 1 2 xdotool getwindowpid "$window")" == "$app_pid" ]] || fail 84 HEX_WINDOW_OWNER_CHANGED
+  [[ "$(timeout -k 1 2 xdotool getwindowname "$window")" == 'XI-IO HEX' ]] || fail 84 HEX_WINDOW_TITLE_CHANGED
+  if timeout -k 1 3 scrot -z "$proof/window.png"; then
     if python3 -I -B "$root/scripts/verify-hex-capture.py" "$proof/window.png" > "$proof/window-visual.json" 2> "$proof/window-visual.err"; then
       visible=yes
       break
