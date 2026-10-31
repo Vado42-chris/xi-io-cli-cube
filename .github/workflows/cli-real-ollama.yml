@@ -1,0 +1,154 @@
+name: HEX current CLI real Ollama proof
+
+on:
+  pull_request:
+    paths:
+      - 'native/hex/cli-source/**'
+      - '.github/workflows/cli-real-ollama.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-ollama:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Use Node 24.22.1
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+
+      - name: Verify exact packaged runtime before inference
+        run: |
+          set -euo pipefail
+          python3 native/hex/cli-source/test_packaged_chat_first.py
+          test "$(sha256sum native/hex/cli-source/src/xiio.mjs | awk '{print $1}')" = "98590a8b8c2aa5ec35ce5ed56c02d128dd422cb368422bd56e0c7f4dd04b13f8"
+
+      - name: Install real local Ollama and PTY driver
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh | sh
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-pexpect
+          ollama --version
+
+      - name: Start Ollama and pull bounded local model
+        run: |
+          set -euo pipefail
+          nohup ollama serve >"$RUNNER_TEMP/ollama.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/ollama.pid"
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5:3b
+          ollama list
+
+      - name: Real Ollama read, approved edit, and independent byte readback
+        env:
+          XIIO_MODEL: qwen2.5:3b
+          XIIO_TOOL_MODE: structured
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/xiio-real-ollama"
+          mkdir -p "$work/project"
+          printf 'status: old\n' > "$work/project/NOTE.txt"
+          cat > "$work/proof.py" <<'PY'
+          import os, pathlib, pexpect, time
+
+          root=pathlib.Path(os.environ["XIIO_PROOF_ROOT"])
+          runtime=pathlib.Path(os.environ["XIIO_RUNTIME"])
+          project=root/"project"
+          transcript=root/"transcript.txt"
+
+          child=pexpect.spawn(
+              "node",
+              [str(runtime), "chat", str(project), "--model", "qwen2.5:3b"],
+              encoding="utf-8",
+              timeout=180,
+              env={**os.environ, "XIIO_MODEL":"qwen2.5:3b", "XIIO_TOOL_MODE":"structured"},
+          )
+          with transcript.open("w",encoding="utf-8") as log:
+              child.logfile=log
+              child.expect("What would you like to build or work on?")
+              child.expect("xi> ")
+              child.sendline("Read NOTE.txt using your file tool. Tell me the exact current status. Do not guess.")
+              child.expect("xi> ", timeout=180)
+              first=transcript.read_text(encoding="utf-8",errors="replace")
+              if "status: old" not in first:
+                  raise SystemExit("REAL_OLLAMA_READBACK_MISSING")
+
+              child.sendline("Change the exact text status: old in NOTE.txt to status: new. Read the file first, make only that edit, then verify the result.")
+              approvals=0
+              deadline=time.time()+240
+              while time.time()<deadline:
+                  idx=child.expect([
+                      r"Approve this exact action\? \[y/N\]: ",
+                      r"xi> ",
+                      pexpect.EOF,
+                      pexpect.TIMEOUT,
+                  ], timeout=60)
+                  if idx==0:
+                      approvals+=1
+                      child.sendline("yes")
+                      continue
+                  if idx==1:
+                      break
+                  if idx==2:
+                      raise SystemExit("CLI_EXITED_BEFORE_EDIT_COMPLETED")
+                  if idx==3:
+                      continue
+              else:
+                  raise SystemExit("REAL_OLLAMA_EDIT_TIMEOUT")
+
+              if approvals != 1:
+                  raise SystemExit(f"EXPECTED_ONE_EDIT_APPROVAL_GOT_{approvals}")
+
+              child.sendline("/exit")
+              child.expect(pexpect.EOF, timeout=30)
+
+          data=(project/"NOTE.txt").read_bytes()
+          if data != b"status: new\n":
+              raise SystemExit("INDEPENDENT_FILE_READBACK_MISMATCH")
+
+          full=transcript.read_text(encoding="utf-8",errors="replace")
+          if "Changed NOTE.txt" not in full and "written bytes match the readback" not in full:
+              raise SystemExit("CLI_EDIT_RECEIPT_MISSING")
+          print("REAL_OLLAMA_READ=PASS")
+          print("REAL_OLLAMA_APPROVED_EDIT=PASS")
+          print("INDEPENDENT_FILE_READBACK=PASS")
+          print("APPROVAL_COUNT=1")
+          PY
+          XIIO_PROOF_ROOT="$work" XIIO_RUNTIME="$GITHUB_WORKSPACE/native/hex/cli-source/src/xiio.mjs" python3 "$work/proof.py"
+          test "$(cat "$work/project/NOTE.txt")" = "status: new"
+          sha256sum "$work/project/NOTE.txt" | tee "$work/note.sha256"
+          cp "$RUNNER_TEMP/ollama.log" "$work/ollama.log"
+          cp "$work/transcript.txt" "$work/transcript.redacted.txt"
+          sed -i -E 's/(token|secret|password|authorization)[^[:space:]]*/[redacted]/Ig' "$work/transcript.redacted.txt"
+
+      - name: Assert no paid-provider route participated
+        run: |
+          set -euo pipefail
+          runtime=native/hex/cli-source/src/xiio.mjs
+          grep -Fq 'http://127.0.0.1:11434/api/chat' "$runtime"
+          ! grep -Eiq 'api\.openai\.com|api\.anthropic\.com|generativelanguage\.googleapis\.com' "$runtime"
+          echo "PAID_PROVIDER_FALLBACK=ABSENT_FROM_CHAT_RUNTIME"
+          echo "REAL_LOCAL_OLLAMA=EXECUTED"
+
+      - name: Preserve real-inference evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hex-cli-real-ollama-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/xiio-real-ollama/transcript.redacted.txt
+            ${{ runner.temp }}/xiio-real-ollama/note.sha256
+            ${{ runner.temp }}/xiio-real-ollama/ollama.log
+          if-no-files-found: warn
+          retention-days: 14
