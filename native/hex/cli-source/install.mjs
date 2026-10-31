@@ -255,7 +255,7 @@ for (const file of FILES.filter(f => f.startsWith('scripts/') && f.endsWith('.mj
 const v = spawnSync(process.execPath, [entry, 'version', '--staged'], { encoding: 'utf8', env, cwd: dir, timeout: 30000 });
 let ver; try { ver = JSON.parse(v.stdout); } catch { fail('CLI_VERSION_FAILED', { generation, stderr: String(v.stderr).slice(0, 300) }); }
 if (v.status !== 0 || !ver.integrity_verified || !['STAGED','PASS'].includes(ver.state) || ver.source_sha !== sha || ver.running_file_sha256 !== hashes['src/xiio.mjs']) fail('INSTALLED_GENERATION_MISMATCH', { expected: sha, reported: ver.source_sha, file_sha256: ver.running_file_sha256 });
-const menu = spawnSync(process.execPath, [entry, dir], { input: '10\n', encoding: 'utf8', env, cwd: dir, timeout: 30000 });
+const menu = spawnSync(process.execPath, [entry, dir], { input: '/exit\n', encoding: 'utf8', env, cwd: dir, timeout: 30000 });
 if (menu.status !== 0) fail('CLI_INTERACTIVE_EXIT_FAILED', { generation, stdout: String(menu.stdout).slice(-300) });
 fs.rmSync(scratch, { recursive: true, force: true });
 
