@@ -1,0 +1,30 @@
+{
+  "schema": "xiio.hex.nvm-discovery-adoption-proof/v1",
+  "base": "a57760bf153a0b75f2178a3cef871683ebed57be",
+  "reused_owner": "native/hex/adapter/install_preflight.py#node_candidates",
+  "unit_cases": 6,
+  "unit_pass": 6,
+  "discovery_source_files_modified": false,
+  "real_install": {
+    "state": "PASS",
+    "node_absent_from_PATH": true,
+    "existing_hex_discovery_used": true,
+    "actual_copied_node_binary": true,
+    "actual_offline_installer": true,
+    "installed_source": "b1f70cdd6c848bea49e76f2d1cd45f67357f0f35",
+    "native_aries": false,
+    "github_transport": "SYNTHETIC_FIXTURE",
+    "profile_changes": false
+  },
+  "retained_download": {
+    "state": "PASS",
+    "transport": "SYNTHETIC_GITHUB_API_FIXTURE",
+    "actual_offline_installer": true,
+    "verified_download_install": true,
+    "cached_tamper_refused": true,
+    "current_preserved": true,
+    "production_github_auth": "NOT_TESTED"
+  },
+  "user_profiles_changed": false,
+  "native_aries": "NOT_RUN"
+}

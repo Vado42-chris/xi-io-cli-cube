@@ -1,0 +1,31 @@
+name: HEX current CLI payload qualification
+on:
+  pull_request:
+    paths:
+      - 'native/hex/cli-source/**'
+      - '.github/workflows/cli-payload-current.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cli-payload:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Use Node 24.22.1
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+      - name: Verify embedded CLI custody and chat-first installer smoke
+        run: |
+          set -euo pipefail
+          python3 native/hex/cli-source/test_packaged_chat_first.py
+          node --check native/hex/cli-source/src/xiio.mjs
+          node --check native/hex/cli-source/install.mjs
+      - name: Preserve evidence boundary
+        run: |
+          echo "HEX_PAYLOAD_SOURCE=QUALIFIED_HERE"
+          echo "REAL_OLLAMA_INFERENCE=NOT_RUN_IN_HOSTED_CI"
+          echo "ARIES_INSTALL=NOT_PERFORMED"

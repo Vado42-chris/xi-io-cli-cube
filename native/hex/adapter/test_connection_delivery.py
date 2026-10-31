@@ -7,7 +7,7 @@ from pathlib import Path
 from test_launcher_repair import Fixture,NODE
 HERE=Path(__file__).resolve().parent
 SOURCE=HERE.parent/'cli-source'
-REF='958a5fe9d4a409e4ab2b690b6a2cc357539908cf'
+REF='b1f70cdd6c848bea49e76f2d1cd45f67357f0f35'
 SB='ffbcd216d4c673de826242662271add63112c49a'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def snapshot(root):
@@ -36,7 +36,7 @@ class ConnectionDelivery(unittest.TestCase):
    if extra:self.assertEqual(v['native_exit'],3)
   self.assertFalse((self.home/'absent-ports.mjs').exists());self.assertFalse((self.home/'config').exists())
  def test_fresh_offline_install_reaches_exact_native_without_auth(self):
-  p=self.prepare();self.assertEqual(p['payload']['manifest']['source_sha'],REF);self.assertEqual(len(p['payload']['manifest']['files']),7)
+  p=self.prepare();self.assertEqual(p['payload']['manifest']['source_sha'],REF);self.assertEqual(len(p['payload']['manifest']['files']),8)
   r=self.act(p);self.assertTrue(r['ok'],r);self.assertEqual(r['result']['phase'],'INSTALLED_READBACK_VERIFIED');self.assert_native_reachable()
  def test_six_file_prior_receipts_survive_seven_file_update_connect_and_rollback(self):
   with Fixture() as f:

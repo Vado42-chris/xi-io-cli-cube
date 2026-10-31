@@ -67,17 +67,17 @@ test('current payload provenance and bounded fresh-generation custody producer a
  assert.equal(source.current_packaged_payload.ref,payload.source_sha);
  assert.deepEqual(source.current_packaged_payload.files,payload.files);
  assert.equal(source.current_packaged_payload.local_payload_modifications,false);
- assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),'fa77fafefdf3e73e20e71b824752f15c14bd7ca3af0fb5f1396f62c162f70aed');
- assert.equal(source.offline_installer_successor.base_ref,'f1bca1245436167fc7767bc31925486643e5d2e7');
- assert.equal(source.offline_installer_successor.base_sha256,'6311b606049f07d35bc31e78f73218a95a114d3723c9f8b97bcb8f3262d8d5a6');
- assert.equal(source.offline_installer_successor.sha256,'14730c1f91609d40b1289b98228aef19f048833d36126ca35531e69d7fc6f418');
+ assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),'07d9b23125a7e4b3d210eed27a3ba4fc71ad0455bebd8c3ce68f425247bd1f42');
+ assert.equal(source.offline_installer_successor.base_ref,'8dbd369c5c6b03637d0b04518400d405153e6885');
+ assert.equal(source.offline_installer_successor.base_sha256,'1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a');
+ assert.equal(source.offline_installer_successor.sha256,'37fc6956b59c26624e7ef4c7340012e4056b6be6219f619b5636302fd8325109');
  assert.equal(createHash('sha256').update(read(base+'install.mjs')).digest('hex'),source.offline_installer_successor.sha256);
 });
 
-test('current seven-file payload and historical repair verifier keep separate exact custody',()=>{
+test('current eleven-file payload and historical repair verifier keep separate exact custody',()=>{
  const base='native/hex/cli-source/',payload=json(base+'packaged-source.json'),repair=json(base+'launcher-repair.SOURCE.json');
- assert.equal(payload.source_sha,'958a5fe9d4a409e4ab2b690b6a2cc357539908cf');
- assert.equal(Object.keys(payload.files).length,7);assert.ok(payload.files['src/local-ops.mjs']);
+ assert.equal(payload.source_sha,'89b9c418f6e161d9864bf891fd665b6a18f00dd2');
+ assert.equal(Object.keys(payload.files).length,11);assert.ok(payload.files['src/local-ops.mjs']);assert.ok(payload.files['src/sdk/local-work-packet.mjs']);
  const helper=read(base+'src/runtime-integrity.mjs').split('\n').filter(line=>!line.startsWith('import ')).join('\n').replace(/^export /gm,'').trim();
  const producer=read(base+'install.mjs');const start=producer.indexOf('\n',producer.indexOf('// BEGIN runtime-integrity standalone mirror'));
  const mirror=producer.slice(start,producer.indexOf('// END runtime-integrity standalone mirror')).trim();

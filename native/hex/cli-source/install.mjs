@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 // BEGIN runtime-integrity standalone mirror (byte-parity tested; keeps the installer one file)
 // Same-host installation guards. Neither identity admission nor a remote lease.
 
-const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']);
+const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']);
 const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 // Preserve selected runtime lookup, home and explicit transport/auth configuration;
 // never inherit interpreter preloads, dynamic loader hooks or Git config injection.
@@ -68,10 +68,14 @@ function verifyGeneration(prefix,generation){
     if(!expected||receipt.repo!=='Vado42-chris/xi-io-cli'||receipt.ref!==receipt.source_sha)throw Error('LEGACY_RELEASE_UNSUPPORTED');
     if(listed.length!==Object.keys(expected).length||listed.some(file=>!Object.hasOwn(expected,file)||receipt.files[file]!==expected[file]))throw Error('LEGACY_RELEASE_PAYLOAD_MISMATCH');
   }else{
-    const required=PAYLOAD_FILES.filter(file=>!['src/runtime-integrity.mjs','src/local-ops.mjs'].includes(file));
+    const required=PAYLOAD_FILES.filter(file=>!['src/runtime-integrity.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs'].includes(file));
     if(required.some(file=>!listed.includes(file))||listed.some(file=>!PAYLOAD_FILES.includes(file)))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './runtime-integrity.mjs'")&&!listed.includes('src/runtime-integrity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './local-ops.mjs'")&&!listed.includes('src/local-ops.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk-provider-state.mjs'")&&!listed.includes('src/sdk-provider-state.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/audhd-command.mjs'")&&!listed.includes('src/sdk/audhd-command.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/tool-verb-fidelity.mjs'")&&!listed.includes('src/sdk/tool-verb-fidelity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-work-packet.mjs'")&&!listed.includes('src/sdk/local-work-packet.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
   }
   for(const relative of listed){
     const file=path.join(root,...relative.split('/'));
@@ -255,7 +259,7 @@ for (const file of FILES.filter(f => f.startsWith('scripts/') && f.endsWith('.mj
 const v = spawnSync(process.execPath, [entry, 'version', '--staged'], { encoding: 'utf8', env, cwd: dir, timeout: 30000 });
 let ver; try { ver = JSON.parse(v.stdout); } catch { fail('CLI_VERSION_FAILED', { generation, stderr: String(v.stderr).slice(0, 300) }); }
 if (v.status !== 0 || !ver.integrity_verified || !['STAGED','PASS'].includes(ver.state) || ver.source_sha !== sha || ver.running_file_sha256 !== hashes['src/xiio.mjs']) fail('INSTALLED_GENERATION_MISMATCH', { expected: sha, reported: ver.source_sha, file_sha256: ver.running_file_sha256 });
-const menu = spawnSync(process.execPath, [entry, dir], { input: '10\n', encoding: 'utf8', env, cwd: dir, timeout: 30000 });
+const menu = spawnSync(process.execPath, [entry, dir], { input: '/exit\n', encoding: 'utf8', env, cwd: dir, timeout: 30000 });
 if (menu.status !== 0) fail('CLI_INTERACTIVE_EXIT_FAILED', { generation, stdout: String(menu.stdout).slice(-300) });
 fs.rmSync(scratch, { recursive: true, force: true });
 
@@ -365,4 +369,5 @@ console.log(JSON.stringify({
   add_to_path: onPath ? null : (win ? `powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';${BIN_DIR}', 'User')"  (then open a new terminal)` : `export PATH="${BIN_DIR}:$PATH"`),
   next: ['xi-io-cli version', 'xi-io-cli', 'xi-io-cli rollback'],
 }, null, 2));
+
 

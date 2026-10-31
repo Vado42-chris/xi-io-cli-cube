@@ -1,0 +1,48 @@
+{
+  "schema": "xiio.continuation.starting-packet/v1",
+  "stamped_at_utc": "2026-10-31T21:17:00Z",
+  "active_writer": "cursor",
+  "claude_parallel_writer": "UNKNOWN_NOT_OBSERVED_THIS_SEAT",
+  "installed_cli": {
+    "source_sha": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
+    "generation": "c4e2b9f8738d-20261031T204721Z-SkYGhU",
+    "previous": "dd6b5b0dfec7-20261031T201431Z-eruOCb",
+    "payload_files": 10,
+    "launcher": "~/.local/bin/xi-io-cli",
+    "note": "Installed product lags open PR heads; do not overwrite in place without explicit adopt"
+  },
+  "open_source_heads": {
+    "cli_pr16": "923f3a656858366a45f5ec140326389920086fca",
+    "hex_pr32": "6690f74a3c3b9a1b4f64ef5e4dd8e74c2184bafc",
+    "inbox_pr595": "dc1db2402daecbf38e7ecd4d1d433379c2711d3e",
+    "inbox_pr596": "2a4d5706acdf275a036c0f34f313450f9dd4484f"
+  },
+  "continuation_adapter": {
+    "module": "src/sdk/local-work-packet.mjs",
+    "payload_files_when_packaged": 11,
+    "status": "IMPLEMENTED_ON_PR_HEADS_NOT_YET_ON_INSTALLED_GENERATION"
+  },
+  "native_repair_receipt": {
+    "workspace": "~/.local/state/xi-io/repair-checks/pass.l2hbcV",
+    "before_sha256": "4d1a4c07c2132ab55a836fa17cb6daae3b4fba38e241a91e5fb0d1ab69cc98c0",
+    "after_sha256": "0d90ed2af93a8839a1545626bfa6fda37e1089e47c7eb9646634ecb04fa6b091",
+    "result": "REPAIR_CANARY_PASS",
+    "autonomous_orchestration": false
+  },
+  "manifest_path_local": "~/.local/state/xi-io/receipts/aries-install-manifest-20261031.json",
+  "manifest_path_hex_evidence": "docs/evidence/aries-install-manifest-20261031.json",
+  "next_hex": "NEXT.local-work-packet-hex-20261031.json",
+  "delivery_target": [
+    "CLI",
+    "Zed plugin",
+    "Ibal",
+    "SAM_LAW"
+  ],
+  "do_not": [
+    "reinstall older candidate",
+    "restart running sessions automatically",
+    "merge/approve PRs",
+    "duplicate Inbox 595/596",
+    "bypass BINS unbound authority"
+  ]
+}
