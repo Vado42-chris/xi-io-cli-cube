@@ -282,12 +282,44 @@ async function doctor(){
     id:s.id,declared_probe:s.probe,probe_state:'NOT_PROBED',
     observation:'CATALOG_DECLARATION_ONLY',product_identity_verified:false,effect_authority:0
   }));
-  const firstRed=local.state==='BLOCKED'?local.first_red:selection.first_red;
+  const active=activeWorkspace();
+  let workspaceResolved=null,workspaceReason=null;
+  try{workspaceResolved=workspaceRoot();}
+  catch(error){workspaceReason=String(error?.message||error).split(':')[0]||'PROJECT_ROOT_SELECTION_REQUIRED';}
+  const byId=new Map(rows.map(row=>[row.id,row]));
+  const observed=row=>Boolean(row&&['HTTP_OBSERVED_UNQUALIFIED','RUNNING_UNPROVEN','PASS'].includes(row.state));
+  const expectedService=id=>expected.has(id);
+  const fileState=workspaceResolved?'READY':'BLOCKED';
+  const ollamaRow=byId.get('ollama')||null,ibalRow=byId.get('ibal')||null;
+  const modelState=!expectedService('ollama')?'NOT_IN_PROFILE'
+    :fileState!=='READY'?'BLOCKED'
+    :observed(ollamaRow)?'OBSERVED_UNQUALIFIED':'BLOCKED';
+  const ibalState=!expectedService('ibal')?'NOT_IN_PROFILE'
+    :modelState==='BLOCKED'?'BLOCKED'
+    :observed(ibalRow)?'OBSERVED_UNQUALIFIED':'BLOCKED';
+  const readinessFirstRed=fileState!=='READY'?'ACTIVE_WORKSPACE_NOT_READY'
+    :expectedService('ollama')&&modelState==='BLOCKED'?'OLLAMA_NOT_OBSERVED'
+    :expectedService('ibal')&&ibalState==='BLOCKED'?'IBAL_RUNTIME_NOT_OBSERVED'
+    :null;
+  const firstRed=local.state==='BLOCKED'?local.first_red:selection.first_red||readinessFirstRed;
   const state=local.state==='BLOCKED'||selection.first_red?'UNKNOWN'
+    :readinessFirstRed?'PARTIAL'
     :rows.length&&rows.every(x=>x.state==='PASS')?'PASS':'PARTIAL';
   return{schema:'xiio.cli.doctor/v1',state,host,profile:selection.profile,first_red:firstRed,
-    active_workspace:activeWorkspace(),services:rows,unprofiled_candidates:outside,
+    active_workspace:active,services:rows,unprofiled_candidates:outside,
     responding_outside_profile:[],local_services_state:local.state,
+    work_readiness:{
+      direct_cli_file_work:{state:fileState,requires:['BOUNDED_WORKSPACE'],workspace:workspaceResolved,reason:workspaceReason,effect_authority:0},
+      local_ollama_work:{state:modelState,requires:['BOUNDED_WORKSPACE','OLLAMA_RUNTIME'],identity_qualified:false,effect_authority:0},
+      ibal_agent_work:{state:ibalState,requires:['BOUNDED_WORKSPACE','OLLAMA_RUNTIME','IBAL_RUNTIME'],identity_qualified:false,effect_authority:0},
+      remote_effect_work:{state:'NOT_PROBED',requires:['SWITCHBOARD','WARD','CURRENT_SESSION','BROKER_READBACK'],effect_authority:0}
+    },
+    host_integration_policy:{
+      xiio_core_independent_of_codex_mcp:true,
+      required_for_core:[],
+      optional_host_integrations:['data','openai-api-key-local-confirmation','codex-diagnostic-db'],
+      rule:'HOST_CLIENT_MCP_FAILURE != XIIO_CORE_RUNTIME_FAILURE'
+    },
     engines:(c.ai_engines||[]).map(x=>x.id),effect_authority:0,
     qualification_rule:'CATALOG_ENTRY != HEALTH_CHECK != WARD_AUTHORITY'};
 }
@@ -323,7 +355,10 @@ const MENU = [
   ['7','/models','What local models are available?'],
   ['8','/status','Is my local xi-io setup healthy?'],
   ['9','/clear','Clear this conversation'],
-  ['10','/exit','Exit xi-io']
+  ['10','/exit','Exit xi-io'],
+  ['11','/chat','Chat with Ibal — describe the work you need'],
+  ['12','/list','List this project’s files (no model needed)'],
+  ['13','/search','Find text in this project (no model needed)']
 ];
 
 function resolveMenuChoice(input){
@@ -426,7 +461,6 @@ function toolCatalog(){
     {name:'resolve_registry',description:'Read one named registry/current/ACK file.',write:false},
     {name:'local_scan',description:'Run the workspace baseline scanner in the no-network sandbox, after explicit approval. A receipt is not live authority.',write:true},
     {name:'cross_ux_triage',description:'Read and deduplicate workspace artifact content; never delete duplicates.',write:false},
-    {name:'ibal_balance',description:'Read historical PR5 donor notes, explicitly not a qualified current mathematics contract.',write:false},
     {name:'edit_workspace_file',description:'Change an existing file using copied old_text, new_text and optional expected_sha256. The file is replaced only when its approved bytes still match under a local cooperative lock. To create a file, give path and content. Each change requires explicit approval. Local locking does not replace Ward or BINS authority.',write:true},
     {name:'install_dependencies',description:'Install the exact packages pinned in package-lock.json (npm ci, install scripts blocked) so builds can run. Sandboxed; needs your yes.',write:true},
     {name:'list_services',description:'List configured local service candidates and their declared health endpoints. Listing proves neither installation nor current product identity or permission.',write:false},
@@ -522,7 +556,6 @@ async function executeTool(name,args,{root,approve}){
   };
   if(name==='local_scan')return approvedLocalScan(root,approve);
   if(name==='cross_ux_triage')return crossUxTriage(root,{terms:args?.terms?args.terms.split(','):undefined,maxFiles:args?.max_files?Number(args.max_files):4000,allowPath:p=>!credentialPath(p),readArtifact:rel=>readWorkspaceText(root,rel)});
-  if(name==='ibal_balance')return ibalBalanceGuide();
   if(name==='list_workspace'){
     const rel=String(args?.path||'.');const dir=safe(rel);
     return {path:rel,entries:fs.readdirSync(dir,{withFileTypes:true}).filter(x=>!credentialPath(path.join(dir,x.name))).slice(0,200).map(x=>({name:x.name,type:x.isDirectory()?'dir':x.isSymbolicLink()?'link':'file'}))};
@@ -691,7 +724,7 @@ function ollamaTools(){
   const defs={
     list_workspace:{path:{type:'string'}},search_workspace:{query:{type:'string'}},read_workspace_file:{path:{type:'string'}},
     git_status:{},list_registries:{},resolve_registry:{path:{type:'string'}},
-    local_scan:{},cross_ux_triage:{terms:{type:'string'},max_files:{type:'string'}},ibal_balance:{},
+    local_scan:{},cross_ux_triage:{terms:{type:'string'},max_files:{type:'string'}},
     edit_workspace_file:{path:{type:'string'},old_text:{type:'string'},new_text:{type:'string'},content:{type:'string'},expected_sha256:{type:'string'}},
     run_workspace_command:{command:{type:'string'}},install_dependencies:{},
     list_services:{},call_service:{service:{type:'string'},method:{type:'string'},path:{type:'string'},body:{type:'string'}}
@@ -816,7 +849,7 @@ async function providerReply(convo,{model,mode}){
 // that schema; the CLI validates every returned action and field
 // and every edit/command still needs the human's yes. XIIO_TOOL_MODE=native keeps
 // the old provider tool-calling path.
-const STRUCTURED_TOOLS=['local_scan','cross_ux_triage','ibal_balance','list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','install_dependencies','list_services','call_service'];
+const STRUCTURED_TOOLS=['local_scan','cross_ux_triage','list_workspace','search_workspace','read_workspace_file','git_status','list_registries','resolve_registry','edit_workspace_file','run_workspace_command','install_dependencies','list_services','call_service'];
 const STRUCTURED_FIELDS=['max_files','terms','path','query','content','old_text','new_text','expected_sha256','command','service','method','body','text'];
 function structuredSchema(){
   const properties={tool:{type:'string',enum:[...STRUCTURED_TOOLS,'answer']}};
@@ -827,7 +860,7 @@ const STRUCTURED_GUIDE=['Reply ONLY with one JSON object: {"tool":..., "path":""
   'tool="answer": text = your reply to the person. Use it when the task is done or you need to ask something.',
   'list_workspace: path (folder, "." for top). search_workspace: query. read_workspace_file: path. git_status / list_registries: no fields. resolve_registry: path.',
   'edit_workspace_file NEW file: path + content. EXISTING file: read it first, then path + old_text (copied exactly) + new_text + optional expected_sha256 from the read result. Edits fail closed if source bytes changed. Never rewrite a whole existing file.',
-  'local_scan: no fields. Requires approval, accepted SDK producer bytes and a sandbox; returns local static observations only. cross_ux_triage: optional comma-separated terms and max_files. ibal_balance: no fields.',
+  'local_scan: no fields. Requires approval, accepted SDK producer bytes and a sandbox; returns local static observations only. cross_ux_triage: optional comma-separated terms and max_files.',
   'run_workspace_command: command (runs sandboxed in the project, no network).',
   'install_dependencies: no fields. Use it before building or testing an npm project whose node_modules is missing.',
   'list_services: no fields. call_service: service (name from list_services), method, path (starting with /), body (JSON text or ""). Each service only allows what its access says (health = only GET its health_path). Never guess API paths.',
@@ -928,6 +961,7 @@ function humanTools(){
     '  • Create a text file or replace an exact piece of text after you approve the displayed change.',
     '  • Check a configured local health endpoint only; a response does not prove the product is ready. Broader service access is unavailable.',
     humanCommands(),
+    'Historical Ibal donor notes: xi-io-cli ibal balance. Informational and unqualified; not a model-callable action.',
     '/tools details shows the technical tool names and full descriptions.'].join('\n');
 }
 function humanExamples(){
@@ -972,6 +1006,16 @@ function humanDoctor(d,root){
     lines.push('  • '+humanText(row.id)+': '+observation+'.');
   }
   if(d.unprofiled_candidates.length)lines.push(d.unprofiled_candidates.length+' other catalog entries were not checked.');
+  if(d.work_readiness){
+    const label=x=>x==='READY'?'ready':x==='OBSERVED_UNQUALIFIED'?'runtime observed, qualification still required':x==='NOT_IN_PROFILE'?'not required by this host profile':'blocked';
+    lines.push('Core XI-IO work readiness:');
+    lines.push('  • Direct CLI file work: '+label(d.work_readiness.direct_cli_file_work?.state)+'.');
+    lines.push('  • Local Ollama work: '+label(d.work_readiness.local_ollama_work?.state)+'.');
+    lines.push('  • Ibal agent work: '+label(d.work_readiness.ibal_agent_work?.state)+'.');
+    lines.push('  • Remote effects: '+label(d.work_readiness.remote_effect_work?.state)+'.');
+  }
+  if(d.host_integration_policy?.xiio_core_independent_of_codex_mcp===true)
+    lines.push('Codex MCP startup and Codex diagnostic-database health are optional host integrations, not prerequisites for XI-IO core work.');
   lines.push(humanCommands(),'Nothing was changed. /status details shows the full doctor findings.');
   return lines.join('\n');
 }
@@ -1002,7 +1046,7 @@ function humanToolTurn(answer){
       if(typeof v.stderr==='string'&&v.stderr)lines.push('Command error output:\n'+preview(v.stderr));
     }
   }
-  if(!r.tool_results.length)lines.push('No tools were executed.');
+  if(!r.tool_results.length)lines.push('No tools were executed. No project file content was verified. Use /read PATH for an exact read.');
   if(r.provider_error&&!r.tool_results.some(f=>f.reason===r.provider_error))lines.push((r.source==='direct_read'?'The direct read did not complete: ':'The local model turn did not complete: ')+(reasons[r.provider_error]||humanText(r.provider_error))+(reasons[r.provider_error]?'':'.')+(r.tool_results.length?' Earlier tool results above still stand.':''));
   if(r.state==='FAILED'||r.state==='PARTIAL')lines.push('This request did not finish successfully.');
   const marker='\nModel reply (unverified narrative; not an execution receipt):\n';
@@ -1012,16 +1056,26 @@ function humanToolTurn(answer){
   return lines.join('\n');
 }
 
-function printMenu(){
-  process.stdout.write('\nxi-io: CLI\nWhat would you like to do?\n\n');
-  for(const [n,,label] of MENU)process.stdout.write('  '+n+'. '+label+'\n');
-  process.stdout.write('\nOr just tell me what you need in plain language.\n/read PATH reads a text file without a model. /menu returns to these choices.\n\n');
+function printMenu({model=null,lastTurn=null,all=false}={}){
+  const receipt=lastTurn?.receipt;
+  const failed=receipt && ['FAILED','PARTIAL'].includes(receipt.state);
+  // Suggestions are projections of observed state, not permission or a planner.
+  const preferred=!model?['7','12','13','8']
+    :failed?['3','8','12','13','5']
+    :receipt?.tool_results?.length?['4','3','13','5']
+    :['12','13','4','5','3'];
+  const rows=all?MENU:MENU.filter(([n])=>preferred.includes(n));
+  process.stdout.write('\n'+(all?'All CLI choices':!model?'Local model setup and file options':failed?'Options after the last incomplete action':receipt?.tool_results?.length?'Options for continuing this project':'Ways to get started')+'\n');
+  if(receipt)process.stdout.write('Last observed result: '+humanText(receipt.state)+'. '+(receipt.first_red?'Reason: '+humanText(receipt.first_red)+'. ':'')+'Task completion has not been inferred.\n/details shows the original evidence.\n');
+  for(const [n,,label] of rows)process.stdout.write('  '+n+'. '+label+'\n');
+  process.stdout.write('Choose a listed number, or keep chatting. /menu all shows every choice.\n');
+  return new Set(rows.map(([n])=>n));
 }
 const MODEL_FILE=path.join(CONFIG_DIR,'model');
 function savedModel(){try{return fs.readFileSync(MODEL_FILE,'utf8').trim()||null;}catch{return null;}}
 function saveModel(m){try{fs.mkdirSync(CONFIG_DIR,{recursive:true});fs.writeFileSync(MODEL_FILE,m+'\n',{mode:0o600});}catch{}}
 function commandLine(){const s=sandboxState();return s.ok?'Commands: run in a sandbox after you approve each one.':'Commands: not available here ('+s.reason+'). Reading and approved edits work.';}
-async function interactive(flags,args=[]){
+async function interactive(flags,args=[],{showMenu=false}={}){
   const explicit=flags.workspace||args[0]||null;
   const root=workspaceRoot(explicit);
   if(explicit)activate([root],{});
@@ -1033,7 +1087,7 @@ async function interactive(flags,args=[]){
   const remembered=savedModel();
   let model=requestedModel||(remembered&&names.includes(remembered)?remembered:null)||names[0]||null;
   const rl=readline.createInterface({input:process.stdin,output:process.stdout,terminal:Boolean(process.stdin.isTTY&&process.stdout.isTTY)});
-  let lastTurn=null;
+  let lastTurn=null, menuChoices=null;
   const showTurn=answer=>{lastTurn=answer;process.stdout.write((process.stdin.isTTY&&process.stdout.isTTY?humanToolTurn(answer):answer.text)+'\n');};
   let messages=[{role:'system',content:[
     'You are @ibal inside xi-io: CLI. Be conversational, concise, and practical.',
@@ -1050,25 +1104,48 @@ async function interactive(flags,args=[]){
     // y or yes, any case. Anything else, including Enter, is no.
     return ['y','yes'].includes((await rl.question('Approve this exact action? [y/N]: ')).trim().toLowerCase());
   };
-  printMenu();
-  process.stdout.write('Workspace: '+root+'\nModel: '+(model||'none discovered')+'\nEdits: shown to you first; nothing changes until you type yes.\n'+commandLine()+'\n');
-  process.stdout.write('Conversation is memory-only; exiting loses this chat. Session resume is not implemented.\n');
+  process.stdout.write('\nIbal · xi-io CLI\nProject: '+humanText(root)+'\nLocal model: '+humanText(model||'none discovered')+'\nWhat would you like to build or work on?\n/menu offers next-step options; /help shows commands. Changes still need your approval.\nThis chat is not saved between sessions.\n');
+  if(showMenu)menuChoices=printMenu({model,lastTurn});
   if(!model)process.stdout.write('No installed Ollama model found. Start Ollama with an already-installed model, then use /models and /model NAME. No model was downloaded.\n');
   try{
     for(;;){
       let input;try{input=await nextHumanInput(rl);}catch(e){if(e.code==='ERR_USE_AFTER_CLOSE'||e.code==='ABORT_ERR')break;throw e;}
-      const choice=resolveMenuChoice(input);
-      if(choice.invalid){process.stdout.write('Unknown menu number. Choose 1-10 or /exit. Nothing was sent to Ollama.\n');continue;}
+      // Bare numbers are ordinary chat unless the user explicitly opened a menu.
+      const numeric=/^\d+$/.test(input);
+      if(menuChoices && numeric && !menuChoices.has(input)){
+        process.stdout.write('That number is not in the displayed menu. Choose a listed number, type your task, or /menu all.\n');continue;
+      }
+      const choice=menuChoices && numeric?resolveMenuChoice(input):{command:input};
+      menuChoices=null;
       const cmd=choice.command;
       if(cmd==='/exit'){process.stdout.write('See you next time.\n');break;}
       if(cmd==='/clear'){messages=messages.slice(0,1);lastTurn=null;process.stdout.write('Conversation cleared. Workspace stays '+root+'.\n');continue;}
-      if(cmd==='/menu'){printMenu();continue;}
+      if(cmd==='/menu'||cmd==='/menu all'){menuChoices=printMenu({model,lastTurn,all:cmd==='/menu all'});continue;}
+      if(cmd==='/chat'){
+        process.stdout.write('Tell Ibal what you need at the next prompt. You can also type plain language directly without choosing a menu item.\n'+(model?'Selected local model: '+humanText(model)+'.':'No local model selected. Use /models and /model NAME; /list, /search and /read PATH work without one.')+'\n');
+        continue;
+      }
+      if(cmd==='/list'||cmd.startsWith('/list ')){
+        const directory=cmd.slice(5).trim()||'.';
+        const fact=await executeObservedTool('list_workspace',{path:directory},{root});
+        showTurn(toolFallbackText([fact],{source:'direct_read'}));continue;
+      }
+      if(cmd==='/search'||cmd.startsWith('/search ')){
+        let query=cmd.slice(7).trim();
+        if(!query){
+          if(!process.stdin.isTTY||!process.stdout.isTTY){process.stdout.write('Use /search TEXT to search this project without a model.\n');continue;}
+          try{query=(await rl.question('Search for (Enter cancels): ')).trim();}catch{break;}
+          if(!query){process.stdout.write('Search cancelled. No search was run.\n');continue;}
+        }
+        const fact=await executeObservedTool('search_workspace',{query},{root});
+        showTurn(toolFallbackText([fact],{source:'direct_read'}));continue;
+      }
       if(cmd==='/connect'){process.stdout.write(JSON.stringify(connectCommand(),null,2)+'\n');continue;}
       if(cmd==='/help'){process.stdout.write(humanHelp(model)+'\n');continue;}
       if(cmd==='/details'){process.stdout.write(lastTurn?lastTurn.text+'\n':'No execution receipt yet. Ask for work or use /read PATH first.\n');continue;}
       if(cmd==='/workspace'){process.stdout.write('You are working in '+root+'.\n');continue;}
       if(cmd==='/tools'){process.stdout.write(humanTools()+'\n');continue;}
-      if(cmd==='/tools details'){for(const t of toolCatalog())process.stdout.write('  '+t.name+(t.write?' [asks you first]':' [read]')+' — '+t.description+'\n');process.stdout.write(commandLine()+'\n');continue;}
+      if(cmd==='/tools details'){process.stdout.write('Informational only: xi-io-cli ibal balance reads historical unqualified donor notes; it is not a model action.\n');for(const t of toolCatalog())process.stdout.write('  '+t.name+(t.write?' [asks you first]':' [read]')+' — '+t.description+'\n');process.stdout.write(commandLine()+'\n');continue;}
       if(cmd==='/commands'){process.stdout.write(humanExamples()+'\n');continue;}
       if(cmd.startsWith('/model ')){const selected=cmd.slice(7).trim();if(!names.includes(selected)){process.stdout.write('Choose a discovered installed model from /models.\n');continue;}model=selected;saveModel(model);process.stdout.write('Local model changed to '+model+'.\n');continue;}
       if(cmd==='/model'){process.stdout.write('Local model: '+(model||'none selected')+' via Ollama. Use /model NAME to switch among /models.\n');continue;}
@@ -1315,13 +1392,14 @@ const rawArgv=process.argv.slice(2);
 let pre;try{pre=parse(rawArgv);}catch(e){emit({state:'FAIL',reason:String(e.message||e)},2);process.exit(2);}
 const explicitHelp=Boolean(pre.flags.help)||['help','-h'].includes(pre.command)&&pre.positionals.length>0;
 const explicitVersion=Boolean(pre.flags.version)||['version','-v'].includes(pre.command);
-const preIsDirectory=pre.command!=='help' && fs.existsSync(path.resolve(pre.command)) && fs.statSync(path.resolve(pre.command)).isDirectory();
+const TOP_LEVEL_COMMANDS=new Set(['help','-h','--help','version','-v','rollback','login','whoami','connect','device','activate','doctor','services','tools','engines','models','install','registry','runner','glass','scan','ux','ibal','menu','chat']);
+const preIsDirectory=!TOP_LEVEL_COMMANDS.has(pre.command) && fs.existsSync(path.resolve(pre.command)) && fs.statSync(path.resolve(pre.command)).isDirectory();
 const interactiveRequested=!explicitHelp&&!explicitVersion&&(
   rawArgv.length===0 || pre.command==='help' || pre.command==='menu' || pre.command==='chat' || preIsDirectory
 );
 if(interactiveRequested){
   const paths=['chat','menu'].includes(pre.command)?pre.positionals.slice(1):pre.positionals;
-  try{await interactive(pre.flags,paths);}catch(e){emit({state:'FAIL',reason:String(e.message||e)},2);process.exit(2);}
+  try{await interactive(pre.flags,paths,{showMenu:pre.command==='menu'});}catch(e){emit({state:'FAIL',reason:String(e.message||e)},2);process.exit(2);}
   process.exit(0);
 }
 const p=pre;
