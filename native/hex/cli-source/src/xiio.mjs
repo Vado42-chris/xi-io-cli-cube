@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync, spawn } from 'node:child_process';
 import readline from 'node:readline/promises';
 import crypto from 'node:crypto';
+import {compileCommandIntentProjection} from './sdk/audhd-command.mjs';
+import {evaluateAgentResponseRealization} from './sdk/tool-verb-fidelity.mjs';
 import {LOCAL_TOOL_INFERENCE_OPTIONS} from './sdk-provider-state.mjs';
 import {localScan,crossUxTriage,ibalBalanceGuide} from './local-ops.mjs';
 import {commitWorkspaceEditCAS} from './file-edit-cas.mjs';
@@ -369,31 +371,57 @@ function resolveMenuChoice(input){
 // Terminal adapter: accept the next instruction while a model turn is pending.
 // Queued task text is NEVER consumed as approval for a subsequently shown action.
 function createHumanConsole(interface_,output,{onInterrupt=()=>{},formatPrompt=p=>p}={}){
-  let pending=null,closed=false;const queued=[];
-  const end=()=>{closed=true;if(pending){pending.reject(Object.assign(Error('Console closed'),{code:'ERR_USE_AFTER_CLOSE'}));pending=null;}};
+  let pending=null,closed=false,pasting=false,burst=[],scheduled=null;
+  const queued=[];const keyboard=interface_.input;
+  const grouped=Boolean(keyboard?.isTTY)&&typeof setImmediate==='function';
+  const render=s=>String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g,'?');
+  const deliver=(line,{paste=false}={})=>{
+    if(closed)return;
+    if(!paste&&line==='/queue'){output.write('\nQueued tasks: '+queued.length+'. /queue clear discards them; /cancel all cancels current work and clears the queue.\n');if(pending)interface_.prompt(true);return;}
+    if(!paste&&(line==='/queue clear'||line==='/cancel all')){
+      const count=queued.length;queued.length=0;
+      if(line==='/cancel all'){onInterrupt();if(pending?.fresh){const p=pending;pending=null;p.resolve('');if(p.draft)interface_.write(p.draft);}}
+      output.write('\nDiscarded '+count+' queued task(s). Completed effects remain recorded.\n');if(pending)interface_.prompt(true);return;
+    }
+    // Pasted text, even "yes", is never approval of the currently displayed action.
+    if(pending&&!(paste&&pending.fresh)){
+      const p=pending;pending=null;p.resolve(line);if(p.draft)interface_.write(p.draft);
+    }else{queued.push(line);output.write('\nQueued for the next turn. '+queued.length+' task(s) waiting. /queue clear discards queued tasks; /cancel all also cancels current work.\n');}
+  };
+  const flush=()=>{scheduled=null;if(pasting||!burst.length)return;const batch=burst;burst=[];deliver(batch.join('\n'),{paste:batch.length>1});};
   const receive=line=>{
-    if(pending){const p=pending;pending=null;p.resolve(line);if(p.draft)interface_.write(p.draft);}
-    else{queued.push(line);output.write('\nQueued for the next turn. Current work continues; Ctrl+C requests cancellation.\n');}
+    if(pasting){burst.push(line);return;}
+    if(!grouped){deliver(line);return;}
+    burst.push(line);if(!scheduled)scheduled=setImmediate(flush);
   };
-  const interrupt=()=>{
-    onInterrupt();
-    if(pending?.fresh){const p=pending;pending=null;p.resolve('');if(p.draft)interface_.write(p.draft);}
+  const keypress=(text,key)=>{
+    if(key?.name==='paste-start'){if(scheduled){clearImmediate(scheduled);scheduled=null;}flush();pasting=true;return;}
+    if(key?.name==='paste-end'&&pasting){
+      if(interface_.line){burst.push(interface_.line);interface_.write(null,{ctrl:true,name:'u'});}
+      pasting=false;const lines=burst;burst=[];deliver(lines.join('\n'),{paste:true});
+    }
   };
+  const end=()=>{closed=true;if(scheduled&&grouped)clearImmediate(scheduled);scheduled=null;burst=[];if(pending){pending.reject(Object.assign(Error('Console closed'),{code:'ERR_USE_AFTER_CLOSE'}));pending=null;}};
+  const interrupt=()=>{pasting=false;burst=[];if(scheduled&&grouped)clearImmediate(scheduled);scheduled=null;onInterrupt();if(pending?.fresh){const p=pending;pending=null;p.resolve('');if(p.draft)interface_.write(p.draft);}};
   interface_.on('line',receive);interface_.on('close',end);interface_.on('SIGINT',interrupt);
+  if(keyboard?.isTTY&&keyboard.prependListener){keyboard.prependListener('keypress',keypress);output.write('\x1b[?2004h');}
   return {
     question(prompt){
       if(closed)return Promise.reject(Object.assign(Error('Console closed'),{code:'ERR_USE_AFTER_CLOSE'}));
       if(pending)return Promise.reject(Error('CONSOLE_QUESTION_ALREADY_PENDING'));
       const fresh=prompt!=='xi> '&&prompt!=='';
       if(!fresh&&queued.length){output.write(formatPrompt(prompt));return Promise.resolve(queued.shift());}
-      let draft='';
-      if(fresh&&interface_.line){draft=interface_.line;interface_.write(null,{ctrl:true,name:'u'});}
+      let draft='';if(fresh&&interface_.line){draft=interface_.line;interface_.write(null,{ctrl:true,name:'u'});}
       interface_.setPrompt(formatPrompt(prompt));interface_.prompt(true);
       return new Promise((resolve,reject)=>{pending={resolve,reject,fresh,draft};});
     },
-    close(){interface_.off('line',receive);interface_.off('SIGINT',interrupt);end();interface_.off('close',end);interface_.close();},
+    close(){if(keyboard?.isTTY&&keyboard.off){keyboard.off('keypress',keypress);output.write('\x1b[?2004l');}interface_.off('line',receive);interface_.off('SIGINT',interrupt);end();interface_.off('close',end);interface_.close();},
     queuedCount(){return queued.length;}
   };
+}
+function looksLikeShellPaste(input){
+  const text=String(input).trim();
+  return text.includes('\n')&&/^(?:#!.*\b(?:ba)?sh\b|[A-Za-z_][A-Za-z_0-9]*=|\(\s*\n|set -[a-z]*e|export PATH=|gh api\b|python3?\s+.*--install|curl\s+|```(?:bash|sh)\s*\n)/.test(text);
 }
 async function nextHumanInput(rl){
   // Blank lines from a pasted terminal block are never model instructions
@@ -471,7 +499,7 @@ function sandboxArgs(root,command,{network=false}={}){
   args.push('--bind',root,root);
   const git=path.join(root,'.git');if(fs.existsSync(git))args.push('--ro-bind',git,git);
   args.push('--chdir',root,'--setenv','HOME',home,'--setenv','TMPDIR','/tmp','--setenv','LANG',process.env.LANG||'C.UTF-8','--setenv','TERM','dumb',
-    '--setenv','PATH',[nodeBin,'/usr/local/bin','/usr/bin','/bin'].join(':'),'--','/bin/bash','-c',command);
+    '--setenv','PATH',[nodeBin,'/usr/local/bin','/usr/bin','/bin'].join(':'),'--','/bin/bash','-o','pipefail','-c',command);
   return args;
 }
 function sandboxRefusal(root){
@@ -710,8 +738,17 @@ async function executeTool(name,args,{root,approve}){
   }
   if(name==='read_workspace_file'||name==='resolve_registry'){
     const rel=String(args?.path||'');if(!rel)throw new Error('PATH_REQUIRED');const p=safe(rel);
-    const {buf,text}=readWorkspaceText(root,rel);
-    return {path:rel,content:text.slice(0,120000),sha256:sha256(buf),byte_length:buf.length,
+    let read,reference=null;
+    try{read=readWorkspaceText(root,rel);}
+    catch(error){
+      const fragment=/^(.*\.md)#([^#]+)$/i.exec(rel);
+      if(error?.code!=='ENOENT'||name!=='read_workspace_file'||!fragment)throw error;
+      safe(fragment[1]);read=readWorkspaceText(root,fragment[1]);
+      reference={kind:'markdown_fragment',resolved_path:fragment[1],fragment:fragment[2],
+        section_verified:false,note:'The full containing file was read. Locate and verify the section in its content; this reference is not proof the section exists.'};
+    }
+    const {buf,text}=read;
+    return {path:rel,...(reference?{reference}:{}),content:text.slice(0,120000),sha256:sha256(buf),byte_length:buf.length,
       full_content_returned:text.length<=120000,bins_version_qualified:false};
   }
   if(name==='git_status'){
@@ -1118,21 +1155,74 @@ async function finishNoProgressTurn(messages,convo,results,{model,signal}){
     const reply=await providerReply(finalConvo,{model,mode:'structured',signal,answerOnly:true});
     const action=structuredAction(reply);
     if(action.name!=='answer')return finishToolTurn(messages,results,{error:'NO_PROGRESS_FINAL_ANSWER_REQUIRED'});
-    return finishToolTurn(messages,results,{text:action.text});
+    const unfulfilled=unmetLocalWork(localWorkRequirement(messages),results)||!responseRealization(action.text,results).pass;
+    return finishToolTurn(messages,results,{text:action.text,...(unfulfilled?{error:'REQUESTED_ACTION_NOT_EXECUTED'}:{})});
   }catch(error){return finishToolTurn(messages,results,{error:error instanceof Error?error.message:'NO_PROGRESS_FINAL_ANSWER_FAILED'});}
 }
-async function ollamaChatStructured(messages,{model,root,approve,signal}){
-  const convo=[...messages],results=[],noProgress=createNoProgressGuard();
+function localWorkRequirement(messages){
+  const task=String([...messages].reverse().find(m=>m.role==='user')?.content||'').trim();
+  if(!task)return null;
+  // Adopt the SDK projection as meaning only. It grants no effect authority.
+  const projection=compileCommandIntentProjection(task,{workspaceIdentityState:'bound'});
+  if(projection.reason!=='current_turn_meaning_projection')return null;
+  const hasDirective=projection.intent?.directives?.some(row=>row.kind==='DIRECTIVE');
+  if(!projection.allowWrite&&!projection.allowTerminal&&!hasDirective)return null;
+  return {kind:[...(projection.allowWrite?['change']:[]),...(projection.allowTerminal?['execute']:[])].join(' and ')||'inspect',task,
+    requireWrite:projection.allowWrite,requireTerminal:projection.allowTerminal,commands:projection.command_requirements,
+    meaning_ref:projection.intent.raw_ref,authority_granted:false};
+}
+function responseRealization(text,results){
+  return evaluateAgentResponseRealization({responseText:text,
+    observedToolCalls:results.filter(f=>f.state==='SUCCEEDED').map(f=>f.name),
+    availableToolNames:toolCatalog().map(t=>t.name),
+    writeToolNames:['edit_workspace_file','run_workspace_command','install_dependencies'],
+    issuedPolicyReasons:results.filter(f=>f.reason).map(f=>f.reason)});
+}
+function unmetLocalWork(requirement,results){
+  if(!requirement)return false;
+  if(results.some(f=>f.state==='FAILED'||f.state==='PARTIAL'))return false;
+  const ok=results.filter(f=>f.state==='SUCCEEDED');
+  if(requirement.requireWrite&&!ok.some(f=>f.name==='edit_workspace_file'))return true;
+  if(requirement.requireTerminal){
+    const commands=ok.filter(f=>f.name==='run_workspace_command');
+    if(!commands.length)return true;
+    if(requirement.commands?.state==='RESOLVED'){
+      const used=new Set();
+      for(const expected of requirement.commands.obligations){
+        const index=commands.findIndex((fact,i)=>{
+          if(used.has(i))return false;
+          const actual=compileCommandIntentProjection('Run '+fact.arguments.command,{workspaceIdentityState:'bound'}).command_requirements;
+          return actual?.state==='RESOLVED'&&actual.obligations.length===1&&actual.obligations[0].command===expected.command
+            &&JSON.stringify(actual.obligations[0].args)===JSON.stringify(expected.args)
+            &&expected.expected_result?.kind==='EXIT_CODE'&&fact.result.status===expected.expected_result.exit_code;
+        });
+        if(index<0)return true;used.add(index);
+      }
+    }
+  }
+  return !requirement.requireWrite&&!requirement.requireTerminal&&ok.length===0;
+}
+function localRecoveryMessage(requirement){return 'The user requested '+requirement.kind+' work, but the recorded tool results do not establish that action. Use the appropriate tool now, within existing permissions and approval. Do not merely promise future work. If you cannot proceed, state the exact missing prerequisite. Do not invent task status or permission. Original request: '+requirement.task;}
+async function ollamaChatStructured(messages,{model,root,approve,signal,onProgress=()=>{}}){
+  const convo=[...messages],results=[],noProgress=createNoProgressGuard(),requirement=localWorkRequirement(messages);let recovered=false;
   if(convo[0]?.role==='system')convo[0]={...convo[0],content:convo[0].content+'\n'+STRUCTURED_GUIDE};
   for(let turn=0;turn<12;turn++){
     let msg,action;
     try{msg=await providerReply(convo,{model,mode:'structured',signal});action=structuredAction(msg);}
     catch(error){return finishToolTurn(messages,results,{error:error instanceof Error?error.message:'PROVIDER_REQUEST_FAILED'});}
     convo.push({role:'assistant',content:msg.content});
-    if(action.name==='answer')return finishToolTurn(messages,results,{text:action.text});
+    if(action.name==='answer'){
+      if(looksLikeToolCall(action.text))return finishToolTurn(messages,results,{text:action.text});
+      if(unmetLocalWork(requirement,results)||!responseRealization(action.text,results).pass){
+        if(recovered)return finishToolTurn(messages,results,{text:action.text,error:'REQUESTED_ACTION_NOT_EXECUTED'});
+        recovered=true;convo.push({role:'user',content:requirement?localRecoveryMessage(requirement):'The SDK response check found an unsupported action claim. Use actual tools within current approval or correct the claim. No authority is granted by this feedback.'});continue;
+      }
+      return finishToolTurn(messages,results,{text:action.text});
+    }
     if(signal?.aborted)return finishToolTurn(messages,results,{error:'USER_CANCELLED'});
+    onProgress({phase:'TOOL_PENDING',tool:action.name,results});
     const fact=await executeObservedTool(action.name,action.args,{root,approve});
-    results.push(fact);
+    results.push(fact);onProgress({phase:'TOOL_RETURNED',tool:action.name,results});
     convo.push({role:'user',content:'TOOL RESULT for '+action.name+': '+modelToolResult(fact)});
     if(fact.reason==='HUMAN_APPROVAL_REQUIRED')return finishToolTurn(messages,results,{error:'HUMAN_APPROVAL_REQUIRED'});
     if(noProgress(fact))return finishNoProgressTurn(messages,convo,results,{model,signal});
@@ -1143,19 +1233,27 @@ async function ollamaChat(messages,opts){
   if(String(process.env.XIIO_TOOL_MODE||'structured').toLowerCase()!=='native')return ollamaChatStructured(messages,opts);
   return ollamaChatNative(messages,opts);
 }
-async function ollamaChatNative(messages,{model,root,approve,signal}){
-  const convo=[...messages],results=[],noProgress=createNoProgressGuard();
+async function ollamaChatNative(messages,{model,root,approve,signal,onProgress=()=>{}}){
+  const convo=[...messages],results=[],noProgress=createNoProgressGuard(),requirement=localWorkRequirement(messages);let recovered=false;
   for(let turn=0;turn<12;turn++){
     let msg,calls;
     try{msg=await providerReply(convo,{model,mode:'native',signal});calls=nativeCalls(msg);}
     catch(error){return finishToolTurn(messages,results,{error:error instanceof Error?error.message:'PROVIDER_REQUEST_FAILED'});}
-    if(!calls.length)return finishToolTurn(messages,results,{text:msg.content.trim()});
+    if(!calls.length){
+      if(!meaningfulReply(msg.content)||looksLikeToolCall(msg.content))return finishToolTurn(messages,results,{text:msg.content.trim()});
+      if(unmetLocalWork(requirement,results)||!responseRealization(msg.content,results).pass){
+        if(recovered)return finishToolTurn(messages,results,{text:msg.content.trim(),error:'REQUESTED_ACTION_NOT_EXECUTED'});
+        recovered=true;convo.push({role:'assistant',content:msg.content},{role:'user',content:requirement?localRecoveryMessage(requirement):'The SDK response check found an unsupported action claim. Use actual tools within current approval or correct the claim. No authority is granted by this feedback.'});continue;
+      }
+      return finishToolTurn(messages,results,{text:msg.content.trim()});
+    }
     // Keep only validated provider fields in the conversation.
     convo.push({role:'assistant',content:msg.content,tool_calls:msg.tool_calls});
     for(const {name,args} of calls){
       if(signal?.aborted)return finishToolTurn(messages,results,{error:'USER_CANCELLED'});
+      onProgress({phase:'TOOL_PENDING',tool:name,results});
       const fact=await executeObservedTool(name,args,{root,approve});
-      results.push(fact);
+      results.push(fact);onProgress({phase:'TOOL_RETURNED',tool:name,results});
       convo.push({role:'tool',tool_name:name,content:modelToolResult(fact)});
       if(fact.reason==='HUMAN_APPROVAL_REQUIRED')return finishToolTurn(messages,results,{error:'HUMAN_APPROVAL_REQUIRED'});
     if(noProgress(fact))return finishNoProgressTurn(messages,convo,results,{model,signal});
@@ -1258,10 +1356,11 @@ function humanToolTurn(answer,{compact=false,color=false}={}){
   const heading=label=>terminalLabel(label,{tty:color});
   const labels={local_scan:'Local baseline',cross_ux_triage:'Artifact deduplication',ibal_balance:'Opposite-seat witness guide',list_workspace:'List files',search_workspace:'Search text',read_workspace_file:'Read file',resolve_registry:'Read project record',list_registries:'Find project records',git_status:'Inspect Git',edit_workspace_file:'Change file',run_workspace_command:'Run command',install_dependencies:'Install pinned dependencies',list_services:'List configured services',call_service:'Check service endpoint'};
   const preview=(text)=>{const s=humanText(text);return s.length>4000?s.slice(0,4000)+'\n[Display shortened; /details retains the full returned value.]':s;};
-  const reasons={HUMAN_APPROVAL_REQUIRED:'No approval was given, so this action was not performed.',CREDENTIAL_PATH_REFUSED:'Credential files are not accessible.',PATH_OUTSIDE_WORKSPACE:'That path is outside this workspace.',SYMLINK_OUTSIDE_WORKSPACE:'That link leaves the workspace.',BINARY_FILE_REFUSED:'This is not a text file.',NOT_UTF8_TEXT_REFUSED:'This file is not valid UTF-8 text.',NOT_A_REGULAR_FILE:'That path is not a regular file.',MODEL_ANSWER_EMPTY_OR_NULL:'The model did not return a usable answer.',MODEL_TEXT_IS_NOT_A_TOOL_CALL:'The model printed a tool-shaped reply instead of a valid action.',TOOL_LOOP_LIMIT:'The model reached the action limit without a final answer.'};
+  const reasons={HUMAN_APPROVAL_REQUIRED:'No approval was given, so this action was not performed.',CREDENTIAL_PATH_REFUSED:'Credential files are not accessible.',PATH_OUTSIDE_WORKSPACE:'That path is outside this workspace.',SYMLINK_OUTSIDE_WORKSPACE:'That link leaves the workspace.',BINARY_FILE_REFUSED:'This is not a text file.',NOT_UTF8_TEXT_REFUSED:'This file is not valid UTF-8 text.',NOT_A_REGULAR_FILE:'That path is not a regular file.',MODEL_ANSWER_EMPTY_OR_NULL:'The model did not return a usable answer.',MODEL_TEXT_IS_NOT_A_TOOL_CALL:'The model printed a tool-shaped reply instead of a valid action.',TOOL_LOOP_LIMIT:'The model reached the action limit without a final answer.',REQUESTED_ACTION_NOT_EXECUTED:'The local model did not perform the requested action after one recovery attempt. No completion is claimed.'};
   for(const fact of r.tool_results){
     if(compact)lines.push('\n'+heading('TOOL'));
     const v=fact.result||{},label=labels[fact.name]||'Action',where=v.path||fact.arguments?.path;
+    if(v.reference?.kind==='markdown_fragment')lines.push('Opened '+humanText(v.reference.resolved_path)+' for section reference '+humanText(v.reference.fragment)+'. Section existence is not yet verified.');
     if(fact.state==='FAILED'){
       const reason=String(fact.reason||'UNKNOWN');
       lines.push(label+(where?' '+humanText(where):'')+' — failed. '+(reasons[reason]||(reason.startsWith('ENOENT')?'The file was not found.':'The action could not be verified.'))+' ('+humanText(reason)+')');
@@ -1331,6 +1430,7 @@ async function interactive(flags,args=[],{showMenu=false}={}){
   const systemMessage={role:'system',content:[
     'You are @ibal inside xi-io: CLI. Be conversational, concise, and practical.',
     'The user is the Pilot; you are the Navigator/Engineer.',
+    'Current runtime date (UTC): '+new Date().toISOString().slice(0,10)+'. Dates and priority labels in documents are historical evidence, not proof a task is currently open or dependency-ready.',
     'Use tools instead of telling the user to run machine-resolvable steps. Call tools through the tool interface, never by writing JSON in your reply.',
     'Do not claim an effect without tool readback.',
     'To change an existing file, read it first, then call edit_workspace_file with old_text copied exactly from the file and new_text. Never rewrite a whole existing file.',
@@ -1363,7 +1463,8 @@ async function interactive(flags,args=[],{showMenu=false}={}){
     // y or yes, any case. Anything else, including Enter, is no.
     return ['y','yes'].includes((await rl.question('Approve this exact action? [y/N]: ')).trim().toLowerCase());
   };
-  process.stdout.write('\nIbal · xi-io CLI\nProject: '+humanText(root)+'\nLocal model: '+humanText(model||'none discovered')+'\nWhat would you like to build or work on?\n/menu offers next-step options; /help shows commands. Changes still need your approval.\nProject chat resumes locally on this computer. /clear removes its saved history.\n');
+  process.stdout.write('\nIbal · xi-io CLI\nProject: '+humanText(root)+'\nLocal model: '+humanText(model||'none discovered')+'\nWhat would you like to build or work on?\n/menu offers next-step options; /help shows commands. Changes still need your approval. /queue shows waiting tasks; /cancel all cancels and clears them.\nProject chat resumes locally on this computer. /clear removes its saved history.\n');
+  if(session.lastTurn?.receipt?.source==='local_task_checkpoint')process.stdout.write('An interrupted task is preserved. /details shows its last recorded step. Effects are not replayed automatically.\n');
   if(session.state==='PASS'&&session.messages.length)process.stdout.write('Resumed '+session.messages.filter(m=>m.role==='user').length+' prior project turn(s).\n');
   if(session.state==='BLOCKED')process.stdout.write('Saved project chat was left untouched because it could not be verified: '+humanText(session.reason)+'. This session will not overwrite it; /clear can remove a regular local session file.\n');
   if(showMenu)menuChoices=printMenu({model,lastTurn});
@@ -1371,6 +1472,7 @@ async function interactive(flags,args=[],{showMenu=false}={}){
   try{
     for(;;){
       let input;try{input=await nextHumanInput(rl);}catch(e){if(e.code==='ERR_USE_AFTER_CLOSE'||e.code==='ABORT_ERR')break;throw e;}
+      if(looksLikeShellPaste(input)){process.stdout.write('This is a shell script pasted into chat. Nothing was sent to the model or executed. Use a normal Bash terminal for installer scripts.\n');continue;}
       // Bare numbers are ordinary chat unless the user explicitly opened a menu.
       const numeric=/^\d+$/.test(input);
       if(menuChoices && numeric && !menuChoices.has(input)){
@@ -1441,7 +1543,15 @@ async function interactive(flags,args=[],{showMenu=false}={}){
       messages.push({role:'user',content:input});
       try{
         activeTurn=new AbortController();
-        const answer=await ollamaChat(messages,{model,root,approve,signal:activeTurn.signal});
+        const taskId=crypto.randomUUID();
+        const checkpoint=progress=>{
+          lastTurn=toolFallbackText(progress.results||[],{source:'local_task_checkpoint',error:'TASK_INTERRUPTED_OR_IN_PROGRESS'});
+          lastTurn.receipt.task={id:taskId,request:input,phase:progress.phase,tool:progress.tool||null,automatic_replay:false};
+          lastTurn.text='Actual execution receipt (CLI-observed, not model claims):\n'+JSON.stringify(lastTurn.receipt,null,2);
+          if(!persistSession())throw Error('TASK_CHECKPOINT_NOT_SAVED');
+        };
+        checkpoint({phase:'STARTED',results:[]});
+        const answer=await ollamaChat(messages,{model,root,approve,signal:activeTurn.signal,onProgress:checkpoint});
         showTurn(answer);persistSession();
       }
       catch(e){

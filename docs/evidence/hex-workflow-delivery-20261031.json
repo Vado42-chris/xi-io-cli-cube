@@ -1,0 +1,42 @@
+{
+  "schema": "xiio.hex.workflow-delivery-proof/v1",
+  "source_sha": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
+  "source_evidence": "docs/evidence/cli-workflow-repair-20261031.json",
+  "package": {
+    "schema": "xiio.hex.offline-payload-delivery-proof/v1",
+    "state": "PASS",
+    "source_sha": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
+    "payload_files": 10,
+    "fresh_install": true,
+    "same_sha_new_generation": true,
+    "rollback_both_directions": true,
+    "user_config_preserved": true,
+    "version_integrity_readback": true,
+    "tampered_module_refused": true,
+    "missing_module_manifest_refused": true,
+    "refusals_preserve_current": true,
+    "installed_on": "DISPOSABLE_CLOUD_ONLY"
+  },
+  "download": {
+    "state": "PASS",
+    "transport": "SYNTHETIC_GITHUB_API_FIXTURE",
+    "actual_offline_installer": true,
+    "verified_download_install": true,
+    "cached_tamper_refused": true,
+    "current_preserved": true,
+    "production_github_auth": "NOT_TESTED"
+  },
+  "sdk_upgrade": {
+    "state": "PASS",
+    "old_eight_to_new_ten": true,
+    "same_launcher": true,
+    "sdk_tampering_refused": 2,
+    "refusals_preserve_current": true,
+    "rollback_to_old_version_verified": true,
+    "reinstall_new_verified": true,
+    "host": "disposable cloud"
+  },
+  "bootstrap_sha256": "8a4be0d3d0ab0db19619b64e3d566e46722cfa73ce02029f53b8aeb6f2e1b260",
+  "production_installation": "NOT_YET_VERIFIED",
+  "authority": "No native Ward/BINS/A2A claims. Existing offline approval and sandbox remain."
+}

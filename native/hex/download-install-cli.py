@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Pinned downloader for the EXISTING HEX offline CLI installer. No new installer."""
 import argparse,base64,hashlib,importlib.util,json,os,pathlib,re,shutil,subprocess,sys,tempfile
-SOURCE_SHA="dd6b5b0dfec7c75dfd5135875bb46124a30b4041"
-INSTALLER_SHA="7cfb4bed6ba2c5e20c9c4e6aa9089ccdd9172ae88e5b3df3add78134662b50de"
-MANIFEST_SHA="118c7346fed08d92c5136a389c25c65069fdf9a530b9462b391991ea9e8c3d24"
-FILES=['src/xiio.mjs', 'src/file-edit-cas.mjs', 'src/local-ops.mjs', 'src/runtime-integrity.mjs', 'config/service-catalog.json', 'scripts/service-inventory.mjs', 'scripts/reconcile-service-inventory.mjs', 'src/sdk-provider-state.mjs']
+SOURCE_SHA="c4e2b9f8738d2d2e074301608ca6b263d635852f"
+INSTALLER_SHA="83e823bea184ddf2ec7334cd937c61a1d89b1c8034edfbd60e37960c92aa4d9b"
+MANIFEST_SHA="6666c7e8c5a3177d14a2baa03941ff52b5671af96e71687dde3c2130da3598fe"
+FILES=['src/xiio.mjs', 'src/file-edit-cas.mjs', 'src/local-ops.mjs', 'src/runtime-integrity.mjs', 'config/service-catalog.json', 'scripts/service-inventory.mjs', 'scripts/reconcile-service-inventory.mjs', 'src/sdk-provider-state.mjs', 'src/sdk/audhd-command.mjs', 'src/sdk/tool-verb-fidelity.mjs']
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 def get_file(carrier,name,source_path=None):

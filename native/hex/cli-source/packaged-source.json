@@ -1,10 +1,10 @@
 {
   "schema": "xiio.cli.packaged-source/v1",
-  "source_sha": "dd6b5b0dfec7c75dfd5135875bb46124a30b4041",
+  "source_sha": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
   "files": {
     "src/xiio.mjs": {
-      "sha256": "0e0ec8603bde37f8578bf1132dfb6f1c3b04270e87cb1c14e7d8dfe0039a90f8",
-      "size": 139526
+      "sha256": "1625e3fa29570653a564eeb7d8d3250b129f081e1776ccc83c488615020a134f",
+      "size": 149185
     },
     "src/file-edit-cas.mjs": {
       "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
@@ -15,8 +15,8 @@
       "size": 6604
     },
     "src/runtime-integrity.mjs": {
-      "sha256": "d50a8e7050e8920c4b8afd2c6e9f074b344bf70bc94d1b38f02dd6989b6d82a9",
-      "size": 11223
+      "sha256": "0f55b035784809488ab47fc27fef8a6fe96390a895aff96009c6edc1097bf248",
+      "size": 11755
     },
     "config/service-catalog.json": {
       "sha256": "473a6e0d6fc2c7da21ed510906e9a85c4a9c22617b4db1f1f107e0482b75f30a",
@@ -33,6 +33,14 @@
     "src/sdk-provider-state.mjs": {
       "sha256": "e83108fa0a87e91c450d4b5a613dc3b215eae47b21d29d8e812e562ffedac55e",
       "size": 9127
+    },
+    "src/sdk/audhd-command.mjs": {
+      "sha256": "85b0adc068a51664992d0d1870b6c1deef133b1987fecb64c33f1098de43d147",
+      "size": 22457
+    },
+    "src/sdk/tool-verb-fidelity.mjs": {
+      "sha256": "a645b456395bac5c6d3881cfe76e54820e5fc6951d01f3c022ef90197e73412c",
+      "size": 15812
     }
   }
 }
