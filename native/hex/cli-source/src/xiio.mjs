@@ -368,7 +368,7 @@ function resolveMenuChoice(input){
 }
 // Terminal adapter: accept the next instruction while a model turn is pending.
 // Queued task text is NEVER consumed as approval for a subsequently shown action.
-function createHumanConsole(interface_,output,{onInterrupt=()=>{}}={}){
+function createHumanConsole(interface_,output,{onInterrupt=()=>{},formatPrompt=p=>p}={}){
   let pending=null,closed=false;const queued=[];
   const end=()=>{closed=true;if(pending){pending.reject(Object.assign(Error('Console closed'),{code:'ERR_USE_AFTER_CLOSE'}));pending=null;}};
   const receive=line=>{
@@ -385,10 +385,10 @@ function createHumanConsole(interface_,output,{onInterrupt=()=>{}}={}){
       if(closed)return Promise.reject(Object.assign(Error('Console closed'),{code:'ERR_USE_AFTER_CLOSE'}));
       if(pending)return Promise.reject(Error('CONSOLE_QUESTION_ALREADY_PENDING'));
       const fresh=prompt!=='xi> '&&prompt!=='';
-      if(!fresh&&queued.length){output.write(prompt);return Promise.resolve(queued.shift());}
+      if(!fresh&&queued.length){output.write(formatPrompt(prompt));return Promise.resolve(queued.shift());}
       let draft='';
       if(fresh&&interface_.line){draft=interface_.line;interface_.write(null,{ctrl:true,name:'u'});}
-      interface_.setPrompt(prompt);interface_.prompt(true);
+      interface_.setPrompt(formatPrompt(prompt));interface_.prompt(true);
       return new Promise((resolve,reject)=>{pending={resolve,reject,fresh,draft};});
     },
     close(){interface_.off('line',receive);interface_.off('SIGINT',interrupt);end();interface_.off('close',end);interface_.close();},
@@ -1247,22 +1247,30 @@ function humanDoctor(d,root){
   lines.push(humanCommands(),'Nothing was changed. /status details shows the full doctor findings.');
   return lines.join('\n');
 }
-function humanToolTurn(answer){
+// Presentation only: never change receipts, model context, permissions or saved turns.
+function terminalLabel(label,{tty=Boolean(process.stdout.isTTY&&process.stdin.isTTY),env=process.env}={}){
+  const codes={YOU:36,IBAL:35,TOOL:34,STATUS:33};
+  return tty&&!Object.hasOwn(env,'NO_COLOR')&&env.TERM!=='dumb'
+    ? '\x1b[1;'+(codes[label]||37)+'m'+label+'\x1b[0m' : label;
+}
+function humanToolTurn(answer,{compact=false,color=false}={}){
   const r=answer.receipt,lines=[];
+  const heading=label=>terminalLabel(label,{tty:color});
   const labels={local_scan:'Local baseline',cross_ux_triage:'Artifact deduplication',ibal_balance:'Opposite-seat witness guide',list_workspace:'List files',search_workspace:'Search text',read_workspace_file:'Read file',resolve_registry:'Read project record',list_registries:'Find project records',git_status:'Inspect Git',edit_workspace_file:'Change file',run_workspace_command:'Run command',install_dependencies:'Install pinned dependencies',list_services:'List configured services',call_service:'Check service endpoint'};
   const preview=(text)=>{const s=humanText(text);return s.length>4000?s.slice(0,4000)+'\n[Display shortened; /details retains the full returned value.]':s;};
   const reasons={HUMAN_APPROVAL_REQUIRED:'No approval was given, so this action was not performed.',CREDENTIAL_PATH_REFUSED:'Credential files are not accessible.',PATH_OUTSIDE_WORKSPACE:'That path is outside this workspace.',SYMLINK_OUTSIDE_WORKSPACE:'That link leaves the workspace.',BINARY_FILE_REFUSED:'This is not a text file.',NOT_UTF8_TEXT_REFUSED:'This file is not valid UTF-8 text.',NOT_A_REGULAR_FILE:'That path is not a regular file.',MODEL_ANSWER_EMPTY_OR_NULL:'The model did not return a usable answer.',MODEL_TEXT_IS_NOT_A_TOOL_CALL:'The model printed a tool-shaped reply instead of a valid action.',TOOL_LOOP_LIMIT:'The model reached the action limit without a final answer.'};
   for(const fact of r.tool_results){
+    if(compact)lines.push('\n'+heading('TOOL'));
     const v=fact.result||{},label=labels[fact.name]||'Action',where=v.path||fact.arguments?.path;
     if(fact.state==='FAILED'){
       const reason=String(fact.reason||'UNKNOWN');
       lines.push(label+(where?' '+humanText(where):'')+' — failed. '+(reasons[reason]||(reason.startsWith('ENOENT')?'The file was not found.':'The action could not be verified.'))+' ('+humanText(reason)+')');
     }else if(['read_workspace_file','resolve_registry'].includes(fact.name)){
-      lines.push('Read '+humanText(v.path)+' ('+v.byte_length+' bytes)'+(fact.state==='PARTIAL'?' — only part of the file was returned.':' — file content returned.')+'\n'+(v.content===''?'[Empty file: 0 bytes.]':preview(v.content)));
+      lines.push('Read '+humanText(v.path)+' ('+v.byte_length+' bytes)'+(fact.state==='PARTIAL'?' — only part of the file was returned.':' — file content returned.')+'\n'+(v.content===''?'[Empty file: 0 bytes.]':compact&&r.source!=='direct_read'?'Content retained. /details shows the returned text.':preview(v.content)));
     }else if(fact.name==='edit_workspace_file')lines.push((v.created?'Created ':'Changed ')+humanText(v.path)+' — written bytes match the readback.'+(v.bytes_outside_change_preserved===true?' Other bytes were preserved.':''));
     else if(fact.name==='list_workspace')lines.push('Files in '+humanText(v.path)+':\n'+preview(v.entries.map(x=>x.name+(x.type==='dir'?'/':'')).join('\n')||'[No entries returned.]'));
     else if(fact.name==='search_workspace')lines.push('Matches for '+humanText(v.query)+':\n'+preview(v.matches.join('\n')||'[No matches returned.]'));
-    else if(fact.name==='git_status')lines.push('Git branch: '+humanText(v.branch||'(detached HEAD)')+'\nWorking-tree entries: '+String(v.status.split('\n').filter(line=>line.trim().length>0).length)+'\n'+preview(v.status||'No working-tree changes reported.')+'\nSubmodule contents were not inspected.');
+    else if(fact.name==='git_status')lines.push('Git branch: '+humanText(v.branch||'(detached HEAD)')+'\nWorking-tree entries: '+String(v.status.split('\n').filter(line=>line.trim().length>0).length)+'\n'+(compact ? (v.status.trim()?v.status.split('\n').filter(line=>line.trim()).slice(0,5).map(line=>humanText(line)).join('\n')+(v.status.split('\n').filter(line=>line.trim()).length>5?'\n[Showing 5 entries; /details retains all observed entries.]':''):'No working-tree changes reported.') : preview(v.status||'No working-tree changes reported.'))+'\nSubmodule contents were not inspected.');
     else if(fact.name==='list_registries')lines.push(humanRegistry(v));
     else if(fact.name==='list_services')lines.push('Configured service candidates: '+humanText(v.services.map(x=>x.service).join(', ')||'none')+'. Listing is not product health or permission. Only declared health endpoints are available.');
     else if(fact.name==='call_service')lines.push(humanText(v.service)+': endpoint returned HTTP '+v.status+'. Product health, identity and broader permission are not verified.\n'+preview(v.body));
@@ -1274,14 +1282,16 @@ function humanToolTurn(answer){
       if(typeof v.stderr==='string'&&v.stderr)lines.push('Command error output:\n'+preview(v.stderr));
     }
   }
+  if(compact)lines.push('\n'+heading('STATUS'));
   if(!r.tool_results.length)lines.push('No tools were executed. No project file content was verified. Use /read PATH for an exact read.');
   if(r.provider_error&&!r.tool_results.some(f=>f.reason===r.provider_error))lines.push((r.source==='direct_read'?'The direct read did not complete: ':'The local model turn did not complete: ')+(reasons[r.provider_error]||humanText(r.provider_error))+(reasons[r.provider_error]?'':'.')+(r.tool_results.length?' Earlier tool results above still stand.':''));
   if(r.state==='FAILED'||r.state==='PARTIAL')lines.push('This request did not finish successfully.');
+  else if(compact&&r.tool_results.length)lines.push('Tool results recorded. Goal completion is not independently verified.');
   const marker='\nModel reply (unverified narrative; not an execution receipt):\n';
   const at=answer.text.indexOf(marker);
-  if(at>=0&&r.state!=='FAILED'&&r.state!=='PARTIAL')lines.push('Model explanation (unverified):\n'+humanText(answer.text.slice(at+marker.length)));
+  if(at>=0&&r.state!=='FAILED'&&r.state!=='PARTIAL')lines.push((compact?'\n'+heading('IBAL')+' · explanation, not proof\n':'Model explanation (unverified):\n')+humanText(answer.text.slice(at+marker.length)));
   lines.push('/details shows the full execution receipt and model reply.');
-  return lines.join('\n');
+  return lines.join('\n')+(compact?'\n':'');
 }
 
 function printMenu({model=null,lastTurn=null,all=false}={}){
@@ -1317,7 +1327,7 @@ async function interactive(flags,args=[],{showMenu=false}={}){
   const sessionModel=session.state==='PASS'&&session.model&&names.includes(session.model)?session.model:null;
   let model=requestedModel||sessionModel||(remembered&&names.includes(remembered)?remembered:null)||names[0]||null;
   let activeTurn=null;
-  const rl=createHumanConsole(readline.createInterface({input:process.stdin,output:process.stdout,terminal:Boolean(process.stdin.isTTY&&process.stdout.isTTY)}),process.stdout,{onInterrupt:()=>{if(activeTurn){activeTurn.abort(Error('USER_CANCELLED'));process.stdout.write('\nCancellation requested. Completed effects remain recorded.\n');}}});
+  const rl=createHumanConsole(readline.createInterface({input:process.stdin,output:process.stdout,terminal:Boolean(process.stdin.isTTY&&process.stdout.isTTY)}),process.stdout,{formatPrompt:p=>p==='xi> '?terminalLabel('YOU')+' · '+p:p,onInterrupt:()=>{if(activeTurn){activeTurn.abort(Error('USER_CANCELLED'));process.stdout.write('\nCancellation requested. Completed effects remain recorded.\n');}}});
   const systemMessage={role:'system',content:[
     'You are @ibal inside xi-io: CLI. Be conversational, concise, and practical.',
     'The user is the Pilot; you are the Navigator/Engineer.',
@@ -1332,7 +1342,7 @@ async function interactive(flags,args=[],{showMenu=false}={}){
   let sessionBytes=session.state==='PASS'?session.bytes:null;
   let sessionWritable=session.state!=='BLOCKED';
   let sessionWarningShown=false;
-  const showTurn=answer=>{lastTurn=answer;process.stdout.write((process.stdin.isTTY&&process.stdout.isTTY?humanToolTurn(answer):answer.text)+'\n');};
+  const showTurn=answer=>{lastTurn=answer;process.stdout.write((process.stdin.isTTY&&process.stdout.isTTY?humanToolTurn(answer,{compact:true,color:true}):answer.text)+'\n');};
   const persistSession=()=>{
     if(!sessionWritable)return false;
     try{sessionBytes=saveChatSession(root,{messages:messages.slice(1),lastTurn,model},sessionBytes);return true;}

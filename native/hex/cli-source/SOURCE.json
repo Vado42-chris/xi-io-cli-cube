@@ -65,12 +65,12 @@
   "ref_role": "Historical initial adoption base; current eight-file payload authority is current_packaged_payload and packaged-source.json.",
   "current_packaged_payload": {
     "repository": "Vado42-chris/xi-io-cli",
-    "ref": "b1f70cdd6c848bea49e76f2d1cd45f67357f0f35",
+    "ref": "dd6b5b0dfec7c75dfd5135875bb46124a30b4041",
     "manifest": "packaged-source.json",
     "files": {
       "src/xiio.mjs": {
-        "sha256": "6cb3eb86b76c6951c9a6487de1e72101c2e197593a839ed57d4254a69ed0e370",
-        "size": 138251
+        "sha256": "0e0ec8603bde37f8578bf1132dfb6f1c3b04270e87cb1c14e7d8dfe0039a90f8",
+        "size": 139526
       },
       "src/file-edit-cas.mjs": {
         "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
