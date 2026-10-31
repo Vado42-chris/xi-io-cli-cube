@@ -74,17 +74,17 @@ test('current payload provenance and bounded fresh-generation custody producer a
  assert.equal(source.current_packaged_payload.ref,payload.source_sha);
  assert.deepEqual(source.current_packaged_payload.files,payload.files);
  assert.equal(source.current_packaged_payload.local_payload_modifications,false);
- assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),'98590a8b8c2aa5ec35ce5ed56c02d128dd422cb368422bd56e0c7f4dd04b13f8');
+ assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),'21436f6171aef695412dab917a11a5eb674d40ade6df3a02e9f8f73f08f81f36');
  assert.equal(source.offline_installer_successor.base_ref,'f1bca1245436167fc7767bc31925486643e5d2e7');
  assert.equal(source.offline_installer_successor.base_sha256,'6311b606049f07d35bc31e78f73218a95a114d3723c9f8b97bcb8f3262d8d5a6');
- assert.equal(source.offline_installer_successor.sha256,'1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a');
+ assert.equal(source.offline_installer_successor.sha256,'c0ea1f4fe80a9d58df0f0270311de7fee7f9d4a5bcb1f6c530c9a92c9f1b28f4');
  assert.equal(createHash('sha256').update(read(base+'install.mjs')).digest('hex'),source.offline_installer_successor.sha256);
 });
 
-test('current seven-file payload and historical repair verifier keep separate exact custody',()=>{
+test('current eight-file payload and historical repair verifier keep separate exact custody',()=>{
  const base='native/hex/cli-source/',payload=json(base+'packaged-source.json'),repair=json(base+'launcher-repair.SOURCE.json');
- assert.equal(payload.source_sha,'ff90881b0311d0a8241e0631017f74d981cda0e2');
- assert.equal(Object.keys(payload.files).length,7);assert.ok(payload.files['src/local-ops.mjs']);
+ assert.equal(payload.source_sha,'ada4dde00ea3ca7322473574b13eb97d14a1ba75');
+ assert.equal(Object.keys(payload.files).length,8);assert.ok(payload.files['src/local-ops.mjs']);assert.ok(payload.files['src/sdk-provider-state.mjs']);
  const helper=read(base+'src/runtime-integrity.mjs').split('\n').filter(line=>!line.startsWith('import ')).join('\n').replace(/^export /gm,'').trim();
  const producer=read(base+'install.mjs');const start=producer.indexOf('\n',producer.indexOf('// BEGIN runtime-integrity standalone mirror'));
  const mirror=producer.slice(start,producer.indexOf('// END runtime-integrity standalone mirror')).trim();
