@@ -27,7 +27,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 native/hex/cli-source/test_packaged_chat_first.py
-          test "$(sha256sum native/hex/cli-source/src/xiio.mjs | awk '{print $1}')" = "98590a8b8c2aa5ec35ce5ed56c02d128dd422cb368422bd56e0c7f4dd04b13f8"
+          # The custody test above checks the exact source pin and every file digest.
+          node --check native/hex/cli-source/src/xiio.mjs
 
       - name: Install real local Ollama and PTY driver
         run: |
@@ -60,7 +61,7 @@ jobs:
           mkdir -p "$work/project"
           printf 'status: old\n' > "$work/project/NOTE.txt"
           cat > "$work/proof.py" <<'PY'
-          import os, pathlib, pexpect, time
+          import os, pathlib, pexpect, time, json, hashlib
 
           root=pathlib.Path(os.environ["XIIO_PROOF_ROOT"])
           runtime=pathlib.Path(os.environ["XIIO_RUNTIME"])
@@ -80,8 +81,15 @@ jobs:
               child.expect("xi> ")
               child.sendline("Read NOTE.txt using your file tool. Tell me the exact current status. Do not guess.")
               child.expect("xi> ", timeout=180)
-              first=transcript.read_text(encoding="utf-8",errors="replace")
-              if "status: old" not in first:
+              child.sendline("/details")
+              child.expect("xi> ", timeout=30)
+              details=child.before.replace("\\r\\n","\\n")
+              marker="Actual execution receipt (CLI-observed, not model claims):\\n"
+              if marker not in details:
+                  raise SystemExit("REAL_OLLAMA_READ_RECEIPT_MISSING")
+              receipt,_=json.JSONDecoder().raw_decode(details.split(marker,1)[1])
+              reads=[f for f in receipt.get("tool_results",[]) if f.get("name")=="read_workspace_file" and f.get("state")=="SUCCEEDED" and f.get("result",{}).get("path")=="NOTE.txt"]
+              if not reads or reads[-1]["result"].get("content")!="status: old\\n" or reads[-1]["result"].get("sha256")!=hashlib.sha256(b"status: old\\n").hexdigest():
                   raise SystemExit("REAL_OLLAMA_READBACK_MISSING")
 
               child.sendline("Change the exact text status: old in NOTE.txt to status: new. Read the file first, make only that edit, then verify the result.")
