@@ -62,15 +62,15 @@
   "modifications": {
     "install.mjs": "Existing offline verified packaged-source transport plus bounded fresh-generation custody correction; upstream generation/launcher/pointer machinery preserved. Canonical launcher-only repair remains separate and unchanged. Runtime-integrity mirror joined exactly from current packaged CLI source to admit local-ops without rewriting historical receipts."
   },
-  "ref_role": "Historical initial adoption base; current seven-file payload authority is current_packaged_payload and packaged-source.json, not the historical blob list.",
+  "ref_role": "Historical initial adoption base; current eight-file payload authority is current_packaged_payload and packaged-source.json.",
   "current_packaged_payload": {
     "repository": "Vado42-chris/xi-io-cli",
-    "ref": "d6b632490d2363e0cba4dd63f1e83f45d09d8adc",
+    "ref": "1d7543a3cf33a3c2d83363825e120a31e28a8bdf",
     "manifest": "packaged-source.json",
     "files": {
       "src/xiio.mjs": {
-        "sha256": "98590a8b8c2aa5ec35ce5ed56c02d128dd422cb368422bd56e0c7f4dd04b13f8",
-        "size": 121214
+        "sha256": "ac1df57853538be1b7fd2af6746a77b06754ed3cef437d0fb06c1c34f84c15c7",
+        "size": 133680
       },
       "src/file-edit-cas.mjs": {
         "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
@@ -81,8 +81,8 @@
         "size": 6604
       },
       "src/runtime-integrity.mjs": {
-        "sha256": "dd78441a47710df2c193369bd1aa829bfd08a827868e6ffa66d84281fffc1482",
-        "size": 10963
+        "sha256": "d50a8e7050e8920c4b8afd2c6e9f074b344bf70bc94d1b38f02dd6989b6d82a9",
+        "size": 11223
       },
       "config/service-catalog.json": {
         "sha256": "473a6e0d6fc2c7da21ed510906e9a85c4a9c22617b4db1f1f107e0482b75f30a",
@@ -95,16 +95,20 @@
       "scripts/reconcile-service-inventory.mjs": {
         "sha256": "eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e",
         "size": 3960
+      },
+      "src/sdk-provider-state.mjs": {
+        "sha256": "e83108fa0a87e91c450d4b5a613dc3b215eae47b21d29d8e812e562ffedac55e",
+        "size": 9127
       }
     },
     "local_payload_modifications": false
   },
   "offline_installer_successor": {
     "repository": "Vado42-chris/xi-io-cli-cube",
-    "base_ref": "f1bca1245436167fc7767bc31925486643e5d2e7",
+    "base_ref": "8dbd369c5c6b03637d0b04518400d405153e6885",
     "path": "native/hex/cli-source/install.mjs",
-    "base_sha256": "6311b606049f07d35bc31e78f73218a95a114d3723c9f8b97bcb8f3262d8d5a6",
-    "sha256": "1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a",
-    "scope": "Existing offline packaged-source installer and side-by-side rollback kernel preserved. Interactive staging smoke now exits the chat-first CLI with /exit instead of relying on the retired numeric front-door menu. Exact current CLI payload is pinned by packaged-source.json; no model/provider install, account requirement, or new installer."
+    "base_sha256": "1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a",
+    "sha256": "7cfb4bed6ba2c5e20c9c4e6aa9089ccdd9172ae88e5b3df3add78134662b50de",
+    "scope": "Existing offline transport/activation preserved. Runtime-integrity mirror adopted exactly from CLI 1d7543a, including sdk-provider-state and legacy-generation compatibility."
   }
 }
