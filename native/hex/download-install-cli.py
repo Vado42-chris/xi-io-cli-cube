@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Pinned downloader for the EXISTING HEX offline CLI installer. No new installer."""
 import argparse,base64,hashlib,importlib.util,json,os,pathlib,re,shutil,subprocess,sys,tempfile
-SOURCE_SHA="923f3a656858366a45f5ec140326389920086fca"
+SOURCE_SHA="89b9c418f6e161d9864bf891fd665b6a18f00dd2"
 INSTALLER_SHA="37fc6956b59c26624e7ef4c7340012e4056b6be6219f619b5636302fd8325109"
-MANIFEST_SHA="27b301e8c71a4f2d3e0e677a91fc414c4eb31f7fa006806955afd246611b7140"
-FILES=["src/xiio.mjs", "src/file-edit-cas.mjs", "src/local-ops.mjs", "src/runtime-integrity.mjs", "config/service-catalog.json", "scripts/service-inventory.mjs", "scripts/reconcile-service-inventory.mjs", "src/sdk-provider-state.mjs", "src/sdk/audhd-command.mjs", "src/sdk/tool-verb-fidelity.mjs", "src/sdk/local-work-packet.mjs"]
+MANIFEST_SHA="8433ebffa70b4e3e2a92f5af69746da24fad41e4acf5733e8b3bae363b7c6f97"
+FILES=["src/xiio.mjs", "src/file-edit-cas.mjs", "src/local-ops.mjs", "src/sdk-provider-state.mjs", "src/sdk/audhd-command.mjs", "src/sdk/tool-verb-fidelity.mjs", "src/sdk/local-work-packet.mjs", "src/runtime-integrity.mjs", "config/service-catalog.json", "scripts/service-inventory.mjs", "scripts/reconcile-service-inventory.mjs"]
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 def get_file(carrier,name,source_path=None):

@@ -17,6 +17,8 @@ import {
   formatBindingMessage,
   isContinuationPhrase,
   loadAcceptedPacket,
+  saveUserAlias,
+  shouldAttemptLocalWorkContinuation,
 } from './sdk/local-work-packet.mjs';
 import {LOCAL_TOOL_INFERENCE_OPTIONS} from './sdk-provider-state.mjs';
 import {localScan,crossUxTriage,ibalBalanceGuide} from './local-ops.mjs';
@@ -1563,16 +1565,30 @@ async function interactive(flags,args=[],{showMenu=false}={}){
         }catch(error){process.stdout.write('Accept failed: '+String(error.message||error)+'\n');}
         continue;
       }
-      if(isContinuationPhrase(cmd)||cmd==='/continue'){
+      if(cmd.startsWith('/alias ')){
+        const rest=cmd.slice(7).trim();
+        const sp=rest.indexOf(' ');
+        if(sp<=0){process.stdout.write('Usage: /alias NAME PACKET_ID — maps a user TLA/alias to an existing packet id. Grants no authority.\n');continue;}
+        try{
+          const out=saveUserAlias(root,rest.slice(0,sp),rest.slice(sp+1).trim());
+          process.stdout.write(JSON.stringify(out,null,2)+'\n');
+        }catch(error){process.stdout.write('Alias failed: '+String(error.message||error)+'\n');}
+        continue;
+      }
+      if(shouldAttemptLocalWorkContinuation(cmd,root)||cmd==='/continue'){
         const observedSourceSha=version().source_sha;
         const binding=bindContinuationRequest({text:cmd==='/continue'?'continue':cmd,workspaceRoot:root,observedSourceSha});
         const message=formatBindingMessage(binding);
         if(message)process.stdout.write(message+'\n');
+        if(binding.state==='AMBIGUOUS'||binding.state==='MISSING_BINDING'||binding.state==='BLOCKED'||binding.state==='NOT_CONTINUATION'){
+          recordDirectTurn(input,toolFallbackText([],{source:'local_work_packet',error:binding.reason||binding.state}));
+          continue;
+        }
         if(binding.state!=='DISPATCH'){
           recordDirectTurn(input,toolFallbackText([],{source:'local_work_packet',error:binding.reason||binding.state}));
           continue;
         }
-        process.stdout.write('Dispatching bound packet '+binding.packet_id+' through the local controller (deterministic acceptance; Ollama is not the authority).\n');
+        process.stdout.write('Running bound task '+binding.packet_id+' now. Approvals still required per effect; /details keeps the full receipt.\n');
         activeTurn=new AbortController();
         let dispatched;
         try{
@@ -1587,10 +1603,19 @@ async function interactive(flags,args=[],{showMenu=false}={}){
                 systemMessage,
                 {role:'user',content:'Executable packet '+packet.packet_id+' is already accepted. Objective: '+packet.objective+'. Allowed paths: '+packet.allowed_scope.paths.join(', ')+'. Use tools only inside that scope. Do not claim completion without tool results.'},
               ],{model,root,approve,signal:activeTurn.signal});
-              return{state:assist?.error?'FAIL':'PASS',model_receipt:assist?.receipt||null,text:assist?.text||null};
+              const receipt=assist?.receipt||null;
+              const denied=Boolean(assist?.error)||['FAILED','FAIL'].includes(String(receipt?.state||''))||['HUMAN_APPROVAL_REQUIRED','USER_CANCELLED'].includes(String(receipt?.first_red||receipt?.provider_error||''));
+              return{state:denied?'FAIL':'PASS',reason:denied?(receipt?.first_red||receipt?.provider_error||assist?.error||'ADMITTED_STEP_FAILED'):null,model_receipt:receipt,text:assist?.text||null};
             },
           });
         }finally{activeTurn=null;}
+        if(dispatched.state==='PASS'&&dispatched.reason==='ALREADY_COMPLETE'){
+          process.stdout.write('Task '+dispatched.packet_id+' already completed with a verified return. No duplicate write.\n');
+        }else if(dispatched.state==='PASS'){
+          process.stdout.write('Task '+dispatched.packet_id+' verified PASS. Full receipt retained for /details.\n');
+        }else{
+          process.stdout.write('Task result: '+(dispatched.state||'UNKNOWN')+(dispatched.reason?' ('+dispatched.reason+')':'')+'. Full receipt retained for /details.\n');
+        }
         recordDirectTurn(input,toolFallbackText([],{source:'local_work_packet',error:dispatched.state==='PASS'?null:dispatched.state}));
         process.stdout.write(JSON.stringify(dispatched,null,2)+'\n');
         continue;

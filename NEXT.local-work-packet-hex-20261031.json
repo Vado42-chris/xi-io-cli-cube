@@ -1,14 +1,11 @@
 {
   "schema": "xiio.hex.next/v1",
-  "stamped_at": "2026-10-31T21:15:00Z",
-  "source_sha": "923f3a656858366a45f5ec140326389920086fca",
-  "hex_branch": "fix/hex-cli-chat-first-payload-20261031",
+  "source_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
+  "runtime_proven_sha": "a944d5dd5e412868940012b711fa430f81993660",
+  "state": "HEX_PACKAGE_READY_AWAITING_OWNER_ADOPT",
   "pr": 32,
-  "state": "HEX_PACKAGE_PUSHED_ISOLATED_PROOF_PASS",
-  "installer_sha": "37fc6956b59c26624e7ef4c7340012e4056b6be6219f619b5636302fd8325109",
-  "manifest_sha": "27b301e8c71a4f2d3e0e677a91fc414c4eb31f7fa006806955afd246611b7140",
-  "remaining_blocker": "Production launcher still on c4e2b9f until owner runs isolated install then explicit adopt; BINS DATAFORGE_CUSTODY_WRITE_AUTHORITY_UNBOUND unchanged",
-  "hex_commit": "b9dfccfddb97def4e32bcad4bc38f989ddbac8a0",
-  "one_install_command": "python3 native/hex/download-install-cli.py --carrier-ref b9dfccfddb97def4e32bcad4bc38f989ddbac8a0 --install --prefix /tmp/xiio-cli-v1-iso --bin-dir /tmp/xiio-cli-bin-iso",
-  "packaging_commit": "88d0b7e109f2deb3b62d5291ab4c0159d0cfac5b"
+  "one_production_adoption_command": "python3 native/hex/download-install-cli.py --carrier-ref WILL_SET_AFTER_PUSH --install --prefix /home/chrishallberg/.local/share/xi-io/cli-v1 --bin-dir /home/chrishallberg/.local/bin --adopt-existing-launcher --expect-launcher-sha256 c3705b136d47536c2cd0e701b56a0163c0d79427e480e01149f25b15dc93aad3",
+  "remaining_blocker": "Owner must explicitly approve production launcher adopt; BINS/Ibal/Inbox production bindings remain separate open gates",
+  "cli_without_cursor": "Accepted packets + ordinary-language continue + Ollama tools with terminal approvals + deterministic acceptance + ALREADY_COMPLETE restart",
+  "current_production_launcher_sha256": "c3705b136d47536c2cd0e701b56a0163c0d79427e480e01149f25b15dc93aad3"
 }

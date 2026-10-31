@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {normalizeAudhdIntent} from './audhd-command.mjs';
 
 export const LOCAL_WORK_PACKET_SCHEMA = 'xiio.cli.local-work-packet/v1';
 export const LOCAL_WORK_RETURN_SCHEMA = 'xiio.cli.local-work-return/v1';
@@ -31,6 +32,9 @@ const CONTINUATION_PHRASES = Object.freeze([
   /^continue\s+the\s+rest[.!?]*$/i,
   /^keep\s+going[.!?]*$/i,
   /^\/continue$/i,
+  /^(?:go\s+ahead|proceed|do\s+it|resume|finish\s+(?:it|the\s+task))[.!?]*$/i,
+  /^pick\s+up\s+where\s+we\s+left\s+off[.!?]*$/i,
+  /^please\s+(?:continue|proceed|keep\s+going)\b/i,
 ]);
 
 const NEXT_STEP_POLICIES = new Set([
@@ -151,6 +155,143 @@ export function isContinuationPhrase(text) {
   return CONTINUATION_PHRASES.some((re) => re.test(line));
 }
 
+function aliasesPath(workspaceRoot) {
+  return path.join(workspaceRoot, '.xiio', 'aliases.json');
+}
+
+export function loadUserAliases(workspaceRoot) {
+  const file = aliasesPath(workspaceRoot);
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return Object.freeze({});
+    const out = {};
+    for (const [alias, id] of Object.entries(raw)) {
+      const a = clean(String(alias), 128);
+      const packetId = clean(String(id), 256);
+      if (a && packetId) out[a.toLowerCase()] = packetId;
+    }
+    return Object.freeze(out);
+  } catch {
+    return Object.freeze({});
+  }
+}
+
+export function saveUserAlias(workspaceRoot, alias, packetId) {
+  const root = path.resolve(workspaceRoot);
+  const a = clean(String(alias), 128);
+  const id = clean(String(packetId), 256);
+  if (!a || !id) throw Object.assign(new Error('ALIAS_FIELDS_REQUIRED'), {code: 'ALIAS_FIELDS_REQUIRED'});
+  const dest = aliasesPath(root);
+  fs.mkdirSync(path.dirname(dest), {recursive: true, mode: 0o700});
+  const current = {...loadUserAliases(root)};
+  current[a.toLowerCase()] = id;
+  const tmp = dest + '.tmp.' + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(current, null, 2) + '\n', {mode: 0o600, flag: 'wx'});
+  fs.renameSync(tmp, dest);
+  return {state: 'PASS', alias: a.toLowerCase(), packet_id: id, path: dest, effect_authority: false};
+}
+
+function objectiveTokens(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s_-]+/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 4 && !['that', 'this', 'with', 'from', 'into', 'then', 'please', 'task', 'work', 'file', 'update'].includes(t));
+}
+
+function isQuotedMentionOnly(line) {
+  const t = line.trim();
+  return (
+    (t.startsWith('"') && t.endsWith('"') && t.length >= 2) ||
+    (t.startsWith("'") && t.endsWith("'") && t.length >= 2) ||
+    /^say\s+["'].*continue/i.test(t) ||
+    /^write\s+["'].*continue/i.test(t)
+  );
+}
+
+/**
+ * Classify ordinary language against the accepted pending task.
+ * Shortcuts remain valid; they are not the only route. Grants no permission.
+ */
+export function classifyContinuationUtterance(text, {workspaceRoot = null, aliases = null} = {}) {
+  const line = clean(text, 512);
+  if (!line) {
+    return {kind: 'EMPTY', effect_authority: false};
+  }
+  if (isQuotedMentionOnly(line)) {
+    return {kind: 'QUOTED_MENTION_ONLY', effect_authority: false, note: 'Quoted text is data, not a continuation command.'};
+  }
+  let intent = null;
+  try {
+    intent = normalizeAudhdIntent(line);
+  } catch {
+    intent = null;
+  }
+  const negative = (intent?.directives || []).some((d) => d.kind === 'NEGATIVE_DIRECTIVE');
+  if (negative && /\b(continue|proceed|keep going|do that|resume|finish|edit|write|apply)\b/i.test(line)) {
+    return {kind: 'NEGATED', effect_authority: false, intent_ref: intent?.raw_ref || null};
+  }
+  if (isContinuationPhrase(line) || line === '/continue') {
+    return {kind: 'CONTINUATION_SHORTCUT', effect_authority: false};
+  }
+  const root = workspaceRoot ? path.resolve(workspaceRoot) : null;
+  const loaded = root ? loadAcceptedPacket(root) : {state: 'MISSING', packet: null};
+  const aliasMap = aliases || (root ? loadUserAliases(root) : {});
+  const lower = line.toLowerCase();
+  if (loaded.state === 'PASS' && loaded.packet) {
+    const packet = loaded.packet;
+    const aliasHit = Object.entries(aliasMap).find(([alias, id]) => id === packet.packet_id && lower.includes(alias));
+    if (aliasHit) {
+      return {
+        kind: 'CONTINUATION_TASK_CONTEXT',
+        effect_authority: false,
+        packet_id: packet.packet_id,
+        matched_alias: aliasHit[0],
+      };
+    }
+    if (lower.includes(packet.packet_id.toLowerCase())) {
+      return {kind: 'CONTINUATION_TASK_CONTEXT', effect_authority: false, packet_id: packet.packet_id, matched: 'packet_id'};
+    }
+    const objTokens = objectiveTokens(packet.objective);
+    const hits = objTokens.filter((t) => lower.includes(t));
+    if (hits.length >= 2 || (hits.length >= 1 && /\b(pending|accepted|canary|packet|task)\b/i.test(line))) {
+      return {
+        kind: 'CONTINUATION_TASK_CONTEXT',
+        effect_authority: false,
+        packet_id: packet.packet_id,
+        matched_tokens: hits.slice(0, 6),
+      };
+    }
+    if (/\b(the|that|this)\s+(pending|accepted)?\s*(task|packet|work|job)\b/i.test(line) && /\b(do|finish|run|continue|resume|complete)\b/i.test(line)) {
+      return {kind: 'CONTINUATION_TASK_CONTEXT', effect_authority: false, packet_id: packet.packet_id, matched: 'deictic_pending'};
+    }
+  }
+  // Alias names a packet that is not the bound one, or multiple unresolved names → ask once.
+  const mentionedAliases = Object.entries(aliasMap).filter(([alias]) => lower.includes(alias));
+  if (mentionedAliases.length > 1) {
+    return {
+      kind: 'AMBIGUOUS',
+      effect_authority: false,
+      question: 'Which accepted task should run: ' + mentionedAliases.map(([a, id]) => a + ' (' + id + ')').join(' or ') + '?',
+      candidates: mentionedAliases.map(([alias, packet_id]) => ({alias, packet_id})),
+    };
+  }
+  if (mentionedAliases.length === 1 && loaded.state === 'PASS' && loaded.packet && mentionedAliases[0][1] !== loaded.packet.packet_id) {
+    return {
+      kind: 'AMBIGUOUS',
+      effect_authority: false,
+      question: 'Alias ' + mentionedAliases[0][0] + ' names ' + mentionedAliases[0][1] + ', but the bound packet is ' + loaded.packet.packet_id + '. Accept the intended packet first, or clear the alias.',
+      candidates: [{alias: mentionedAliases[0][0], packet_id: mentionedAliases[0][1]}, {packet_id: loaded.packet.packet_id}],
+    };
+  }
+  return {kind: 'NOT_CONTINUATION', effect_authority: false};
+}
+
+export function shouldAttemptLocalWorkContinuation(text, workspaceRoot) {
+  const kind = classifyContinuationUtterance(text, {workspaceRoot}).kind;
+  return ['CONTINUATION_SHORTCUT', 'CONTINUATION_TASK_CONTEXT', 'NEGATED', 'AMBIGUOUS'].includes(kind);
+}
+
 export function loadAcceptedPacket(workspaceRoot) {
   const root = path.resolve(workspaceRoot);
   const file = packetPath(root);
@@ -191,7 +332,18 @@ export function acceptPacket(input, {workspaceRoot, force = false} = {}) {
       return {state: 'PASS', reason: 'ALREADY_ACCEPTED', packet: existing.packet, path: dest, duplicate: true};
     }
     if (existing.state === 'PASS') {
-      return {state: 'BLOCKED', reason: 'DUPLICATE_START', packet: existing.packet, path: dest};
+      const prior = reconcileInterruptedEffect({packet: existing.packet});
+      if (prior.state === 'RECONCILED_NO_DUPLICATE') {
+        const archiveDir = path.join(root, '.xiio', 'completed');
+        fs.mkdirSync(archiveDir, {recursive: true, mode: 0o700});
+        const archive = path.join(archiveDir, existing.packet.packet_id + '.json');
+        if (!fs.existsSync(archive)) {
+          fs.copyFileSync(dest, archive);
+        }
+        // Prior packet completed with acceptance PASS — allow successor without erasing its return.
+      } else {
+        return {state: 'BLOCKED', reason: 'DUPLICATE_START', packet: existing.packet, path: dest};
+      }
     }
   }
   const body = JSON.stringify(packet, null, 2) + '\n';
@@ -207,14 +359,38 @@ export function bindContinuationRequest({
   observedSourceSha = null,
   modelPromiseWithoutAction = false,
 } = {}) {
-  const phrase = isContinuationPhrase(text);
+  const classified = classifyContinuationUtterance(text, {workspaceRoot});
   const loaded = loadAcceptedPacket(workspaceRoot);
-  if (!phrase) {
+  if (classified.kind === 'QUOTED_MENTION_ONLY' || classified.kind === 'NOT_CONTINUATION' || classified.kind === 'EMPTY') {
     return {
       schema: LOCAL_WORK_BINDING_SCHEMA,
       state: 'NOT_CONTINUATION',
-      reason: 'ORDINARY_CHAT',
-      packet: loaded.packet,
+      reason: classified.kind === 'QUOTED_MENTION_ONLY' ? 'QUOTED_MENTION_ONLY' : 'ORDINARY_CHAT',
+      classification: classified,
+      packet: loaded.packet || null,
+      effect_authority: false,
+    };
+  }
+  if (classified.kind === 'NEGATED') {
+    return {
+      schema: LOCAL_WORK_BINDING_SCHEMA,
+      state: 'BLOCKED',
+      reason: 'NEGATION_OR_CANCEL',
+      classification: classified,
+      packet: loaded.packet || null,
+      effect_authority: false,
+      plain: 'Understood as a stop/negation. No pending effect was started.',
+    };
+  }
+  if (classified.kind === 'AMBIGUOUS') {
+    return {
+      schema: LOCAL_WORK_BINDING_SCHEMA,
+      state: 'AMBIGUOUS',
+      reason: 'MULTIPLE_OR_MISMATCHED_TASKS',
+      question: classified.question,
+      candidates: classified.candidates || null,
+      classification: classified,
+      packet: loaded.packet || null,
       effect_authority: false,
     };
   }
@@ -225,6 +401,7 @@ export function bindContinuationRequest({
       reason: 'NO_ACCEPTED_PACKET',
       offer: 'Accept an executable work packet with /accept-packet PATH or: xi-io-cli work-packet accept --file PATH',
       packet: null,
+      classification: classified,
       effect_authority: false,
     };
   }
@@ -279,6 +456,15 @@ export function bindContinuationRequest({
     workspace_root: packet.workspace_root,
     packet_id: packet.packet_id,
     objective: packet.objective,
+    classification: classified,
+    plain:
+      'Pending task ' +
+      packet.packet_id +
+      ' — ' +
+      packet.objective +
+      ' (workspace ' +
+      packet.workspace_root +
+      ').',
     effect_authority: false,
   };
 }
@@ -475,6 +661,12 @@ export function formatBindingMessage(binding) {
   if (binding.state === 'MISSING_BINDING') {
     return 'No accepted executable work packet is bound to this workspace. ' + binding.offer;
   }
+  if (binding.state === 'AMBIGUOUS') {
+    return binding.question || 'More than one task could match. Name the packet id or alias once.';
+  }
+  if (binding.state === 'BLOCKED' && binding.reason === 'NEGATION_OR_CANCEL') {
+    return binding.plain || 'Understood as a stop/negation. No pending effect was started.';
+  }
   if (binding.state === 'BLOCKED' && binding.reason === 'STALE_SOURCE') {
     return 'Continuation blocked: pinned source ' + binding.expected + ' does not match observed ' + binding.observed + '.';
   }
@@ -489,13 +681,8 @@ export function formatBindingMessage(binding) {
   }
   if (binding.state === 'DISPATCH') {
     return (
-      'Bound pending task ' +
-      binding.packet_id +
-      ' in ' +
-      binding.workspace_root +
-      ': ' +
-      binding.objective +
-      '. Local controller will run the admitted step and deterministic acceptance; model proposals are not authority.'
+      (binding.plain || ('Bound pending task ' + binding.packet_id + ': ' + binding.objective)) +
+      ' Local controller runs the admitted step and deterministic acceptance; model proposals are not authority. Details stay in /details.'
     );
   }
   if (binding.state === 'BLOCKED') {
