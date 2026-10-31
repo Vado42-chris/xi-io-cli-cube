@@ -125,9 +125,6 @@ test('installation journey: missing prerequisites produce actionable errors', ()
     if (!env.nodeVersion || parseInt(env.nodeVersion.split('.')[0], 10) < 22) {
       errors.push('PREREQUISITE_FAILED: Node.js 22 or newer required');
     }
-    if (!env.hasGhAuth) {
-      errors.push('PREREQUISITE_FAILED: GitHub CLI authentication required (gh auth login)');
-    }
     if (env.platform === 'linux' && !env.hasBubblewrap) {
       errors.push('PREREQUISITE_NOTICE: bubblewrap recommended for containerized commands (sudo apt install bubblewrap)');
     }
@@ -137,10 +134,11 @@ test('installation journey: missing prerequisites produce actionable errors', ()
   const failingEnv = { nodeVersion: '18.19.0', hasGhAuth: false, platform: 'linux', hasBubblewrap: false };
   const errors = checkPrerequisites(failingEnv);
 
-  assert.equal(errors.length, 3);
+  assert.equal(errors.length, 2);
   assert.ok(errors[0].includes('Node.js 22'));
-  assert.ok(errors[1].includes('gh auth login'));
-  assert.ok(errors[2].includes('bubblewrap'));
+  assert.ok(errors[1].includes('bubblewrap'));
+  assert.ok(errors.every(error => !error.includes('GitHub') && !error.includes('sign-in')));
+  assert.deepEqual(checkPrerequisites({nodeVersion: '24.22.1', hasGhAuth: false, platform: 'linux', hasBubblewrap: true}), []);
 });
 
 test('installation journey: first launch and project reopening preserves content parity', () => {
@@ -573,3 +571,171 @@ test('installation journey: concierge unit economics model calculation is strict
 
 
 
+
+
+test('real packaged CLI clean-install and local use require no XI-IO identity, Ward, GitHub auth or remote service', async () => {
+  const {spawnSync} = await import('node:child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-offline-first-install-'));
+  const home = path.join(root, 'home');
+  const prefix = path.join(home, '.local', 'share', 'xi-io', 'cli-v1');
+  const adapter = new URL('../native/hex/adapter/installer_adapter.py', import.meta.url);
+  const clean = {
+    PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8',
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    XDG_STATE_HOME: path.join(home, '.local', 'state'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    PYTHONDONTWRITEBYTECODE: '1',
+  };
+  fs.mkdirSync(home, {recursive: true});
+  const python = fs.existsSync('/usr/bin/python3') ? '/usr/bin/python3' : 'python3';
+  const request = payload => {
+    const run = spawnSync(python, [adapter.pathname], {
+      input: JSON.stringify(payload), encoding: 'utf8', env: clean, timeout: 90000,
+    });
+    assert.equal(run.status, 0, run.stderr || run.error?.message || run.stdout);
+    const result = JSON.parse(run.stdout);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result.result;
+  };
+  try {
+    for (const key of ['XIIO_DEVICE_REF', 'XIIO_DEVICE_BROKER_URL', 'XIIO_DEVICE_PORTS_MODULE',
+      'XIIO_USER', 'XIIO_ACCOUNT', 'WARD_GRANT', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_HOST']) {
+      assert.equal(Object.hasOwn(clean, key), false, key);
+    }
+    const initial = request({action: 'inspect'});
+    assert.equal(initial.existing_cli.state, 'NOT_OBSERVED_AT_KNOWN_LOCATION');
+    assert.equal(initial.connection_prerequisites.state, 'CONFIGURATION_REQUIRED');
+    assert.equal(initial.connection_prerequisites.credential_values_read, false);
+    const planned = request({action: 'prepare', prefix, node: process.execPath, components: ['cli']});
+    assert.equal(planned.phase, 'PREPARED_NOT_INSTALLED');
+    assert.equal(planned.connection.configuration_state, 'CONFIGURATION_REQUIRED');
+    assert.equal(planned.connection.connected, false);
+    assert.equal(planned.components.length, 1);
+    assert.equal(planned.components[0], 'cli');
+    const applied = request({action: 'apply', plan_id: planned.plan_id,
+      approval_digest: planned.approval_digest, approved: true});
+    assert.equal(applied.phase, 'INSTALLED_READBACK_VERIFIED');
+    assert.equal(applied.connected, false);
+    const reopened = request({action: 'readback', plan_id: planned.plan_id});
+    assert.equal(reopened.phase, 'INSTALLED_READBACK_VERIFIED');
+    assert.equal(reopened.connection_state, 'CONFIGURATION_REQUIRED');
+    assert.equal(reopened.connected, false);
+    const cli = path.join(prefix, 'bin', 'xi-io-cli');
+    assert.ok(fs.statSync(cli).isFile());
+    for (const [command, schema] of [['version', 'xiio.cli.version/v1'], ['help', 'xiio.cli.help/v1']]) {
+      const launched = spawnSync(cli, [command], {
+        encoding: 'utf8', env: clean, cwd: home, timeout: 15000,
+      });
+      assert.equal(launched.status, 0, launched.stderr || launched.error?.message || launched.stdout);
+      assert.equal(JSON.parse(launched.stdout).schema, schema);
+    }
+    const connect = spawnSync(path.join(prefix, 'bin', 'xi-io-connect'), [], {
+      encoding: 'utf8', env: clean, cwd: home, timeout: 15000,
+    });
+    assert.equal(connect.status, 3, connect.stderr || connect.stdout);
+    const state = JSON.parse(connect.stdout);
+    assert.equal(state.state, 'CONFIGURATION_REQUIRED');
+    assert.equal(state.connected, false);
+    assert.equal(fs.existsSync(path.join(home, '.config', 'xi-io', 'device.json')), false);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+
+test('preexisting device identity survives CLI install, restart, same-payload upgrade and rollback', async () => {
+  const {spawnSync} = await import('node:child_process');
+  const {generateKeyPairSync, createPublicKey, randomUUID, createHash} = await import('node:crypto');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiio-identity-preserve-'));
+  const home = path.join(root, 'home');
+  const configDir = path.join(home, '.config', 'xi-io');
+  const prefix = path.join(home, '.local', 'share', 'xi-io', 'cli-v1');
+  const adapter = new URL('../native/hex/adapter/installer_adapter.py', import.meta.url);
+  const env = {
+    HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8',
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    XDG_STATE_HOME: path.join(home, '.local', 'state'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    PYTHONDONTWRITEBYTECODE: '1',
+  };
+  const python = fs.existsSync('/usr/bin/python3') ? '/usr/bin/python3' : 'python3';
+  const call = payload => {
+    const subprocess = spawnSync(python, [adapter.pathname], {
+      input: JSON.stringify(payload), encoding: 'utf8', env, timeout: 90000,
+    });
+    assert.equal(subprocess.status, 0, subprocess.stderr || subprocess.error?.message);
+    const output = JSON.parse(subprocess.stdout);
+    assert.equal(output.ok, true, JSON.stringify(output));
+    return output.result;
+  };
+  const cli = command => {
+    const subprocess = spawnSync(path.join(prefix, 'bin', 'xi-io-cli'), [command], {
+      encoding: 'utf8', env, cwd: home, timeout: 15000,
+    });
+    assert.equal(subprocess.status, 0, subprocess.stderr || subprocess.error?.message);
+    return JSON.parse(subprocess.stdout);
+  };
+  try {
+    fs.mkdirSync(configDir, {recursive: true, mode: 0o700});
+    const {privateKey, publicKey} = generateKeyPairSync('ed25519');
+    const pemPrivate = privateKey.export({type: 'pkcs8', format: 'pem'});
+    const pemPublic = publicKey.export({type: 'spki', format: 'pem'});
+    const fingerprint = 'SHA256:' + createHash('sha256')
+      .update(createPublicKey(privateKey).export({type: 'spki', format: 'der'}))
+      .digest('base64').replace(/=+$/, '');
+    const device = {
+      schema: 'xiio.cli.device/v1',
+      device_id: 'device:' + randomUUID(),
+      hostname: os.hostname(), platform: process.platform,
+      principal: 'github:42', login: 'existing-fixture',
+      public_key: pemPublic, fingerprint,
+      created_at: '2026-01-01T00:00:00.000Z',
+      authority: 'NONE_UNTIL_WARD_GRANT',
+    };
+    const deviceFile = path.join(configDir, 'device.json');
+    const keyFile = path.join(configDir, 'device-key.pem');
+    fs.writeFileSync(deviceFile, JSON.stringify(device) + '\n', {mode: 0o600, flag: 'wx'});
+    fs.writeFileSync(keyFile, pemPrivate, {mode: 0o600, flag: 'wx'});
+    const initialRecord = fs.readFileSync(deviceFile);
+    const initialKey = fs.readFileSync(keyFile);
+    const inspect = call({action: 'inspect'});
+    assert.equal(inspect.connection_prerequisites.device_identity.state, 'PUBLIC_DEVICE_METADATA_OBSERVED');
+    assert.equal(inspect.connection_prerequisites.device_identity.device_ref, device.device_id);
+    assert.equal(inspect.connection_prerequisites.device_identity.authority, 'NOT_INFERRED');
+    assert.equal(inspect.connection_prerequisites.credential_values_read, false);
+    const install = () => {
+      const plan = call({action: 'prepare', prefix, node: process.execPath, components: ['cli']});
+      assert.equal(plan.phase, 'PREPARED_NOT_INSTALLED');
+      assert.equal(plan.connection.configuration_state, 'CONFIGURATION_REQUIRED');
+      const result = call({action: 'apply', plan_id: plan.plan_id,
+        approval_digest: plan.approval_digest, approved: true});
+      assert.equal(result.phase, 'INSTALLED_READBACK_VERIFIED');
+      assert.equal(result.connected, false);
+      return plan;
+    };
+    const first = install();
+    assert.equal(cli('whoami').state, 'PASS');
+    assert.equal(cli('whoami').device_id, device.device_id);
+    assert.equal(cli('version').state, 'PASS');
+    assert.equal(call({action: 'readback', plan_id: first.plan_id}).phase,
+      'INSTALLED_READBACK_VERIFIED');
+    const firstGeneration = fs.readFileSync(path.join(prefix, 'current'), 'utf8');
+    const second = install();
+    assert.notEqual(fs.readFileSync(path.join(prefix, 'current'), 'utf8'), firstGeneration);
+    const rollback = call({action: 'rollback', plan_id: second.plan_id,
+      approval_digest: second.approval_digest, approved: true});
+    assert.equal(rollback.phase, 'ROLLED_BACK');
+    assert.equal(fs.readFileSync(path.join(prefix, 'current'), 'utf8'), firstGeneration);
+    assert.equal(call({action: 'readback', plan_id: second.plan_id}).phase, 'ROLLED_BACK');
+    assert.equal(cli('whoami').device_id, device.device_id);
+    assert.equal(cli('whoami').state, 'PASS');
+    assert.deepEqual(fs.readFileSync(deviceFile), initialRecord);
+    assert.deepEqual(fs.readFileSync(keyFile), initialKey);
+    assert.equal(Object.hasOwn(env, 'GH_TOKEN'), false);
+    assert.equal(Object.hasOwn(env, 'XIIO_DEVICE_PORTS_MODULE'), false);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
