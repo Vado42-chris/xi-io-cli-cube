@@ -1,12 +1,13 @@
 {
   "schema": "xiio.hex.workflow-delivery-proof/v1",
-  "source_sha": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
-  "source_evidence": "docs/evidence/cli-workflow-repair-20261031.json",
+  "source_sha": "923f3a656858366a45f5ec140326389920086fca",
+  "source_evidence": "docs/evidence/cli-local-work-packet-20261031.json",
+  "carrier_base": "41fc9497c3d31a6cbb082d6ac8e5003c8f28d696",
   "package": {
     "schema": "xiio.hex.offline-payload-delivery-proof/v1",
     "state": "PASS",
-    "source_sha": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
-    "payload_files": 10,
+    "source_sha": "923f3a656858366a45f5ec140326389920086fca",
+    "payload_files": 11,
     "fresh_install": true,
     "same_sha_new_generation": true,
     "rollback_both_directions": true,
@@ -15,7 +16,7 @@
     "tampered_module_refused": true,
     "missing_module_manifest_refused": true,
     "refusals_preserve_current": true,
-    "installed_on": "DISPOSABLE_CLOUD_ONLY"
+    "installed_on": "DISPOSABLE_LOCAL_ISOLATION"
   },
   "download": {
     "state": "PASS",
@@ -28,15 +29,27 @@
   },
   "sdk_upgrade": {
     "state": "PASS",
-    "old_eight_to_new_ten": true,
-    "same_launcher": true,
-    "sdk_tampering_refused": 2,
-    "refusals_preserve_current": true,
-    "rollback_to_old_version_verified": true,
-    "reinstall_new_verified": true,
-    "host": "disposable cloud"
+    "old_ten_to_new_eleven": true,
+    "added": [
+      "src/sdk/local-work-packet.mjs"
+    ],
+    "same_launcher_contract": true,
+    "offline_packaged_source_preserved": true
   },
-  "bootstrap_sha256": "8a4be0d3d0ab0db19619b64e3d566e46722cfa73ce02029f53b8aeb6f2e1b260",
-  "production_installation": "NOT_YET_VERIFIED",
-  "authority": "No native Ward/BINS/A2A claims. Existing offline approval and sandbox remain."
+  "isolated_install": {
+    "state": "PASS",
+    "source_sha": "923f3a656858366a45f5ec140326389920086fca",
+    "integrity_verified": true,
+    "work_packet_missing_binding": "MISSING_BINDING",
+    "work_packet_accept_dispatch_restart": "PASS",
+    "production_launcher_untouched": true,
+    "production_generation": "c4e2b9f8738d-20261031T204721Z-SkYGhU"
+  },
+  "pins": {
+    "SOURCE_SHA": "923f3a656858366a45f5ec140326389920086fca",
+    "INSTALLER_SHA": "37fc6956b59c26624e7ef4c7340012e4056b6be6219f619b5636302fd8325109",
+    "MANIFEST_SHA": "27b301e8c71a4f2d3e0e677a91fc414c4eb31f7fa006806955afd246611b7140"
+  },
+  "production_installation": "NOT_YET_VERIFIED_OVERWRITE_FORBIDDEN",
+  "authority": "No native Ward/BINS/A2A claims. Existing offline approval and sandbox remain. Per-effect human approvals remain."
 }

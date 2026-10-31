@@ -10,6 +10,14 @@ import readline from 'node:readline/promises';
 import crypto from 'node:crypto';
 import {compileCommandIntentProjection} from './sdk/audhd-command.mjs';
 import {evaluateAgentResponseRealization} from './sdk/tool-verb-fidelity.mjs';
+import {
+  acceptPacket,
+  bindContinuationRequest,
+  dispatchAcceptedWork,
+  formatBindingMessage,
+  isContinuationPhrase,
+  loadAcceptedPacket,
+} from './sdk/local-work-packet.mjs';
 import {LOCAL_TOOL_INFERENCE_OPTIONS} from './sdk-provider-state.mjs';
 import {localScan,crossUxTriage,ibalBalanceGuide} from './local-ops.mjs';
 import {commitWorkspaceEditCAS} from './file-edit-cas.mjs';
@@ -132,7 +140,7 @@ async function mutateOrObserveLocalServices(sub,args,flags){
 }
 function parse(argv){
   const args=[],flags={};
-  const booleanFlags=new Set(['execute','help','version','apply','deep','staged','recover']);
+  const booleanFlags=new Set(['execute','help','version','apply','deep','staged','recover','force','refuse','acceptance-only']);
   for(let i=0;i<argv.length;i++){
     const t=argv[i];
     if(t==='--'){args.push(...argv.slice(i+1));break;}
@@ -1539,6 +1547,54 @@ async function interactive(flags,args=[],{showMenu=false}={}){
         recordDirectTurn(input,toolFallbackText([fact],{source:'direct_read'}));
         continue;
       }
+      if(cmd==='/packet'||cmd==='/packet status'){
+        const loaded=loadAcceptedPacket(root);
+        process.stdout.write(JSON.stringify(loaded,null,2)+'\n');
+        continue;
+      }
+      if(cmd==='/accept-packet'||cmd.startsWith('/accept-packet ')){
+        const file=cmd.slice('/accept-packet'.length).trim();
+        if(!file){process.stdout.write('Usage: /accept-packet PATH.json — must include every required executable field and accepted:true.\n');continue;}
+        try{
+          const raw=JSON.parse(fs.readFileSync(path.resolve(root,file),'utf8'));
+          const out=acceptPacket(raw,{workspaceRoot:root});
+          process.stdout.write(JSON.stringify(out,null,2)+'\n');
+          if(out.state==='PASS')process.stdout.write(formatBindingMessage(bindContinuationRequest({text:'continue',workspaceRoot:root,observedSourceSha:version().source_sha}))+'\n');
+        }catch(error){process.stdout.write('Accept failed: '+String(error.message||error)+'\n');}
+        continue;
+      }
+      if(isContinuationPhrase(cmd)||cmd==='/continue'){
+        const observedSourceSha=version().source_sha;
+        const binding=bindContinuationRequest({text:cmd==='/continue'?'continue':cmd,workspaceRoot:root,observedSourceSha});
+        const message=formatBindingMessage(binding);
+        if(message)process.stdout.write(message+'\n');
+        if(binding.state!=='DISPATCH'){
+          recordDirectTurn(input,toolFallbackText([],{source:'local_work_packet',error:binding.reason||binding.state}));
+          continue;
+        }
+        process.stdout.write('Dispatching bound packet '+binding.packet_id+' through the local controller (deterministic acceptance; Ollama is not the authority).\n');
+        activeTurn=new AbortController();
+        let dispatched;
+        try{
+          dispatched=await dispatchAcceptedWork({
+            text:cmd==='/continue'?'continue':cmd,
+            workspaceRoot:root,
+            observedSourceSha,
+            performAdmittedStep:async(packet)=>{
+              if(!model)return{state:'PASS',note:'NO_MODEL_STEP_ACCEPTANCE_ONLY'};
+              // Bounded model assist: tools still require approval; acceptance is deterministic.
+              const assist=await ollamaChat([
+                systemMessage,
+                {role:'user',content:'Executable packet '+packet.packet_id+' is already accepted. Objective: '+packet.objective+'. Allowed paths: '+packet.allowed_scope.paths.join(', ')+'. Use tools only inside that scope. Do not claim completion without tool results.'},
+              ],{model,root,approve,signal:activeTurn.signal});
+              return{state:assist?.error?'FAIL':'PASS',model_receipt:assist?.receipt||null,text:assist?.text||null};
+            },
+          });
+        }finally{activeTurn=null;}
+        recordDirectTurn(input,toolFallbackText([],{source:'local_work_packet',error:dispatched.state==='PASS'?null:dispatched.state}));
+        process.stdout.write(JSON.stringify(dispatched,null,2)+'\n');
+        continue;
+      }
       if(!model){process.stdout.write('No local model selected. No request sent.\n');continue;}
       messages.push({role:'user',content:input});
       try{
@@ -1772,7 +1828,7 @@ const rawArgv=process.argv.slice(2);
 let pre;try{pre=parse(rawArgv);}catch(e){emit({state:'FAIL',reason:String(e.message||e)},2);process.exit(2);}
 const explicitHelp=Boolean(pre.flags.help)||['help','-h'].includes(pre.command)&&pre.positionals.length>0;
 const explicitVersion=Boolean(pre.flags.version)||['version','-v'].includes(pre.command);
-const TOP_LEVEL_COMMANDS=new Set(['help','-h','--help','version','-v','rollback','login','whoami','connect','device','activate','doctor','services','tools','engines','models','install','registry','runner','glass','scan','ux','ibal','menu','chat']);
+const TOP_LEVEL_COMMANDS=new Set(['help','-h','--help','version','-v','rollback','login','whoami','connect','device','activate','doctor','services','tools','engines','models','install','registry','runner','glass','scan','ux','ibal','menu','chat','work-packet']);
 const preIsDirectory=!TOP_LEVEL_COMMANDS.has(pre.command) && fs.existsSync(path.resolve(pre.command)) && fs.statSync(path.resolve(pre.command)).isDirectory();
 const interactiveRequested=!explicitHelp&&!explicitVersion&&(
   rawArgv.length===0 || pre.command==='help' || pre.command==='menu' || pre.command==='chat' || preIsDirectory
@@ -1804,6 +1860,27 @@ else if(p.command==='glass') result=await glassRead(p.flags);
 else if(p.command==='scan'&&p.subcommand==='local') result=await approvedLocalScan(workspaceRoot(p.flags.root||null),async()=>p.flags.apply===true);
 else if(p.command==='ux'&&['walk','triage'].includes(p.subcommand)){const root=workspaceRoot(p.flags.root||null);result=crossUxTriage(root,{terms:String(p.flags.terms||'local_scan,RCP,ibal').split(','),maxFiles:Number(p.flags['max-files']||4000),allowPath:p=>!credentialPath(p),readArtifact:rel=>readWorkspaceText(root,rel)});}
 else if(p.command==='ibal'&&p.subcommand==='balance') result=ibalBalanceGuide();
+else if(p.command==='work-packet'){
+  const root=workspaceRoot(p.flags.root||null);
+  const observedSourceSha=version().source_sha;
+  if(p.subcommand==='status') result=loadAcceptedPacket(root);
+  else if(p.subcommand==='accept'){
+    const file=p.flags.file||p.args[0];
+    if(!file) result={schema:'xiio.cli.local-work-packet/v1',state:'FAIL',reason:'FILE_REQUIRED',usage:'xi-io-cli work-packet accept --file PATH.json --root WORKSPACE'};
+    else{
+      try{result=acceptPacket(JSON.parse(fs.readFileSync(path.resolve(file),'utf8')),{workspaceRoot:root,force:p.flags.force===true});}
+      catch(error){result={schema:'xiio.cli.local-work-packet/v1',state:'FAIL',reason:String(error.message||error),missing:error.missing||null};}
+    }
+  }else if(p.subcommand==='continue'||p.subcommand==='dispatch'){
+    result=await dispatchAcceptedWork({
+      text:'continue',
+      workspaceRoot:root,
+      observedSourceSha,
+      refuse:p.flags.refuse===true,
+      performAdmittedStep:p.flags['acceptance-only']===true?async()=>({state:'PASS',note:'ACCEPTANCE_ONLY'}):null,
+    });
+  }else result={schema:'xiio.cli.local-work-packet/v1',state:'FAIL',reason:'UNKNOWN_SUBCOMMAND',usage:'xi-io-cli work-packet status|accept|continue [--root PATH] [--file PATH] [--acceptance-only]'};
+}
 else result={schema:'xiio.cli.error/v1',state:'FAIL',reason:'UNKNOWN_COMMAND',command:p.command,usage:help().usage};
 emit(result,p.command==='scan'?(result?.state==='LOCAL_STATIC_OBSERVED'?result.process_status:2):p.command==='connect'&&!['EMPTY','RESULT_RETURNED_TO_BROKER'].includes(result?.state)?3:result?.state==='FAIL'?2:0);
 

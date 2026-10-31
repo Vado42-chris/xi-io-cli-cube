@@ -62,15 +62,15 @@
   "modifications": {
     "install.mjs": "Existing offline verified packaged-source transport plus bounded fresh-generation custody correction; upstream generation/launcher/pointer machinery preserved. Canonical launcher-only repair remains separate and unchanged. Runtime-integrity mirror joined exactly from current packaged CLI source to admit local-ops without rewriting historical receipts."
   },
-  "ref_role": "Historical initial adoption base; current eight-file payload authority is current_packaged_payload and packaged-source.json.",
+  "ref_role": "Historical initial adoption base; current eleven-file payload authority is current_packaged_payload and packaged-source.json.",
   "current_packaged_payload": {
     "repository": "Vado42-chris/xi-io-cli",
-    "ref": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
+    "ref": "923f3a656858366a45f5ec140326389920086fca",
     "manifest": "packaged-source.json",
     "files": {
       "src/xiio.mjs": {
-        "sha256": "1625e3fa29570653a564eeb7d8d3250b129f081e1776ccc83c488615020a134f",
-        "size": 149185
+        "sha256": "e3dab9c4b91891cfa243a9d72a28c15fbb63d9c6859782aec7a06473778f755b",
+        "size": 153701
       },
       "src/file-edit-cas.mjs": {
         "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
@@ -81,8 +81,8 @@
         "size": 6604
       },
       "src/runtime-integrity.mjs": {
-        "sha256": "0f55b035784809488ab47fc27fef8a6fe96390a895aff96009c6edc1097bf248",
-        "size": 11755
+        "sha256": "7c7100b6aa61a9055a35a47c94971c8080258e105e345853ba9bb97e27823536",
+        "size": 12027
       },
       "config/service-catalog.json": {
         "sha256": "473a6e0d6fc2c7da21ed510906e9a85c4a9c22617b4db1f1f107e0482b75f30a",
@@ -107,6 +107,10 @@
       "src/sdk/tool-verb-fidelity.mjs": {
         "sha256": "a645b456395bac5c6d3881cfe76e54820e5fc6951d01f3c022ef90197e73412c",
         "size": 15812
+      },
+      "src/sdk/local-work-packet.mjs": {
+        "sha256": "6efd7165ed89d716f512d8078369e9486009c2ea1be4cc9c122c82581d60a581",
+        "size": 17802
       }
     },
     "local_payload_modifications": false
@@ -116,7 +120,7 @@
     "base_ref": "8dbd369c5c6b03637d0b04518400d405153e6885",
     "path": "native/hex/cli-source/install.mjs",
     "base_sha256": "1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a",
-    "sha256": "83e823bea184ddf2ec7334cd937c61a1d89b1c8034edfbd60e37960c92aa4d9b",
-    "scope": "Existing offline installer retained; runtime-integrity mirror adopts two hash-pinned SDK modules with conditional legacy-generation compatibility."
+    "sha256": "37fc6956b59c26624e7ef4c7340012e4056b6be6219f619b5636302fd8325109",
+    "scope": "Existing offline installer retained; runtime-integrity mirror adopts three hash-pinned SDK modules (audhd-command, tool-verb-fidelity, local-work-packet) with conditional legacy-generation compatibility."
   }
 }

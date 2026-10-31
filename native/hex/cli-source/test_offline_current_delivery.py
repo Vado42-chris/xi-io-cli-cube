@@ -1,5 +1,5 @@
 import pathlib,tempfile,subprocess,os,json,shutil,hashlib
-R=pathlib.Path(__file__).resolve().parent;SHA='b1f70cdd6c848bea49e76f2d1cd45f67357f0f35';node=shutil.which('node')
+R=pathlib.Path(__file__).resolve().parent;SHA='923f3a656858366a45f5ec140326389920086fca';node=shutil.which('node')
 with tempfile.TemporaryDirectory(prefix='xiio-hex-delivery-') as d:
  t=pathlib.Path(d);(t/'home').mkdir();(t/'bin').mkdir();env={**os.environ,'HOME':str(t/'home'),'XIIO_CONFIG_DIR':str(t/'config'),'PATH':str(t/'bin')+':'+os.environ['PATH']}
  def install(src=R):return subprocess.run([node,str(R/'install.mjs'),'--packaged-source',str(src),'--ref',SHA,'--prefix',str(t/'prefix'),'--bin-dir',str(t/'bin')],env=env,capture_output=True,text=True,timeout=45)
@@ -11,4 +11,4 @@ with tempfile.TemporaryDirectory(prefix='xiio-hex-delivery-') as d:
  version=subprocess.run([str(t/'bin/xi-io-cli'),'version'],env=env,capture_output=True,text=True,timeout=30);v=json.loads(version.stdout);assert version.returncode==0 and v['integrity_verified'] and v['source_sha']==SHA
  before=(t/'prefix/current').read_bytes();bad=t/'bad';shutil.copytree(R,bad);(bad/'src/sdk-provider-state.mjs').write_text('tampered\n');deny=install(bad);assert deny.returncode!=0;assert (t/'prefix/current').read_bytes()==before
  shutil.rmtree(bad);shutil.copytree(R,bad);m=json.loads((bad/'packaged-source.json').read_text());del m['files']['src/sdk-provider-state.mjs'];(bad/'packaged-source.json').write_text(json.dumps(m));deny2=install(bad);assert deny2.returncode!=0;assert (t/'prefix/current').read_bytes()==before
- print(json.dumps({'schema':'xiio.hex.offline-payload-delivery-proof/v1','state':'PASS','source_sha':SHA,'payload_files':8,'fresh_install':True,'same_sha_new_generation':True,'rollback_both_directions':True,'user_config_preserved':True,'version_integrity_readback':True,'tampered_module_refused':True,'missing_module_manifest_refused':True,'refusals_preserve_current':True,'installed_on':'DISPOSABLE_CLOUD_ONLY'},indent=2))
+ print(json.dumps({'schema':'xiio.hex.offline-payload-delivery-proof/v1','state':'PASS','source_sha':SHA,'payload_files':11,'fresh_install':True,'same_sha_new_generation':True,'rollback_both_directions':True,'user_config_preserved':True,'version_integrity_readback':True,'tampered_module_refused':True,'missing_module_manifest_refused':True,'refusals_preserve_current':True,'installed_on':'DISPOSABLE_CLOUD_ONLY'},indent=2))
