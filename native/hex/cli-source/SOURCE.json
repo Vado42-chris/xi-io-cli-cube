@@ -65,12 +65,12 @@
   "ref_role": "Historical initial adoption base; current seven-file payload authority is current_packaged_payload and packaged-source.json, not the historical blob list.",
   "current_packaged_payload": {
     "repository": "Vado42-chris/xi-io-cli",
-    "ref": "958a5fe9d4a409e4ab2b690b6a2cc357539908cf",
+    "ref": "ff90881b0311d0a8241e0631017f74d981cda0e2",
     "manifest": "packaged-source.json",
     "files": {
       "src/xiio.mjs": {
-        "sha256": "fa77fafefdf3e73e20e71b824752f15c14bd7ca3af0fb5f1396f62c162f70aed",
-        "size": 115187
+        "sha256": "98590a8b8c2aa5ec35ce5ed56c02d128dd422cb368422bd56e0c7f4dd04b13f8",
+        "size": 121214
       },
       "src/file-edit-cas.mjs": {
         "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
@@ -104,7 +104,7 @@
     "base_ref": "f1bca1245436167fc7767bc31925486643e5d2e7",
     "path": "native/hex/cli-source/install.mjs",
     "base_sha256": "6311b606049f07d35bc31e78f73218a95a114d3723c9f8b97bcb8f3262d8d5a6",
-    "sha256": "14730c1f91609d40b1289b98228aef19f048833d36126ca35531e69d7fc6f418",
-    "scope": "Existing offline installer, fresh-generation files/receipt 0600 and nested directories 0700 only; historical bytes, modes and identities preserved. No new installer or runtime. Current PR16 runtime-integrity mirror copied exactly to admit the seven-file payload (local-ops optional for historical receipts); existing packaged-source transport and connection profile unchanged."
+    "sha256": "1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a",
+    "scope": "Existing offline installer, fresh-generation files/receipt 0600 and nested directories 0700 only; historical bytes, modes and identities preserved. No new installer or runtime. Current PR16 runtime-integrity mirror remains exact for the seven-file payload; chat-first startup verification exits with /exit so installation never invokes the local model. Existing packaged-source transport and connection profile unchanged."
   }
 }
