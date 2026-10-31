@@ -979,8 +979,37 @@ function finishToolTurn(messages,results,{text='',error=null,source='provider'}=
   messages.push({role:'assistant',content:answer.text});
   return answer;
 }
-async function providerReply(convo,{model,mode,signal}){
-  const res=await fetch('http://127.0.0.1:11434/api/chat',{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(300000)]):AbortSignal.timeout(300000),method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,messages:convo,stream:false,options:LOCAL_TOOL_INFERENCE_OPTIONS,...(mode==='native'?{tools:ollamaTools()}:{format:structuredSchema()})})});
+function projectModelHistory(convo){
+  const prefix='Actual execution receipt (CLI-observed, not model claims):\n';
+  const marker='\nModel reply (unverified narrative; not an execution receipt):\n';
+  return convo.map(message=>{
+    if(message.role!=='assistant'||typeof message.content!=='string'||!message.content.startsWith(prefix))return message;
+    try{
+      const rest=message.content.slice(prefix.length),split=rest.indexOf(marker);
+      const raw=(split<0?rest:rest.slice(0,split)).replace(/\nNo tools were executed\.$/,'');
+      const receipt=JSON.parse(raw);
+      if(receipt.schema!=='xiio.cli.execution-return/v1'||!Array.isArray(receipt.tool_results))return message;
+      const summary={schema:'xiio.cli.prior-execution-context/v1',state:receipt.state,first_red:receipt.first_red,
+        full_receipt_retained_in_session:true,not_execution_authority:true,
+        tool_results:receipt.tool_results.map(f=>({name:f.name,state:f.state,reason:f.reason,path:f.arguments?.path,
+          sha256:f.result?.sha256,byte_length:f.result?.byte_length,full_content_returned:f.result?.full_content_returned,
+          branch:f.result?.branch,head:f.result?.head,head_state:f.result?.head_state})),
+        note:'Historical observation metadata, not current file contents. Read current files when contents are needed.'};
+      return {...message,content:JSON.stringify(summary)+(split<0?'':marker+rest.slice(split+marker.length))};
+    }catch{return message;}
+  });
+}
+function modelToolResult(fact){
+  const result=fact.result;
+  if(fact.name==='git_status'&&typeof result?.status==='string'){
+    const lines=result.status.split('\n'),entries=lines.filter(line=>line.trim().length>0);
+    return JSON.stringify({...result,status:lines.slice(0,20).join('\n'),status_entry_count:entries.length,working_tree_clean:entries.length===0,
+      model_status_projection_truncated:lines.length>20,note:'working_tree_clean is computed from the complete Git result. A false value means changes exist. Only the first 20 status lines are shown to the model; the full observation remains in the receipt. Repeating git_status will not reveal omitted lines.'});
+  }
+  return JSON.stringify(result);
+}
+async function providerReply(convo,{model,mode,signal,answerOnly=false}){
+  const res=await fetch('http://127.0.0.1:11434/api/chat',{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(answerOnly?60000:300000)]):AbortSignal.timeout(answerOnly?60000:300000),method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model,messages:projectModelHistory(convo),stream:false,options:LOCAL_TOOL_INFERENCE_OPTIONS,...(answerOnly?{format:{type:'object',properties:{tool:{type:'string',enum:['answer']},text:{type:'string',minLength:1}},required:['tool','text'],additionalProperties:false}}:mode==='native'?{tools:ollamaTools()}:{format:structuredSchema()})})});
   if(!res.ok)throw new Error('OLLAMA_HTTP_'+res.status);
   return providerMessage(await res.json());
 }
@@ -1059,8 +1088,41 @@ function structuredAction(msg){
   }
   return {name:d.tool,args:validateToolArgs(d.tool,args)};
 }
+function createNoProgressGuard() {
+    const counts = new Map();
+    let previousKey = null;
+    const read_workspace_file = new Set(['read_workspace_file','resolve_registry','git_status','list_workspace','search_workspace','list_registries','list_services']);
+
+    return function observe(fact) {
+        if (!read_workspace_file.has(fact.name)) {
+            counts.clear();
+            previousKey = null;
+            return false;
+        }
+
+        const sortedEntries = Object.entries(fact.arguments).sort((a, b) => a[0].localeCompare(b[0]));
+        const key = JSON.stringify([fact.name, sortedEntries, fact.result]);
+        if(key !== previousKey) counts.clear();
+        previousKey = key;
+        const n = (counts.get(key) || 0) + 1;
+        counts.set(key, n);
+
+        return n >= 3;
+    };
+}
+async function finishNoProgressTurn(messages,convo,results,{model,signal}){
+  if(signal?.aborted)return finishToolTurn(messages,results,{error:'USER_CANCELLED'});
+  const originalTask=[...messages].reverse().find(m=>m.role==='user')?.content||'';
+  const finalConvo=[...convo,{role:'user',content:'The CLI observed three identical read-only results and stopped further tool calls. Return only an answer using the recorded evidence. Do not claim unverified completion. If the next task is unknown, say so. Original task: '+originalTask}];
+  try{
+    const reply=await providerReply(finalConvo,{model,mode:'structured',signal,answerOnly:true});
+    const action=structuredAction(reply);
+    if(action.name!=='answer')return finishToolTurn(messages,results,{error:'NO_PROGRESS_FINAL_ANSWER_REQUIRED'});
+    return finishToolTurn(messages,results,{text:action.text});
+  }catch(error){return finishToolTurn(messages,results,{error:error instanceof Error?error.message:'NO_PROGRESS_FINAL_ANSWER_FAILED'});}
+}
 async function ollamaChatStructured(messages,{model,root,approve,signal}){
-  const convo=[...messages],results=[];
+  const convo=[...messages],results=[],noProgress=createNoProgressGuard();
   if(convo[0]?.role==='system')convo[0]={...convo[0],content:convo[0].content+'\n'+STRUCTURED_GUIDE};
   for(let turn=0;turn<12;turn++){
     let msg,action;
@@ -1071,8 +1133,9 @@ async function ollamaChatStructured(messages,{model,root,approve,signal}){
     if(signal?.aborted)return finishToolTurn(messages,results,{error:'USER_CANCELLED'});
     const fact=await executeObservedTool(action.name,action.args,{root,approve});
     results.push(fact);
-    convo.push({role:'user',content:'TOOL RESULT for '+action.name+': '+JSON.stringify(fact.result).slice(0,20000)});
+    convo.push({role:'user',content:'TOOL RESULT for '+action.name+': '+modelToolResult(fact)});
     if(fact.reason==='HUMAN_APPROVAL_REQUIRED')return finishToolTurn(messages,results,{error:'HUMAN_APPROVAL_REQUIRED'});
+    if(noProgress(fact))return finishNoProgressTurn(messages,convo,results,{model,signal});
   }
   return finishToolTurn(messages,results,{error:'TOOL_LOOP_LIMIT'});
 }
@@ -1081,7 +1144,7 @@ async function ollamaChat(messages,opts){
   return ollamaChatNative(messages,opts);
 }
 async function ollamaChatNative(messages,{model,root,approve,signal}){
-  const convo=[...messages],results=[];
+  const convo=[...messages],results=[],noProgress=createNoProgressGuard();
   for(let turn=0;turn<12;turn++){
     let msg,calls;
     try{msg=await providerReply(convo,{model,mode:'native',signal});calls=nativeCalls(msg);}
@@ -1093,8 +1156,9 @@ async function ollamaChatNative(messages,{model,root,approve,signal}){
       if(signal?.aborted)return finishToolTurn(messages,results,{error:'USER_CANCELLED'});
       const fact=await executeObservedTool(name,args,{root,approve});
       results.push(fact);
-      convo.push({role:'tool',tool_name:name,content:JSON.stringify(fact.result)});
+      convo.push({role:'tool',tool_name:name,content:modelToolResult(fact)});
       if(fact.reason==='HUMAN_APPROVAL_REQUIRED')return finishToolTurn(messages,results,{error:'HUMAN_APPROVAL_REQUIRED'});
+    if(noProgress(fact))return finishNoProgressTurn(messages,convo,results,{model,signal});
     }
   }
   return finishToolTurn(messages,results,{error:'TOOL_LOOP_LIMIT'});
@@ -1198,7 +1262,7 @@ function humanToolTurn(answer){
     }else if(fact.name==='edit_workspace_file')lines.push((v.created?'Created ':'Changed ')+humanText(v.path)+' — written bytes match the readback.'+(v.bytes_outside_change_preserved===true?' Other bytes were preserved.':''));
     else if(fact.name==='list_workspace')lines.push('Files in '+humanText(v.path)+':\n'+preview(v.entries.map(x=>x.name+(x.type==='dir'?'/':'')).join('\n')||'[No entries returned.]'));
     else if(fact.name==='search_workspace')lines.push('Matches for '+humanText(v.query)+':\n'+preview(v.matches.join('\n')||'[No matches returned.]'));
-    else if(fact.name==='git_status')lines.push('Git branch: '+humanText(v.branch||'(detached HEAD)')+'\n'+preview(v.status||'No working-tree changes reported.')+'\nSubmodule contents were not inspected.');
+    else if(fact.name==='git_status')lines.push('Git branch: '+humanText(v.branch||'(detached HEAD)')+'\nWorking-tree entries: '+String(v.status.split('\n').filter(line=>line.trim().length>0).length)+'\n'+preview(v.status||'No working-tree changes reported.')+'\nSubmodule contents were not inspected.');
     else if(fact.name==='list_registries')lines.push(humanRegistry(v));
     else if(fact.name==='list_services')lines.push('Configured service candidates: '+humanText(v.services.map(x=>x.service).join(', ')||'none')+'. Listing is not product health or permission. Only declared health endpoints are available.');
     else if(fact.name==='call_service')lines.push(humanText(v.service)+': endpoint returned HTTP '+v.status+'. Product health, identity and broader permission are not verified.\n'+preview(v.body));

@@ -76,7 +76,7 @@ test('current payload provenance and bounded fresh-generation custody producer a
 
 test('current eight-file payload and historical repair verifier keep separate exact custody',()=>{
  const base='native/hex/cli-source/',payload=json(base+'packaged-source.json'),repair=json(base+'launcher-repair.SOURCE.json');
- assert.equal(payload.source_sha,'1d7543a3cf33a3c2d83363825e120a31e28a8bdf');
+ assert.equal(payload.source_sha,'b1f70cdd6c848bea49e76f2d1cd45f67357f0f35');
  assert.equal(Object.keys(payload.files).length,8);assert.ok(payload.files['src/local-ops.mjs']);
  const helper=read(base+'src/runtime-integrity.mjs').split('\n').filter(line=>!line.startsWith('import ')).join('\n').replace(/^export /gm,'').trim();
  const producer=read(base+'install.mjs');const start=producer.indexOf('\n',producer.indexOf('// BEGIN runtime-integrity standalone mirror'));

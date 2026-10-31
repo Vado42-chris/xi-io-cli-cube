@@ -1,5 +1,5 @@
 import pathlib,tempfile,subprocess,os,json,shutil,hashlib
-R=pathlib.Path(__file__).resolve().parent;SHA='1d7543a3cf33a3c2d83363825e120a31e28a8bdf';node=shutil.which('node')
+R=pathlib.Path(__file__).resolve().parent;SHA='b1f70cdd6c848bea49e76f2d1cd45f67357f0f35';node=shutil.which('node')
 with tempfile.TemporaryDirectory(prefix='xiio-hex-delivery-') as d:
  t=pathlib.Path(d);(t/'home').mkdir();(t/'bin').mkdir();env={**os.environ,'HOME':str(t/'home'),'XIIO_CONFIG_DIR':str(t/'config'),'PATH':str(t/'bin')+':'+os.environ['PATH']}
  def install(src=R):return subprocess.run([node,str(R/'install.mjs'),'--packaged-source',str(src),'--ref',SHA,'--prefix',str(t/'prefix'),'--bin-dir',str(t/'bin')],env=env,capture_output=True,text=True,timeout=45)

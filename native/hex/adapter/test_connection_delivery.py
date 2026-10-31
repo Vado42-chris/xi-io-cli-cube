@@ -7,7 +7,7 @@ from pathlib import Path
 from test_launcher_repair import Fixture,NODE
 HERE=Path(__file__).resolve().parent
 SOURCE=HERE.parent/'cli-source'
-REF='1d7543a3cf33a3c2d83363825e120a31e28a8bdf'
+REF='b1f70cdd6c848bea49e76f2d1cd45f67357f0f35'
 SB='ffbcd216d4c673de826242662271add63112c49a'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def snapshot(root):
