@@ -4,10 +4,10 @@
   "runtime_proven_sha": "a944d5dd5e412868940012b711fa430f81993660",
   "state": "HEX_PACKAGE_READY_AWAITING_OWNER_ADOPT",
   "pr": 32,
-  "one_production_adoption_command": "python3 native/hex/download-install-cli.py --carrier-ref 41381277b3ccf6e8995cecad3ddf124eb07615f2 --install --prefix /home/chrishallberg/.local/share/xi-io/cli-v1 --bin-dir /home/chrishallberg/.local/bin --adopt-existing-launcher --expect-launcher-sha256 c3705b136d47536c2cd0e701b56a0163c0d79427e480e01149f25b15dc93aad3",
+  "one_production_adoption_command": "python3 native/hex/download-install-cli.py --carrier-ref 54ab6f638e668a03ffc14f3331e292d5f3879679 --install --prefix /home/chrishallberg/.local/share/xi-io/cli-v1 --bin-dir /home/chrishallberg/.local/bin --adopt-existing-launcher --expect-launcher-sha256 c3705b136d47536c2cd0e701b56a0163c0d79427e480e01149f25b15dc93aad3",
   "remaining_blocker": "Owner must explicitly approve production launcher adopt; BINS/Ibal/Inbox production bindings remain separate open gates",
   "cli_without_cursor": "Accepted packets + ordinary-language continue + Ollama tools with terminal approvals + deterministic acceptance + ALREADY_COMPLETE restart",
   "current_production_launcher_sha256": "c3705b136d47536c2cd0e701b56a0163c0d79427e480e01149f25b15dc93aad3",
-  "hex_commit": "41381277b3ccf6e8995cecad3ddf124eb07615f2",
-  "isolated_verify_command": "python3 native/hex/download-install-cli.py --carrier-ref 41381277b3ccf6e8995cecad3ddf124eb07615f2 --install --prefix /tmp/xiio-cli-v1-iso --bin-dir /tmp/xiio-cli-bin-iso"
+  "hex_commit": "54ab6f638e668a03ffc14f3331e292d5f3879679",
+  "isolated_verify_command": "python3 native/hex/download-install-cli.py --carrier-ref 54ab6f638e668a03ffc14f3331e292d5f3879679 --install --prefix /tmp/xiio-cli-v1-iso --bin-dir /tmp/xiio-cli-bin-iso"
 }
