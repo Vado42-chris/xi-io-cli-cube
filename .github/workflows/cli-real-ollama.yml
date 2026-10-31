@@ -47,12 +47,12 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
-          ollama pull qwen2.5:3b
+          ollama pull qwen2.5:1.5b
           ollama list
 
       - name: Real Ollama read, approved edit, and independent byte readback
         env:
-          XIIO_MODEL: qwen2.5:3b
+          XIIO_MODEL: qwen2.5:1.5b
           XIIO_TOOL_MODE: structured
         run: |
           set -euo pipefail
@@ -69,10 +69,10 @@ jobs:
 
           child=pexpect.spawn(
               "node",
-              [str(runtime), "chat", str(project), "--model", "qwen2.5:3b"],
+              [str(runtime), "chat", str(project), "--model", "qwen2.5:1.5b"],
               encoding="utf-8",
               timeout=180,
-              env={**os.environ, "XIIO_MODEL":"qwen2.5:3b", "XIIO_TOOL_MODE":"structured"},
+              env={**os.environ, "XIIO_MODEL":"qwen2.5:1.5b", "XIIO_TOOL_MODE":"structured"},
           )
           with transcript.open("w",encoding="utf-8") as log:
               child.logfile=log
@@ -93,7 +93,7 @@ jobs:
                       r"xi> ",
                       pexpect.EOF,
                       pexpect.TIMEOUT,
-                  ], timeout=60)
+                  ], timeout=45)
                   if idx==0:
                       approvals+=1
                       child.sendline("yes")
@@ -147,8 +147,10 @@ jobs:
         with:
           name: hex-cli-real-ollama-${{ github.sha }}
           path: |
+            ${{ runner.temp }}/xiio-real-ollama/transcript.txt
             ${{ runner.temp }}/xiio-real-ollama/transcript.redacted.txt
             ${{ runner.temp }}/xiio-real-ollama/note.sha256
+            ${{ runner.temp }}/ollama.log
             ${{ runner.temp }}/xiio-real-ollama/ollama.log
           if-no-files-found: warn
           retention-days: 14
