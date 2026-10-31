@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Pinned downloader for the EXISTING HEX offline CLI installer. No new installer."""
-import argparse,base64,hashlib,json,os,pathlib,re,shutil,subprocess,sys,tempfile
+import argparse,base64,hashlib,importlib.util,json,os,pathlib,re,shutil,subprocess,sys,tempfile
 SOURCE_SHA="b1f70cdd6c848bea49e76f2d1cd45f67357f0f35"
 INSTALLER_SHA="7cfb4bed6ba2c5e20c9c4e6aa9089ccdd9172ae88e5b3df3add78134662b50de"
 MANIFEST_SHA="f31e58a813b7a8fcfbe25ce26aed9fa37c130ef69c1ec695a031a49e2fa587d1"
 FILES=['src/xiio.mjs', 'src/file-edit-cas.mjs', 'src/local-ops.mjs', 'src/runtime-integrity.mjs', 'config/service-catalog.json', 'scripts/service-inventory.mjs', 'scripts/reconcile-service-inventory.mjs', 'src/sdk-provider-state.mjs']
 
 def digest(data):return hashlib.sha256(data).hexdigest()
-def get_file(carrier,name):
- endpoint=f"repos/Vado42-chris/xi-io-cli-cube/contents/native/hex/cli-source/{name}?ref={carrier}"
+def get_file(carrier,name,source_path=None):
+ source_path=source_path or "native/hex/cli-source/"+name
+ endpoint=f"repos/Vado42-chris/xi-io-cli-cube/contents/{source_path}?ref={carrier}"
  response=subprocess.run(['gh','api',endpoint],check=True,capture_output=True,text=True,timeout=45)
  item=json.loads(response.stdout)
  if item.get('type')!='file' or item.get('encoding')!='base64':raise RuntimeError('GITHUB_REGULAR_FILE_REQUIRED:'+name)
@@ -29,6 +30,32 @@ def verify(root):
   data=file.read_bytes();expected=manifest['files'][name]
   if len(data)!=expected['size'] or digest(data)!=expected['sha256']:raise RuntimeError('PAYLOAD_HASH_MISMATCH:'+name)
  return manifest
+
+DISCOVERY_FILES = {'native/hex/adapter/install_preflight.py': '7290a9d02870332009f4dd984203aa9aabb093a135adae97643c60aa1ab6f9a2', 'native/hex/adapter/kernel/xiio_installer/__init__.py': '1cfa18cf7a7ce811c262f715af968d50db2efb237fc44f95f0e593f30a3e2c95', 'native/hex/adapter/kernel/xiio_installer/discovery.py': 'c1c6096189c03b593707f7c440b8727ea0aff49135f9d8d26afd5d10e5ee60a8'}
+
+def resolve_existing_node(carrier,cache,home=None):
+ node=shutil.which('node')
+ if node:return node
+ # Reuse HEX's bounded metadata-only discovery. No profile changes or new runtime.
+ base=cache/'runtime-discovery'/carrier
+ for relative,expected in DISCOVERY_FILES.items():
+  target=base/relative
+  if target.exists():
+   if target.is_symlink() or not target.is_file() or digest(target.read_bytes())!=expected:raise RuntimeError('DISCOVERY_SOURCE_CHANGED:'+relative)
+  else:
+   data=get_file(carrier,relative,source_path=relative)
+   if digest(data)!=expected:raise RuntimeError('DISCOVERY_SOURCE_HASH_MISMATCH:'+relative)
+   target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+   with open(os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'wb') as f:f.write(data)
+ adapter=base/'native/hex/adapter'
+ sys.path.insert(0,str(adapter/'kernel'))
+ try:
+  spec=importlib.util.spec_from_file_location('_xiio_existing_install_preflight',adapter/'install_preflight.py')
+  module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+  candidates=module.node_candidates(home or pathlib.Path.home())
+ finally:sys.path.pop(0)
+ preferred=next((row['path'] for row in candidates if row['source']=='user_nvm'),None)
+ return preferred or (candidates[0]['path'] if candidates else None)
 
 def main():
  ap=argparse.ArgumentParser();ap.add_argument('--carrier-ref',required=True);ap.add_argument('--install',action='store_true');ap.add_argument('--cache-dir');ap.add_argument('--prefix');ap.add_argument('--bin-dir');ap.add_argument('--adopt-existing-launcher',action='store_true');ap.add_argument('--expect-launcher-sha256');a=ap.parse_args()
@@ -52,7 +79,7 @@ def main():
    shutil.rmtree(stage,ignore_errors=True);raise
  if not a.install:
   print(json.dumps({'state':'VERIFIED_DOWNLOAD','carrier_sha':a.carrier_ref,'source_sha':SOURCE_SHA,'directory':str(root),'installed':False}));return
- node=shutil.which('node')
+ node=resolve_existing_node(a.carrier_ref,cache)
  if not node:raise RuntimeError('NODE_REQUIRED')
  cmd=[node,str(root/'install.mjs'),'--packaged-source',str(root),'--ref',SOURCE_SHA]
  for flag,value in [('--prefix',a.prefix),('--bin-dir',a.bin_dir)]:
