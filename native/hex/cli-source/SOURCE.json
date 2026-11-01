@@ -69,8 +69,8 @@
     "manifest": "packaged-source.json",
     "files": {
       "src/xiio.mjs": {
-        "sha256": "5fff3c5f5ffaf6d00b488624b01b1426ad60c834b42040d92be4049b14ec2199",
-        "size": 157498
+        "sha256": "40f49c10cf69fe3595726eada1aacd4fa233eb856c041011471a5f79ce6c57fa",
+        "size": 157697
       },
       "src/file-edit-cas.mjs": {
         "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",

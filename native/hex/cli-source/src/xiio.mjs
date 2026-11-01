@@ -1643,7 +1643,10 @@ async function interactive(flags,args=[],{showMenu=false}={}){
       }
       catch(e){
         const failure='I could not complete that locally: '+String(e.message||e)+'.';
-        messages.push({role:'assistant',content:failure});process.stdout.write(failure+'\n');persistSession();
+        // Durable /details evidence even on failed turns — chat narrative alone is not a receipt.
+        const failed=toolFallbackText([],{text:failure,error:String(e.message||e),source:'provider'});
+        messages.push({role:'assistant',content:failed.text});
+        showTurn(failed);persistSession();
       }
     }
   } finally { rl.close(); }

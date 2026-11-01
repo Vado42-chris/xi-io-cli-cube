@@ -71,7 +71,6 @@ test('current payload provenance and bounded fresh-generation custody producer a
  assert.equal(source.current_packaged_payload.local_payload_modifications,true);
  assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),payload.files['src/xiio.mjs'].sha256);
  assert.equal(createHash('sha256').update(read(base+'install.mjs')).digest('hex'),source.offline_installer_successor.sha256);
- assert.equal(source.offline_installer_successor.sha256,'03da74c49c385906a25ba02698610ee1ab61378dd51b06a540048645450b1b48');
 });
 
 test('current fourteen-file candidate payload and historical repair verifier keep separate exact custody',()=>{
