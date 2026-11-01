@@ -1,7 +1,6 @@
 """Actual existing-kernel child bundle tests, disposable paths, zero network/host effects."""
 import hashlib
 import json
-import multiprocessing as mp
 import os
 import sys
 import tempfile
@@ -213,6 +212,16 @@ class BundleTests(unittest.TestCase):
                            fetch=f.fetch, fail_after_product=1)
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/ward/ward.bin").exists())
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        self.assertEqual(list(state_root.glob("*.receipt.json")), [])
+        archived = list((state_root / "rolled-back").glob("*.rollback-*.json"))
+        self.assertEqual(len(archived), 1)
+        self.assertIn('"schema_version": "xiio-installer-receipt-v1"', archived[0].read_text())
+        # The verified rollback is genuinely retryable: no stale active receipt
+        # can convert the prior creation into a silent noop.
+        retry = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(retry["state"], "INSTALLED_BYTES_VERIFIED")
+        self.assertEqual(retry["receipt_count"], 2)
 
     def test_existing_user_file_is_not_overwritten(self):
         f = self.fixture()
@@ -352,35 +361,228 @@ class BundleTests(unittest.TestCase):
         for role in ("cli", "ibal", "switchboard", "bins", "ward", "inbox"):
             self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / f"xi-io/{role}/{role}.bin").exists())
 
-    def test_two_process_overlapping_install_refused_via_cross_process_lock(self):
+
+    def test_symlinked_xdg_state_root_refuses_without_external_directory_effect(self):
         f = self.fixture()
         f.child("cli")
         lock, digest = f.lock()
-        barrier = mp.Queue()
-        done = mp.Queue()
-        p1 = mp.Process(target=_concurrency_worker, args=(lock, digest, f.env, barrier, done))
-        p1.start()
+        external = f.root / "external"
+        external.mkdir()
+        (f.root / "state").symlink_to(external, target_is_directory=True)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(list(external.iterdir()), [])
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
+    def test_symlinked_intermediate_bundle_ancestor_refuses_before_outside_write(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        external = f.root / "external"
+        external.mkdir()
+        (f.root / "state").mkdir()
+        (f.root / "state/xi-io").symlink_to(external, target_is_directory=True)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(list(external.iterdir()), [])
+
+    def test_destination_xdg_symlink_rejected_without_installing(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        outside = f.root / "external"
+        outside.mkdir()
+        (f.root / "data").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_XDG_DESTINATION_SYMLINK_FORBIDDEN"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_attacker_swaps_state_ancestor_during_staging_no_outside_effect(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        outside = f.root / "external"
+        outside.mkdir()
+        state = f.root / "state"
+        moved = f.root / "moved-original-state"
+        def swap_and_fetch(url, destination, limit):
+            if not moved.exists():
+                state.rename(moved)
+                state.symlink_to(outside, target_is_directory=True)
+            f.fetch(url, destination, limit)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_CHANGED"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                           fetch=swap_and_fetch)
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
+    def test_symlinked_apply_lock_refused_without_touching_target(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        state = f.root / "state/xi-io/installer/bundles/core-test"
+        state.mkdir(parents=True)
+        victim = f.root / "unrelated-user-file"
+        victim.write_bytes(b"DO NOT TOUCH")
+        (state / "apply.lock").symlink_to(victim)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_LOCK_UNTRUSTED|BUNDLE_APPLY_LOCK_SYMLINK_FORBIDDEN"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                           fetch=f.fetch)
+        self.assertEqual(victim.read_bytes(), b"DO NOT TOUCH")
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
+    def test_unsafe_world_writable_bundle_state_root_is_rejected(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        state = f.root / "state/xi-io/installer/bundles/core-test"
+        state.mkdir(parents=True)
+        state.chmod(0o777)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_PERMISSIONS"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                           fetch=f.fetch)
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
+    def test_cross_process_apply_custody_precedes_payload_acquisition(self):
+        # Separate Linux processes share a real inode/lock. The second may
+        # neither fetch payload nor plan/install while first stages.
+        import multiprocessing
+        f = self.fixture()
+        f.child("cli").child("ward", depends_on=("cli",))
+        lock, digest = f.lock()
+        ctx = multiprocessing.get_context("fork")
+        started, release = ctx.Event(), ctx.Event()
+        report = ctx.Queue()
+
+        def first_process():
+            def paused_fetch(url, output, limit):
+                started.set()
+                if not release.wait(8):
+                    raise RuntimeError("FIRST_ACQUISITION_TIMEOUT")
+                f.fetch(url, output, limit)
+            try:
+                result = install_bundle(lock, approved_lock_sha256=digest,
+                                        env=f.env, fetch=paused_fetch)
+                report.put(result["state"])
+            except BaseException as error:
+                report.put(type(error).__name__ + ":" + str(error))
+
+        first = ctx.Process(target=first_process)
+        first.start()
         try:
-            status = barrier.get(timeout=5)
-            self.assertEqual(status, "LOCKED_AND_FETCHING")
-            # Process 2 attempts concurrent install while Process 1 is in acquisition stage
-            with self.assertRaisesRegex(BundleError, "BUNDLE_INSTALLATION_IN_PROGRESS"):
-                install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+            self.assertTrue(started.wait(5), "first child never reached download")
+            second_fetches = []
+
+            def forbidden_fetch(url, output, limit):
+                second_fetches.append(url)
+                raise AssertionError("SECOND_FETCH_BEFORE_CUSTODY")
+
+            with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_ALREADY_IN_PROGRESS"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                               fetch=forbidden_fetch)
+            self.assertEqual(second_fetches, [])
+            self.assertFalse((Path(f.env["XDG_DATA_HOME"]) /
+                              "xi-io/cli/cli.bin").exists())
         finally:
-            done.put("RELEASE")
-            p1.join(timeout=5)
+            release.set()
+            first.join(8)
+            if first.is_alive():
+                first.terminate()
+                first.join(3)
+        self.assertEqual(first.exitcode, 0)
+        self.assertEqual(report.get(timeout=2), "INSTALLED_BYTES_VERIFIED")
+        self.assertTrue((Path(f.env["XDG_DATA_HOME"]) /
+                         "xi-io/cli/cli.bin").is_file())
 
+    def test_parent_swapped_to_attacker_precreated_stage_does_not_write_outside(self):
+        # Shared A/B known answer: a symlink check is not protection once the
+        # checked fd is closed and ordinary pathnames are used for acquisition.
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        state = f.root / "state"
+        moved = f.root / "moved-original-state"
+        outside = f.root / "attacker-controlled"
+        outside.mkdir()
+        hostile_destination = []
+        wrote_outside = []
 
-def _concurrency_worker(lock, digest, env, barrier, done):
-    def slow_fetch(url, output, limit):
-        barrier.put("LOCKED_AND_FETCHING")
-        done.get(timeout=10)
-        output.write_bytes(b"cli delivered\n")
-    try:
-        install_bundle(lock, approved_lock_sha256=digest, env=env, fetch=slow_fetch)
-    except Exception as exc:
-        barrier.put(f"ERROR: {exc}")
+        def swapped_fetch(url, output, limit):
+            if not moved.exists():
+                portions = list(output.parts)
+                index = next((i for i, part in enumerate(portions)
+                              if part.startswith("xiio-stage-")), None)
+                self.assertIsNotNone(index)
+                shadow = (outside / "xi-io" / "installer" / "bundles" /
+                          "core-test" / Path(*portions[index:]))
+                shadow.parent.mkdir(parents=True)
+                hostile_destination.append(shadow)
+                state.rename(moved)
+                state.symlink_to(outside, target_is_directory=True)
+            f.fetch(url, output, limit)
+            wrote_outside.append(hostile_destination[0].is_file())
 
+        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_CHANGED"):
+            install_bundle(lock, approved_lock_sha256=digest,
+                           env=f.env, fetch=swapped_fetch)
+        self.assertEqual(wrote_outside, [False])
+        self.assertFalse(hostile_destination[0].exists())
+        self.assertFalse((f.root / "data/xi-io/cli/cli.bin").exists())
+
+    def test_search_only_xdg_ancestor_remains_installable_without_listing_rights(self):
+        # A root/user-managed ancestor can be searchable (x) but not readable;
+        # O_PATH must work without relaxing the anti-symlink protections.
+        f = self.fixture()
+        f.child("cli")
+        outer = f.root / "search-only-parent"
+        inner = outer / "state"
+        inner.mkdir(parents=True, mode=0o700)
+        outer.chmod(0o111)
+        f.env["XDG_STATE_HOME"] = str(inner)
+        lock, digest = f.lock()
+        try:
+            result = install_bundle(lock, approved_lock_sha256=digest,
+                                    env=f.env, fetch=f.fetch)
+            self.assertEqual(result["state"], "INSTALLED_BYTES_VERIFIED")
+            state = inner / "xi-io/installer/bundles/core-test"
+            self.assertTrue(state.is_dir())
+            self.assertEqual(state.stat().st_mode & 0o777, 0o700)
+        finally:
+            outer.chmod(0o700)
+
+    def test_verified_rollback_archive_preserves_receipt_and_allows_retry(self):
+        f = self.fixture()
+        f.child("cli").child("ward", depends_on=("cli",))
+        lock, digest = f.lock()
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_FAILED_ROLLED_BACK"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                           fetch=f.fetch, fail_after_product=1)
+        state = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        self.assertEqual(list(state.glob("*.receipt.json")), [])
+        self.assertEqual(len(list((state / "rolled-back").glob("*.json"))), 1)
+        result = install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                                fetch=f.fetch)
+        self.assertEqual(result["state"], "INSTALLED_BYTES_VERIFIED")
+        self.assertEqual(len(list(state.glob("*.receipt.json"))), 2)
+
+    def test_inspection_custody_refuses_changed_parent_without_external_effect(self):
+        from child_bundle import bundle_inspection_custody, inspect_bundle_install
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        state, moved = f.root / "state", f.root / "moved-original-state"
+        outside = f.root / "outside"
+        outside.mkdir()
+        with bundle_inspection_custody(lock, approved_lock_sha256=digest,
+                                      env=f.env) as custody:
+            state.rename(moved)
+            state.symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(
+                    BundleError,
+                    "BUNDLE_INSPECTION_CUSTODY_INVALID|BUNDLE_STATE_ROOT_CHANGED|BUNDLE_STATE_ROOT_UNTRUSTED"):
+                inspect_bundle_install(lock, approved_lock_sha256=digest,
+                                       env=f.env, custody=custody)
+        self.assertEqual(list(outside.iterdir()), [])
 
 if __name__ == "__main__":
     unittest.main()
