@@ -1,0 +1,179 @@
+{
+  "title": "Staged continuation payloads: safe HEX delivery and Ibal/Zed adoption",
+  "prepared_at": "2026-11-01T04:38:00Z",
+  "state": "PREPARED_NOT_DISPATCHED",
+  "effect_authority": false,
+  "not_a_runtime_work_packet": true,
+  "active_assignment": "Existing worker/HEX assignment remains owned by the current Cursor executor. Reconcile its Result before dispatching any item below. Skip already-fixed work only with matching tested bytes.",
+  "observed_revisions": {
+    "hex_candidate": "e1862a55a89cb64cb851531e0a55c36e928dcab4",
+    "cli_packaged_candidate": "f2626cae872f191e980ecdfb681485f2d9e67198",
+    "framework_inspected": "f992d96e0f3fb27e5040aaad7433389cf516f218",
+    "sdk": "55cff051ff61c3cc55d21c364377a83f97620a32",
+    "production_cli_reported": "89b9c418f6e161d9864bf891fd665b6a18f00dd2"
+  },
+  "release_inputs_missing": [
+    "executor final Result and exact returned revisions",
+    "independent review of installed worker and cold-reopen evidence",
+    "actual final runtime entrypoint and consumer protocol binding"
+  ],
+  "scope_rules": [
+    "No production install or authority activation from this preparation",
+    "No regular Zed/Cursor/Claude app, settings, profiles, launchers or sessions changes: Chris performs those actions",
+    "No Desktop Commander",
+    "Preserve existing dirty NEXT and worktrees",
+    "No paid fallback, paid agent fan-out, or new orchestration engine",
+    "Read source at exact revisions; a branch tip changing alone does not invalidate unaffected tested bytes"
+  ],
+  "packets": [
+    {
+      "id": "HEX-HOTFOLDER-BOUNDARIES",
+      "owner": "Vado42-chris/xi-io-cli-cube",
+      "state": "REPRODUCED_AWAITING_CURRENT_RESULT_RECONCILIATION",
+      "source_paths": [
+        "native/hex/hotfolder-update-consumer.py",
+        "native/hex/download-install-cli.py",
+        "native/hex/cli-source/test_offline_local_worker_delivery.py"
+      ],
+      "objective": "Close observed verification boundary gaps in the existing hotfolder consumer without replacing HEX.",
+      "findings": [
+        "verify_packaged accepts absolute manifest paths outside incoming root",
+        "verify_packaged accepts parent traversal outside incoming root",
+        "verify_packaged accepts a file through an ancestor directory symlink outside incoming root",
+        "Changing install.mjs while retaining expected source SHA still verifies; installer digest is observed, not checked against independently trusted expectation"
+      ],
+      "evidence": "hotfolder-boundary-findings.json; reproduce-hotfolder-boundaries.py; exact pinned source snapshot",
+      "implementation_requirements": [
+        "Resolve manifest entries under the incoming root; reject absolute paths, traversal and symlinked ancestors, including race/replace cases at materialization",
+        "Authenticate manifest and installer against the existing trusted pinned delivery metadata; an attacker-editable source_sha string is not provenance",
+        "Stage only admitted verified files; do not follow arbitrary unlisted symlinks during copy",
+        "Keep executable staging separate from activation and custody rollback",
+        "Review stage/LKG pointer crash and concurrency semantics using existing installer patterns; preserve last known good until replacement is durably complete"
+      ],
+      "tests": [
+        "valid trusted exact payload stages",
+        "absolute path refused",
+        "parent traversal refused",
+        "ancestor symlink refused",
+        "installer changed under same source string refused",
+        "manifest+payload rewritten together without trusted provenance refused",
+        "unlisted symlink not copied outside scope",
+        "real interruption leaves recoverable stage/LKG",
+        "stale or superseded proof cannot satisfy current install gate"
+      ],
+      "limits": "Four verification defects reproduced. No production compromise, installer execution, staging crash or full chain claim was tested here."
+    },
+    {
+      "id": "IBAL-ZED-SOURCE-RECONCILIATION",
+      "owner": "Vado42-chris/xi-io.net",
+      "state": "SOURCE_SEAMS_IDENTIFIED_NOT_RUNTIME_QUALIFIED",
+      "source_paths": [
+        "tools/hex-operator/rc/bin/zed-ibal-configure.mjs",
+        "scripts/run-r3-zed-ledger-tool-topology-replay.mjs",
+        "scripts/compile-zed-ibal-workforce-return-bundle.mjs",
+        "tools/hex-operator/rc/ibal-acp-runtime/agent-runtime-execution.mjs"
+      ],
+      "objective": "Make the existing XI-IO Zed integration consume the qualified local worker while preserving user-owned Zed configuration.",
+      "findings": [
+        "Configurator embeds llama3.1:8b in IBAL_BLOCK and probes that model directly rather than honoring a discovered chosen model",
+        "Configurator expects a historical ibal-acp-001a agent-runtime-operator.mjs location",
+        "Replay zero_mcp_not_required predicate includes after.plugin.installed although zedIbalStatus readiness excludes Cursor plugin installation",
+        "Replay calls configureZedIbal at top level, which writes the regular settings file",
+        "Replay pass is hardcoded false and ledger fault-injection cells remain false; it must not be marketed as an installed PASS",
+        "operator entrypoint absent at framework tools/hex-operator/rc/ibal-acp-runtime/agent-runtime-operator.mjs at inspected revision; installation producer/rename remains unresolved, not proof it is missing everywhere"
+      ],
+      "implementation_requirements": [
+        "Keep detection read-only; produce a reviewable configuration proposal separately from applying it",
+        "Use resolved installed candidate runtime and user-selected installed model; preserve custom endpoint/model and fail clearly if unavailable",
+        "Do not couple Zed readiness to Cursor plugin presence",
+        "Trace current packaged ACP entrypoint producer once against returned runtime manifest; do not invent a substitute agent",
+        "Use existing ACP and existing admitted executor for read/proposal/approval/effect/verification/return; no second paid conductor or independent task engine",
+        "Preserve unrelated context servers, settings, data and selected workspace with spaces",
+        "Test in disposable HOME/config with a fake client first; real UI qualification requires Chris's action, not automatic regular-install mutation"
+      ],
+      "tests": [
+        "qwen-only configured host does not fail solely because llama absent",
+        "Cursor plugin absent does not block valid Zed ACP readiness",
+        "status/replay preflight makes zero regular-settings writes",
+        "changed packaged runtime is resolved by manifest rather than historical hardcoded path",
+        "unknown runtime remains a precise blocker",
+        "space-containing project path remains intact",
+        "configuration proposal preserves unrelated settings",
+        "ACP initialize/session/read/proposal/refuse/approve/cancel/reopen have actual consumer evidence"
+      ],
+      "return_contract": "Use existing workforce-return bundle lineage fields and exact admitted work-ref set. RETURN_READY is not APPLY_RETURN and is not effect authority."
+    },
+    {
+      "id": "LOCAL-WORKER-TO-EVERYDAY-CLIENT",
+      "owners": [
+        "Vado42-chris/xi-io-ibal",
+        "Vado42-chris/xi-io.net",
+        "Vado42-chris/xi-io-cli-cube"
+      ],
+      "state": "WAITING_FOR_QUALIFIED_WORKER_RESULT",
+      "depends_on": [
+        "current executor installed local-worker qualification",
+        "IBAL-ZED-SOURCE-RECONCILIATION",
+        "HEX-HOTFOLDER-BOUNDARIES for hotfolder transport"
+      ],
+      "objective": "Expose the same durable local work in Ibal and the XI-IO Zed client so Chris can work without Cursor conducting it.",
+      "required_worker_output": [
+        "exact installed runtime revision/hash",
+        "actual start/resume/status/cancel interfaces",
+        "durable task and effect identity",
+        "verified return/custody references",
+        "tested procedure and applicability inputs from the real starter batch",
+        "activation and rollback boundary"
+      ],
+      "acceptance": [
+        "plain-language goal selects or proposes a scoped task without requiring magic phrases",
+        "local Ollama proposes; current authorization gates consequential effects",
+        "both consumers show the same verified task and workspace, not copied chat histories",
+        "side question/interjection does not become write authority or erase active work",
+        "approval/refusal/cancel remain scoped and visible",
+        "real process restart reopens uncertain effects safely and preserves completed work",
+        "a receiving consumer reads and validates the result; emitting a file alone does not satisfy cross-product completion",
+        "a second eligible job runs without paid-agent tool-by-tool decisions",
+        "learned repair procedure reuses only under its tested applicability/version conditions",
+        "offline local functionality remains independent of production BINS caller authentication"
+      ],
+      "guard": "Do not claim or build all SAM_LAW/ArtCraft surfaces in this slice. Retain them in dependency records; shared runtime output must remain reusable for those consumers. Do not discard their requirements."
+    }
+  ],
+  "acceptance_dimensions": [
+    [
+      "custody",
+      "coordinate/version/digest/independent readback"
+    ],
+    [
+      "authority",
+      "proposal distinct from authorization, independent acceptance and receipt"
+    ],
+    [
+      "repair_reuse",
+      "tested versioned procedure, applicability and requalification"
+    ],
+    [
+      "recovery",
+      "real restart; completed/failed/uncertain; no blind duplicate effects"
+    ],
+    [
+      "ownership",
+      "user storage/identity/privacy preserved; local core independent"
+    ],
+    [
+      "cross_product",
+      "actual recipient consumes and validates"
+    ],
+    [
+      "accessibility",
+      "plain language, comprehensible status, meaningful consent"
+    ],
+    [
+      "honest_status",
+      "ready/blocked/waiting approval/needs recheck grounded in evidence"
+    ]
+  ],
+  "triage_contract": "Use the existing canonical 3x3x3/21-step/ROTFL definitions when resolved. This preparation does not invent those axes or claim quorum execution.",
+  "dispatch_rule": "After current Result: reconcile exact bytes and unresolved defects; finish residual release blockers in the same lane, then release the Ibal/Zed adopter slice. Do not resend all history or re-run valid unrelated proofs. Source-only Zed preparation can proceed without production BINS authorization."
+}
