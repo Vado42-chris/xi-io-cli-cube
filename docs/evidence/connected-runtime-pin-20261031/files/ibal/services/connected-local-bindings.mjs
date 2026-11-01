@@ -72,6 +72,10 @@ function bindFields(binding = {}) {
     'source_generation',
     'return_ref',
     'operation_ref',
+    'workspace_root_ref',
+    'root_ref',
+    'work_ref',
+    'resource_ref',
   ];
   return Object.fromEntries(keys.map((k) => [k, binding[k] ?? null]));
 }
@@ -82,6 +86,54 @@ function bindingDigest(binding = {}) {
 
 function inputDigest(parts = {}) {
   return digest(parts);
+}
+
+function isSha256Hex(value) {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value);
+}
+
+/**
+ * Canonical local digest for custody payload equality (matches write payload).
+ * Not a substitute for BINS server digest algorithm when present — both must agree.
+ */
+function custodyPayloadDigest(payload) {
+  return digest(payload);
+}
+
+function qualifyVersionReadback(versionRead, expected) {
+  if (!versionRead || versionRead.state !== 'PASS') {
+    return { ok: false, reason: 'VERSION_READ_NOT_PASS' };
+  }
+  const body = versionRead.body || {};
+  const coordinate = body.coordinate_ref ?? body.coordinateRef ?? null;
+  if (coordinate !== expected.coordinate_ref) {
+    return { ok: false, reason: 'COORDINATE_MISMATCH', observed: coordinate };
+  }
+  const versionRef = body.version_ref ?? body.version ?? null;
+  if (String(versionRef) !== String(expected.version_ref)) {
+    return { ok: false, reason: 'VERSION_MISMATCH', observed: versionRef };
+  }
+  const digestValue =
+    (typeof body.digest === 'string' ? body.digest : null) ||
+    body.digest?.value ||
+    null;
+  if (!isSha256Hex(digestValue)) {
+    return { ok: false, reason: 'DIGEST_INVALID', observed: digestValue };
+  }
+  if (expected.payload_digest && digestValue.toLowerCase() !== expected.payload_digest.toLowerCase()) {
+    return { ok: false, reason: 'DIGEST_CONTENT_MISMATCH', observed: digestValue };
+  }
+  const payload = body.payload || {};
+  if (payload.receipt_ref !== expected.receipt_ref) {
+    return { ok: false, reason: 'PAYLOAD_RECEIPT_MISMATCH' };
+  }
+  if (expected.work_id != null && payload.work_id != null && payload.work_id !== expected.work_id) {
+    return { ok: false, reason: 'PAYLOAD_WORK_MISMATCH' };
+  }
+  if (expected.result_ref != null && payload.result_ref != null && payload.result_ref !== expected.result_ref) {
+    return { ok: false, reason: 'PAYLOAD_RESULT_MISMATCH' };
+  }
+  return { ok: true, digest: digestValue.toLowerCase() };
 }
 
 /**
@@ -124,8 +176,22 @@ async function withIdempotencyClaim(claimPath, action) {
           throw fail('IDEMPOTENCY_CLAIM_HELD', { claimPath, existing });
         } catch (aliveErr) {
           if (aliveErr?.code === 'IDEMPOTENCY_CLAIM_HELD') throw aliveErr;
-          // ESRCH — dead claimant; remove and retry
-          await fs.unlink(claimPath).catch(() => {});
+          // Only ESRCH means the claimant process is absent. EPERM/unknown must not delete a live claim.
+          if (aliveErr?.code !== 'ESRCH') {
+            throw fail('IDEMPOTENCY_CLAIM_PROCESS_CHECK_UNRELIABLE', {
+              claimPath,
+              existing,
+              process_check_code: aliveErr?.code || null,
+            });
+          }
+          const recheck = await readJson(claimPath);
+          if (
+            recheck?.token === existing.token &&
+            recheck?.pid === existing.pid &&
+            recheck?.hostname === existing.hostname
+          ) {
+            await fs.unlink(claimPath).catch(() => {});
+          }
           continue;
         }
       }
@@ -345,8 +411,83 @@ export async function createConnectedLocalBindings({
       const claimPath = `${file}.claim`;
       const parts = {
         result_ref: result?.result_ref || null,
+        result_content_digest: result == null ? null : digest(result),
+        workspace_root_ref: binding?.workspace_root_ref || binding?.root_ref || null,
+        work_ref: binding?.work_ref || null,
+        resource_ref: binding?.resource_ref || null,
         receipt_seed: `local:applied:${idempotencyKey}`,
       };
+
+      async function attemptCustody(value) {
+        const payload = {
+          schema: 'xiio.ibal.apply-return-custody-payload/v1',
+          receipt_ref: value.receipt_ref,
+          work_id: value.work_id,
+          result_ref: value.result_ref,
+          applied_at: value.applied_at,
+        };
+        const payloadDigest = custodyPayloadDigest(payload);
+        const probe = await binsClient.writeCustody({
+          coordinate_ref: value.receipt_ref,
+          principal_ref: binding?.agent_id || null,
+          agent_id: binding?.agent_id || null,
+          root_ref: binding?.workspace_root_ref || binding?.root_ref || null,
+          work_ref: binding?.work_ref || null,
+          payload,
+          source_occurrence_ref: value.receipt_ref,
+        });
+        value.bins_custody = probe;
+        value.custody_payload_digest = payloadDigest;
+
+        if (probe.state !== 'PASS' || !probe.body?.version_ref) {
+          value.state = 'RECOVERABLE_CUSTODY_PENDING';
+          value.reason = probe.reason || probe.state;
+          value.bins_version_qualified = false;
+          value.bins_version_ref = null;
+          value.bins_digest = null;
+          await writeJsonAtomic(file, value);
+          return value;
+        }
+
+        const versionRead = await binsClient.readVersion({
+          coordinateRef: value.receipt_ref,
+          version: probe.body.version_ref,
+        });
+        const qualified = qualifyVersionReadback(versionRead, {
+          coordinate_ref: value.receipt_ref,
+          version_ref: probe.body.version_ref,
+          receipt_ref: value.receipt_ref,
+          work_id: value.work_id,
+          result_ref: value.result_ref,
+          payload_digest: payloadDigest,
+        });
+        if (!qualified.ok) {
+          value.state = 'RECOVERABLE_CUSTODY_PENDING';
+          value.reason = 'VERSION_READBACK_UNQUALIFIED';
+          value.version_qualify_reason = qualified.reason;
+          value.bins_version_readback = versionRead;
+          value.bins_version_qualified = false;
+          value.bins_version_ref = null;
+          value.bins_digest = null;
+          await writeJsonAtomic(file, value);
+          return value;
+        }
+
+        value.state = 'APPLIED';
+        value.reason = null;
+        value.bins_version_qualified = true;
+        value.bins_version_ref = probe.body.version_ref;
+        value.bins_digest = qualified.digest;
+        value.bins_version_readback = {
+          state: 'PASS',
+          coordinate_ref: value.receipt_ref,
+          version_ref: probe.body.version_ref,
+          digest: qualified.digest,
+        };
+        await writeJsonAtomic(file, value);
+        return value;
+      }
+
       return withIdempotencyClaim(claimPath, async () => {
         const existing = await readJson(file);
         if (existing) {
@@ -361,6 +502,24 @@ export async function createConnectedLocalBindings({
               hard: ['WRITEJSONATOMIC != CLAIM_LOCK', 'CONFLICTING_REUSE != IDEMPOTENT_PASS'],
             };
           }
+          if (existing.state === 'APPLIED' && existing.bins_version_qualified === true) {
+            return existing;
+          }
+          // Resume pending effects with the original operation/payload identity (stable applied_at).
+          if (existing.state === 'RECOVERABLE_CUSTODY_PENDING') {
+            const resumed = {
+              ...existing,
+              schema: 'xiio.ibal.apply-return/v1',
+              ...bindFields(binding),
+              binding_digest: bindingDigest(binding),
+              input_digest: inputDigest(parts),
+              result_ref: result?.result_ref || existing.result_ref || null,
+              receipt_ref: existing.receipt_ref || `local:applied:${idempotencyKey}`,
+              applied_at: existing.applied_at,
+              resume_count: Number(existing.resume_count || 0) + 1,
+            };
+            return attemptCustody(resumed);
+          }
           return existing;
         }
 
@@ -373,62 +532,13 @@ export async function createConnectedLocalBindings({
           result_ref: result?.result_ref || null,
           receipt_ref: `local:applied:${idempotencyKey}`,
           applied_at: new Date().toISOString(),
+          resume_count: 0,
           bins_custody: null,
           bins_version_qualified: false,
           bins_version_ref: null,
           bins_digest: null,
         };
-
-        const probe = await binsClient.writeCustody({
-          coordinate_ref: value.receipt_ref,
-          principal_ref: binding?.agent_id || null,
-          agent_id: binding?.agent_id || null,
-          root_ref: binding?.workspace_root_ref || binding?.root_ref || null,
-          work_ref: binding?.work_ref || null,
-          payload: {
-            schema: 'xiio.ibal.apply-return-custody-payload/v1',
-            receipt_ref: value.receipt_ref,
-            work_id: value.work_id,
-            result_ref: value.result_ref,
-            applied_at: value.applied_at,
-          },
-          source_occurrence_ref: value.receipt_ref,
-        });
-        value.bins_custody = probe;
-
-        if (probe.state !== 'PASS' || !probe.body?.version_ref) {
-          value.state = 'RECOVERABLE_CUSTODY_PENDING';
-          value.reason = probe.reason || probe.state;
-          await writeJsonAtomic(file, value);
-          return value;
-        }
-
-        const versionRead = await binsClient.readVersion({
-          coordinateRef: value.receipt_ref,
-          version: probe.body.version_ref,
-        });
-        const digestValue = versionRead.body?.digest?.value || versionRead.body?.content_sha256 || null;
-        const payloadOk = versionRead.body?.payload?.receipt_ref === value.receipt_ref;
-        if (versionRead.state !== 'PASS' || !digestValue || !payloadOk) {
-          value.state = 'RECOVERABLE_CUSTODY_PENDING';
-          value.reason = 'VERSION_READBACK_UNQUALIFIED';
-          value.bins_version_readback = versionRead;
-          await writeJsonAtomic(file, value);
-          return value;
-        }
-
-        value.state = 'APPLIED';
-        value.bins_version_qualified = true;
-        value.bins_version_ref = probe.body.version_ref;
-        value.bins_digest = digestValue;
-        value.bins_version_readback = {
-          state: 'PASS',
-          coordinate_ref: value.receipt_ref,
-          version_ref: probe.body.version_ref,
-          digest: digestValue,
-        };
-        await writeJsonAtomic(file, value);
-        return value;
+        return attemptCustody(value);
       });
     },
     async reconcile({ idempotencyKey }) {
@@ -438,13 +548,51 @@ export async function createConnectedLocalBindings({
     },
   };
 
-  async function readInboxConsumerAck(wakeId) {
+  /**
+   * Validate Inbox babysit return against the wake binding.
+   * A wake observation ≠ applied work. FAILED/mismatched returns stay incomplete.
+   */
+  function classifyInboxConsumerReturn(row, wake) {
+    if (!row || row.schema !== 'xiio.hotfolder.return.v1') {
+      return { ok: false, reason: 'RETURN_SCHEMA_INVALID' };
+    }
+    if (row.wake_id !== wake.wake_id) {
+      return { ok: false, reason: 'WAKE_ID_MISMATCH' };
+    }
+    if (!row.consumer || typeof row.consumer !== 'string') {
+      return { ok: false, reason: 'CONSUMER_MISSING' };
+    }
+    if (row.provider_effect !== false) {
+      return { ok: false, reason: 'PROVIDER_EFFECT_NOT_FALSE' };
+    }
+    if (row.apply_return_state == null || row.apply_return_state === '') {
+      return { ok: false, reason: 'APPLY_RETURN_STATE_MISSING' };
+    }
+    // When return carries binding fields, they must match the wake (no silent cross-project CONSUMED).
+    for (const key of ['project_id', 'work_id', 'source_generation', 'root_ref']) {
+      if (row[key] != null && wake[key] != null && String(row[key]) !== String(wake[key])) {
+        return { ok: false, reason: 'RETURN_BINDING_MISMATCH', field: key };
+      }
+    }
+    const execState = String(row.execution?.state || row.state || '').toUpperCase();
+    if (['FAILED', 'FAIL', 'DENIED', 'BLOCKED', 'ERROR'].includes(execState)) {
+      return {
+        ok: false,
+        reason: 'CONSUMER_EXECUTION_FAILED',
+        observed_execution_state: execState,
+        note: 'Wake may be acknowledged as observed; FAILED execution must not become CONSUMED success.',
+      };
+    }
+    return { ok: true };
+  }
+
+  async function readInboxConsumerAck(wakeId, wake) {
     if (!resolvedInboxRoot) return null;
     const returnPath = path.join(resolvedInboxRoot, 'returns', `${wakeId}.return.json`);
     const row = await readJson(returnPath);
-    if (!row || row.schema !== 'xiio.hotfolder.return.v1') return null;
-    if (row.wake_id !== wakeId) return null;
-    return { return_path: returnPath, return: row };
+    if (!row) return null;
+    const classified = classifyInboxConsumerReturn(row, { ...wake, wake_id: wakeId });
+    return { return_path: returnPath, return: row, classified };
   }
 
   const wakeConsumer = async (wake) => {
@@ -464,11 +612,23 @@ export async function createConnectedLocalBindings({
         wake_id: wakeId,
         receipt_ref: wake?.receipt_ref || `local:wake:${wakeId}`,
         local_recorded_at: new Date().toISOString(),
-        hard: ['LOCAL_WAKE_RECEIPT != RECEIVING_PRODUCT_CONSUMPTION'],
+        hard: [
+          'LOCAL_WAKE_RECEIPT != RECEIVING_PRODUCT_CONSUMPTION',
+          'WAKE_OBSERVATION != APPLIED_WORK',
+        ],
       });
     }
     const stored = await readJson(file);
-    const consumer = await readInboxConsumerAck(wakeId);
+    if (stored.state === 'CONSUMED') {
+      return {
+        state: 'CONSUMED',
+        ...bindFields(wake),
+        wake_id: wakeId,
+        receipt_ref: stored.receipt_ref,
+        consumer_ack: stored.consumer_ack || null,
+      };
+    }
+    const consumer = await readInboxConsumerAck(wakeId, wake);
     if (!consumer) {
       return {
         state: 'PENDING_CONSUMER_ACK',
@@ -479,9 +639,36 @@ export async function createConnectedLocalBindings({
         hard: ['LOCAL_WAKE_RECEIPT != RECEIVING_PRODUCT_CONSUMPTION'],
       };
     }
+    if (!consumer.classified.ok) {
+      const observed = {
+        ...stored,
+        state: 'WAKE_ACK_OBSERVED_INCOMPLETE',
+        reason: consumer.classified.reason,
+        consumer_observation: {
+          return_path: consumer.return_path,
+          consumer: consumer.return.consumer || null,
+          observed_at: consumer.return.observed_at || null,
+          apply_return_state: consumer.return.apply_return_state || null,
+          execution_state: consumer.return.execution?.state || consumer.return.state || null,
+          classify: consumer.classified,
+        },
+        hard: ['WAKE_OBSERVATION != APPLIED_WORK', 'FAILED_OR_MISMATCHED_RETURN != CONSUMED'],
+      };
+      await writeJsonAtomic(file, observed);
+      return {
+        state: 'WAKE_ACK_OBSERVED_INCOMPLETE',
+        ...bindFields(wake),
+        wake_id: wakeId,
+        receipt_ref: stored.receipt_ref,
+        reason: consumer.classified.reason,
+        consumer_observation: observed.consumer_observation,
+        hard: observed.hard,
+      };
+    }
     const consumed = {
       ...stored,
       state: 'CONSUMED',
+      reason: null,
       consumer_ack: {
         return_path: consumer.return_path,
         consumer: consumer.return.consumer || null,
@@ -489,6 +676,7 @@ export async function createConnectedLocalBindings({
         apply_return_state: consumer.return.apply_return_state || null,
       },
       consumed_at: new Date().toISOString(),
+      hard: ['LOCAL_WAKE_RECEIPT != APPLIED_WORK', 'CONSUMED_WAKE != BINS_VERSION_QUALIFIED'],
     };
     await writeJsonAtomic(file, consumed);
     return {
@@ -542,12 +730,16 @@ export async function createConnectedLocalBindings({
   }
 
   const cliTaskSurface = {
-    state: 'CLI_TASK_SURFACE_MISSING',
+    state: 'PACKET_ADMITTED_STEP_RUNNER_IN_CLI_SOURCE',
     owner: 'Vado42-chris/xi-io-cli',
-    function: 'dispatchAcceptedWork.performAdmittedStep',
-    pinned_revision: '89b9c418f6e161d9864bf891fd665b6a18f00dd2',
-    note: 'work-packet continue defaults performAdmittedStep=null; only admitted acceptance_command runs. Host mutation must be supplied by packet acceptance proving an admitted effect, or a future CLI admitted-step flag — do not invent a general task engine here.',
-    smallest_next_repair: 'Expose an explicit, policy-gated admitted-step runner on work-packet continue that executes packet.admitted_step only, never model-supplied commands.',
+    function: 'dispatchAcceptedWork.performAdmittedStep → runPacketAdmittedStep',
+    pinned_revision_baseline: '89b9c418f6e161d9864bf891fd665b6a18f00dd2',
+    note: 'CLI source wires packet-bound admitted_step (scope-gated argv) on work-packet continue; acceptance_command remains mandatory. Installed generation still baseline until disposable reinstall. Not production :8796 auth.',
+    hard: [
+      'PACKET_ADMITTED_STEP != GENERAL_SHELL',
+      'CLI_SOURCE_SURFACE != INSTALLED_PROOF',
+      'ISOLATED_ADMITTED_STEP != CALLER_AUTHENTICATOR',
+    ],
   };
 
   const qualifiedHost = {

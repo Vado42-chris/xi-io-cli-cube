@@ -55,9 +55,13 @@ function normalizeAuthority(row, file) {
   if (!row || row.schema !== AUTHORITY_SCHEMA) return null;
   if (row.admitted !== true) return null;
   if (row.revoked === true) return { ...row, _file: file, _status: 'REVOKED' };
-  if (row.expires_at) {
+  if (row.expires_at != null && row.expires_at !== '') {
     const exp = Date.parse(row.expires_at);
-    if (Number.isFinite(exp) && Date.now() > exp) {
+    // Malformed expires_at must fail closed — never treat as "not expired".
+    if (!Number.isFinite(exp)) {
+      return { ...row, _file: file, _status: 'MALFORMED', reason: 'EXPIRES_AT_INVALID' };
+    }
+    if (Date.now() > exp) {
       return { ...row, _file: file, _status: 'EXPIRED' };
     }
   }
@@ -210,6 +214,19 @@ export function createDataForgeWriteAuthorityAdapter({
           };
         }
 
+        const malformed = records.find(
+          (r) => r._status === 'MALFORMED' && r.principal_ref === claimedPrincipal && r.workspace_root_ref === rootRef,
+        );
+        if (malformed) {
+          return {
+            admitted: false,
+            reason: 'AUTHORITY_MALFORMED',
+            detail: malformed.reason || 'EXPIRES_AT_INVALID',
+            authority_granted: false,
+            authority_ref: malformed.authority_id || path.basename(malformed._file),
+          };
+        }
+
         const matches = records.filter((r) => {
           if (r._status !== 'ADMITTED') return false;
           if (r.principal_ref !== claimedPrincipal) return false;
@@ -219,7 +236,8 @@ export function createDataForgeWriteAuthorityAdapter({
           if (r.work_ref != null && workRef == null) return false;
           const scope = r.coordinate_scope;
           if (scope == null) return true;
-          if (typeof scope === 'string') return coordinate === scope || coordinate.startsWith(scope);
+          // Bare string = exact match only. Prefix must be explicit { prefix }.
+          if (typeof scope === 'string') return coordinate === scope;
           if (Array.isArray(scope)) return scope.includes(coordinate);
           if (scope && typeof scope === 'object' && typeof scope.prefix === 'string') {
             return coordinate.startsWith(scope.prefix);
@@ -326,8 +344,9 @@ export function buildAuthorityRecord({
 }
 
 /**
- * Existing seat/Switchboard trust artifact resolver for isolated tests / future activation.
- * Reads Switchboard seat agent file — does not invent principals.
+ * Seat identity file reader — identifies a seat; does NOT authenticate an HTTP request.
+ * Must not be bound as production resolveVerifiedCaller without a request-specific trust path.
+ * Production keeps resolveVerifiedCaller unbound → CALLER_AUTHENTICATOR_MISSING.
  */
 export function createSeatSwitchboardCallerResolver({
   seatAgentPath = path.join(
@@ -345,7 +364,12 @@ export function createSeatSwitchboardCallerResolver({
       return {
         principal_ref: principal,
         issuer_ref: seatAgentPath,
-        evidence_class: 'SWITCHBOARD_SEAT_AGENT',
+        evidence_class: 'SWITCHBOARD_SEAT_AGENT_FILE_ONLY',
+        hard: [
+          'SEAT_IDENTITY_FILE != HTTP_REQUEST_AUTH',
+          'createSeatSwitchboardCallerResolver != PRODUCTION_CALLER_AUTHENTICATOR',
+        ],
+        production_activation: false,
       };
     } catch {
       return null;

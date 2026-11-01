@@ -33,7 +33,12 @@ async function readJsonBody(req, limit = 1024 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createDataForgeCustodyServer({ rootDir, authorityAdapter = resolveAuthorityAdapter() } = {}) {
+export function createDataForgeCustodyServer({
+  rootDir,
+  authorityAdapter = resolveAuthorityAdapter(),
+  /** @deprecated test-only — never set in production */
+  _testBetweenAuthorizeAndPut = null,
+} = {}) {
   if (!path.isAbsolute(rootDir || '')) throw new Error('EXPLICIT_ABSOLUTE_CUSTODY_ROOT_REQUIRED');
   const store = createDataForgeCustodyStore({ rootDir });
   const writeBound = typeof authorityAdapter?.authorizeWrite === 'function';
@@ -132,7 +137,7 @@ export function createDataForgeCustodyServer({ rootDir, authorityAdapter = resol
             }
             return reply(res, 400, { error: 'REQUEST_BODY_INVALID', authority_granted: false });
           }
-          const admission = await authorityAdapter.authorizeWrite({
+          const authorizeArgs = {
             principal_ref: body.principal_ref || body.agent_id,
             agent_id: body.agent_id,
             root_ref: body.root_ref || body.workspace_root_ref,
@@ -140,7 +145,8 @@ export function createDataForgeCustodyServer({ rootDir, authorityAdapter = resol
             work_ref: body.work_ref || null,
             coordinate_ref: body.coordinate_ref,
             operation: 'custody.put',
-          });
+          };
+          const admission = await authorityAdapter.authorizeWrite(authorizeArgs);
           if (!admission?.admitted) {
             const status =
               admission?.reason === 'DATAFORGE_CUSTODY_WRITE_AUTHORITY_UNBOUND'
@@ -152,6 +158,23 @@ export function createDataForgeCustodyServer({ rootDir, authorityAdapter = resol
               error: admission?.reason || 'AUTHORITY_DENIED',
               authority_granted: false,
               authority_ref: admission?.authority_ref || null,
+            });
+          }
+          // Authorization-at-commit: re-check after authorizeWrite returns, before store.put.
+          // Not a fully atomic commit primitive — production remains blocked without request auth.
+          if (typeof _testBetweenAuthorizeAndPut === 'function') {
+            await _testBetweenAuthorizeAndPut(admission);
+          }
+          const commitAdmission = await authorityAdapter.authorizeWrite(authorizeArgs);
+          if (
+            !commitAdmission?.admitted ||
+            commitAdmission.authority_fingerprint !== admission.authority_fingerprint
+          ) {
+            return reply(res, 403, {
+              error: 'AUTHORITY_CHANGED_BEFORE_STORE_PUT',
+              authority_granted: false,
+              authority_ref: admission.authority_ref || null,
+              hard: ['AUTHORIZE_RETURN != COMMIT_AUTHORITY', 'TOCTOU_GAP_AFTER_AUTHORIZE != PASS'],
             });
           }
           try {
@@ -167,6 +190,7 @@ export function createDataForgeCustodyServer({ rootDir, authorityAdapter = resol
               authority_granted: true,
               authority_ref: admission.authority_ref,
               decision_digest: admission.decision_digest,
+              commit_authority_fingerprint: commitAdmission.authority_fingerprint,
             });
           } catch (error) {
             const code = String(error?.message || error);
