@@ -77,19 +77,26 @@ jobs:
           )
           with transcript.open("w",encoding="utf-8") as log:
               child.logfile=log
+              # Readline redraws the prompt (ANSI + "xi> ") after sendline; do not
+              # treat the next "xi> " alone as turn-complete — that races before
+              # /details / tool output and false-fails REAL_OLLAMA_READ_RECEIPT_MISSING
+              # even when the transcript later contains a valid receipt.
+              marker="Actual execution receipt (CLI-observed, not model claims):"
               child.expect("What would you like to build or work on?")
               child.expect("xi> ")
               child.sendline("Read NOTE.txt using your file tool. Tell me the exact current status. Do not guess.")
-              child.expect("xi> ", timeout=180)
+              child.expect(r"Tool results recorded|Actual execution receipt", timeout=180)
+              child.expect("xi> ", timeout=60)
               child.sendline("/details")
+              child.expect_exact(marker, timeout=30)
               child.expect("xi> ", timeout=30)
-              details=child.before.replace("\\r\\n","\\n")
-              marker="Actual execution receipt (CLI-observed, not model claims):\\n"
+              details=(marker + child.before).replace("\r\n","\n").replace("\r","\n")
               if marker not in details:
                   raise SystemExit("REAL_OLLAMA_READ_RECEIPT_MISSING")
-              receipt,_=json.JSONDecoder().raw_decode(details.split(marker,1)[1])
+              receipt,_=json.JSONDecoder().raw_decode(details.split(marker,1)[1].lstrip("\n"))
               reads=[f for f in receipt.get("tool_results",[]) if f.get("name")=="read_workspace_file" and f.get("state")=="SUCCEEDED" and f.get("result",{}).get("path")=="NOTE.txt"]
-              if not reads or reads[-1]["result"].get("content")!="status: old\\n" or reads[-1]["result"].get("sha256")!=hashlib.sha256(b"status: old\\n").hexdigest():
+              expected_content="status: old\n"
+              if not reads or reads[-1]["result"].get("content")!=expected_content or reads[-1]["result"].get("sha256")!=hashlib.sha256(expected_content.encode()).hexdigest():
                   raise SystemExit("REAL_OLLAMA_READBACK_MISSING")
 
               child.sendline("Change the exact text status: old in NOTE.txt to status: new. Read the file first, make only that edit, then verify the result.")
@@ -98,7 +105,7 @@ jobs:
               while time.time()<deadline:
                   idx=child.expect([
                       r"Approve this exact action\? \[y/N\]: ",
-                      r"xi> ",
+                      r"Changed NOTE\.txt|written bytes match the readback|Tool results recorded",
                       pexpect.EOF,
                       pexpect.TIMEOUT,
                   ], timeout=45)
@@ -107,6 +114,7 @@ jobs:
                       child.sendline("yes")
                       continue
                   if idx==1:
+                      child.expect("xi> ", timeout=60)
                       break
                   if idx==2:
                       raise SystemExit("CLI_EXITED_BEFORE_EDIT_COMPLETED")
