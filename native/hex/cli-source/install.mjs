@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 // BEGIN runtime-integrity standalone mirror (byte-parity tested; keeps the installer one file)
 // Same-host installation guards. Neither identity admission nor a remote lease.
 
-const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']);
+const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs','src/sdk/qualified-command-executor.mjs','src/sdk/local-worker-host.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs','config/batches/starter-regression-20261031.json']);
 const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 // Preserve selected runtime lookup, home and explicit transport/auth configuration;
 // never inherit interpreter preloads, dynamic loader hooks or Git config injection.

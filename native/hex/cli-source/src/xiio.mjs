@@ -17,9 +17,15 @@ import {
   formatBindingMessage,
   isContinuationPhrase,
   loadAcceptedPacket,
+  runPacketAdmittedStep,
   saveUserAlias,
   shouldAttemptLocalWorkContinuation,
 } from './sdk/local-work-packet.mjs';
+import {
+  readControl,
+  runLocalWorkerHost,
+  writeControl,
+} from './sdk/local-worker-host.mjs';
 import {LOCAL_TOOL_INFERENCE_OPTIONS} from './sdk-provider-state.mjs';
 import {localScan,crossUxTriage,ibalBalanceGuide} from './local-ops.mjs';
 import {commitWorkspaceEditCAS} from './file-edit-cas.mjs';
@@ -142,7 +148,7 @@ async function mutateOrObserveLocalServices(sub,args,flags){
 }
 function parse(argv){
   const args=[],flags={};
-  const booleanFlags=new Set(['execute','help','version','apply','deep','staged','recover','force','refuse','acceptance-only']);
+  const booleanFlags=new Set(['execute','help','version','apply','deep','staged','recover','force','refuse','acceptance-only','pause','resume','cancel']);
   for(let i=0;i<argv.length;i++){
     const t=argv[i];
     if(t==='--'){args.push(...argv.slice(i+1));break;}
@@ -1902,9 +1908,38 @@ else if(p.command==='work-packet'){
       workspaceRoot:root,
       observedSourceSha,
       refuse:p.flags.refuse===true,
-      performAdmittedStep:p.flags['acceptance-only']===true?async()=>({state:'PASS',note:'ACCEPTANCE_ONLY'}):null,
+      performAdmittedStep:
+        p.flags['acceptance-only']===true
+          ?async()=>({state:'PASS',note:'ACCEPTANCE_ONLY'})
+          :async(packet)=>runPacketAdmittedStep(packet),
     });
   }else result={schema:'xiio.cli.local-work-packet/v1',state:'FAIL',reason:'UNKNOWN_SUBCOMMAND',usage:'xi-io-cli work-packet status|accept|continue [--root PATH] [--file PATH] [--acceptance-only]'};
+}
+else if(p.command==='local-worker'){
+  const root=workspaceRoot(p.flags.root||null);
+  const pin=String(p.flags.pin||version().source_sha||'');
+  if(p.subcommand==='run'){
+    const batch=p.flags.batch||p.args[0];
+    if(!batch) result={schema:'xiio.cli.local-worker-host/v1',state:'FAIL',reason:'BATCH_REQUIRED',usage:'xi-io-cli local-worker run --batch PATH.json --root WORKSPACE --pin <40hex>'};
+    else result=await runLocalWorkerHost({
+      workspaceRoot:root,
+      batchPath:path.resolve(batch),
+      observedSourceSha:/^[0-9a-f]{40}$/.test(pin)?pin:null,
+      approve:p.flags.refuse===true?()=>false:null,
+      sdkRoot:p.flags['sdk-root']||process.env.XIIO_SDK_ROOT||null,
+    });
+  }else if(p.subcommand==='status'){
+    const progressFile=path.join(root,'.xiio','worker-progress.json');
+    try{result={schema:'xiio.cli.local-worker-progress/v1',state:'PASS',control:readControl(root),progress:JSON.parse(fs.readFileSync(progressFile,'utf8')),path:progressFile};}
+    catch(error){result={schema:'xiio.cli.local-worker-progress/v1',state:error?.code==='ENOENT'?'MISSING':'FAIL',reason:String(error.message||error),control:readControl(root)};}
+  }else if(p.subcommand==='control'){
+    const patch={};
+    if(p.flags.pause===true)patch.pause=true;
+    if(p.flags.resume===true)patch.pause=false;
+    if(p.flags.cancel===true)patch.cancel=true;
+    if(p.flags.interjection!==undefined)patch.interjection=p.flags.interjection;
+    result={schema:'xiio.cli.local-worker-control/v1',state:'PASS',...writeControl(root,patch)};
+  }else result={schema:'xiio.cli.local-worker-host/v1',state:'FAIL',reason:'UNKNOWN_SUBCOMMAND',usage:'xi-io-cli local-worker run|status|control [--root PATH] [--batch PATH] [--pin SHA] [--pause|--resume|--cancel]'};
 }
 else result={schema:'xiio.cli.error/v1',state:'FAIL',reason:'UNKNOWN_COMMAND',command:p.command,usage:help().usage};
 emit(result,p.command==='scan'?(result?.state==='LOCAL_STATIC_OBSERVED'?result.process_status:2):p.command==='connect'&&!['EMPTY','RESULT_RETURNED_TO_BROKER'].includes(result?.state)?3:result?.state==='FAIL'?2:0);

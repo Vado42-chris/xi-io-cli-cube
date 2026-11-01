@@ -1,0 +1,123 @@
+{
+  "schema": "xiio.cli.local-worker-batch/v1",
+  "batch_id": "STARTER-REGRESSION-20261031",
+  "title": "Local worker starter batch — inspect, isolated Ollama repair, HEX candidate",
+  "generation": "starter-20261031",
+  "hard": [
+    "BLOCKED_DEPENDENT != BLOCK_INDEPENDENT",
+    "OLLAMA_PROPOSAL != EFFECT",
+    "NO_PAID_FALLBACK",
+    "NO_PRODUCTION_ACTIVATION"
+  ],
+  "tasks": [
+    {
+      "task_id": "T1-INSPECT-ARGV-ESCAPE",
+      "priority": 1,
+      "dependencies": [],
+      "continuation_text": "continue",
+      "packet": {
+        "packet_id": "T1-INSPECT-ARGV-ESCAPE",
+        "objective": "Run canary/inspect-argv-escape.mjs to reproduce ARGV escape refusal (deterministic)",
+        "dependencies": [],
+        "allowed_scope": {
+          "paths": ["canary/", "repair/"],
+          "tools": ["node"]
+        },
+        "admitted_step": ["node", "canary/inspect-argv-escape.mjs"],
+        "acceptance_command": [
+          "node",
+          "-e",
+          "const fs=require('fs');const j=JSON.parse(fs.readFileSync('canary/inspect-result.json','utf8'));if(j.state!=='PASS'||j.defect!=='ARGV_PATH_ESCAPES_ALLOWED_SCOPE')process.exit(3);console.log('LWP_ACCEPT_PASS');"
+        ],
+        "expected_result": {"exit_code": 0, "stdout_includes": "LWP_ACCEPT_PASS"},
+        "checkpoint_return_destination": ".xiio/returns/T1-INSPECT-ARGV-ESCAPE.json",
+        "next_step_policy": "STOP_ON_PASS",
+        "accepted": true
+      }
+    },
+    {
+      "task_id": "T2-OLLAMA-ISOLATED-REPAIR",
+      "priority": 2,
+      "dependencies": ["T1-INSPECT-ARGV-ESCAPE"],
+      "continuation_text": "continue",
+      "proposal": {
+        "kind": "ollama",
+        "output_rel": "repair/proposal.json",
+        "prompt": "The isolated canary file repair/broken.txt currently contains BROKEN. Propose the exact replacement single word FIXED for an isolated worktree canary. Reply with one word only: FIXED"
+      },
+      "packet": {
+        "packet_id": "T2-OLLAMA-ISOLATED-REPAIR",
+        "objective": "Apply Ollama proposal into isolated repair/ worktree canary and verify independently",
+        "dependencies": [{"id": "T1-INSPECT-ARGV-ESCAPE"}],
+        "allowed_scope": {
+          "paths": ["repair/", "canary/"],
+          "tools": ["node"]
+        },
+        "admitted_step": ["node", "repair/apply-proposal.mjs"],
+        "acceptance_command": [
+          "node",
+          "-e",
+          "const fs=require('fs');const t=fs.readFileSync('repair/isolated/broken.txt','utf8');if(t!=='FIXED\\n')process.exit(3);const a=JSON.parse(fs.readFileSync('repair/applied.json','utf8'));if(a.state!=='PASS')process.exit(3);console.log('LWP_ACCEPT_PASS');"
+        ],
+        "expected_result": {"exit_code": 0, "stdout_includes": "LWP_ACCEPT_PASS"},
+        "checkpoint_return_destination": ".xiio/returns/T2-OLLAMA-ISOLATED-REPAIR.json",
+        "next_step_policy": "STOP_ON_PASS",
+        "accepted": true
+      }
+    },
+    {
+      "task_id": "T3-HEX-CANDIDATE-PREPARE",
+      "priority": 3,
+      "dependencies": ["T2-OLLAMA-ISOLATED-REPAIR"],
+      "continuation_text": "continue",
+      "packet": {
+        "packet_id": "T3-HEX-CANDIDATE-PREPARE",
+        "objective": "Preserve repair result and write HEX candidate receipt (activation remains user-gated)",
+        "dependencies": [{"id": "T2-OLLAMA-ISOLATED-REPAIR"}],
+        "allowed_scope": {
+          "paths": ["repair/", "canary/", ".xiio/"],
+          "tools": ["node"]
+        },
+        "admitted_step": ["node", "repair/prepare-hex-candidate.mjs"],
+        "acceptance_command": [
+          "node",
+          "-e",
+          "const fs=require('fs');const j=JSON.parse(fs.readFileSync('.xiio/hex/candidate-receipt.json','utf8'));if(j.state!=='PREPARED_NOT_ACTIVATED')process.exit(3);console.log('LWP_ACCEPT_PASS');"
+        ],
+        "expected_result": {"exit_code": 0, "stdout_includes": "LWP_ACCEPT_PASS"},
+        "checkpoint_return_destination": ".xiio/returns/T3-HEX-CANDIDATE-PREPARE.json",
+        "next_step_policy": "STOP_ON_PASS",
+        "accepted": true
+      }
+    },
+    {
+      "task_id": "T4-INDEPENDENT-CANARY",
+      "priority": 1,
+      "dependencies": [],
+      "continuation_text": "continue",
+      "packet": {
+        "packet_id": "T4-INDEPENDENT-CANARY",
+        "objective": "Independent ready canary — must not wait on T2/T3",
+        "dependencies": [],
+        "allowed_scope": {
+          "paths": ["canary/"],
+          "tools": ["node"]
+        },
+        "admitted_step": [
+          "node",
+          "-e",
+          "const fs=require('fs');fs.mkdirSync('canary',{recursive:true});fs.writeFileSync('canary/independent.txt','INDEPENDENT_OK\\n');console.log('T4_INDEPENDENT_PASS');"
+        ],
+        "acceptance_command": [
+          "node",
+          "-e",
+          "const fs=require('fs');if(fs.readFileSync('canary/independent.txt','utf8')!=='INDEPENDENT_OK\\n')process.exit(3);console.log('LWP_ACCEPT_PASS');"
+        ],
+        "expected_result": {"exit_code": 0, "stdout_includes": "LWP_ACCEPT_PASS"},
+        "checkpoint_return_destination": ".xiio/returns/T4-INDEPENDENT-CANARY.json",
+        "next_step_policy": "STOP_ON_PASS",
+        "accepted": true
+      }
+    }
+  ]
+}

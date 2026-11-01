@@ -1,10 +1,10 @@
 {
   "schema": "xiio.cli.packaged-source/v1",
-  "source_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
+  "source_sha": "f2626cae872f191e980ecdfb681485f2d9e67198",
   "files": {
     "src/xiio.mjs": {
-      "sha256": "07d9b23125a7e4b3d210eed27a3ba4fc71ad0455bebd8c3ce68f425247bd1f42",
-      "size": 155521
+      "sha256": "5fff3c5f5ffaf6d00b488624b01b1426ad60c834b42040d92be4049b14ec2199",
+      "size": 157498
     },
     "src/file-edit-cas.mjs": {
       "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
@@ -27,12 +27,20 @@
       "size": 15812
     },
     "src/sdk/local-work-packet.mjs": {
-      "sha256": "11dcf41e8456c06552bf093a4e2a61855e1ddde4e2d1209d07c3aabbbbe02076",
-      "size": 26064
+      "sha256": "4e515388a1d8be804f98d1b49611f70127b6e997453dc0b3815fbe189bd4bb8b",
+      "size": 36051
+    },
+    "src/sdk/qualified-command-executor.mjs": {
+      "sha256": "ba2f3365695e02966e5814697c437a0d68f078e1649267183451b54ecc3ca848",
+      "size": 11037
+    },
+    "src/sdk/local-worker-host.mjs": {
+      "sha256": "28baa3a1dea73ed42b8c6edf4c6ce47a5a92b0cf933f57550ca2a5c7fbe3b82f",
+      "size": 20026
     },
     "src/runtime-integrity.mjs": {
-      "sha256": "7c7100b6aa61a9055a35a47c94971c8080258e105e345853ba9bb97e27823536",
-      "size": 12027
+      "sha256": "7cbd84ae5bd5ebc5fc7c45ce6d94506d78d2a000df5267e0586e7f5198df5e67",
+      "size": 12584
     },
     "config/service-catalog.json": {
       "sha256": "473a6e0d6fc2c7da21ed510906e9a85c4a9c22617b4db1f1f107e0482b75f30a",
@@ -45,6 +53,15 @@
     "scripts/reconcile-service-inventory.mjs": {
       "sha256": "eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e",
       "size": 3960
+    },
+    "config/batches/starter-regression-20261031.json": {
+      "sha256": "e9d13a37e624255d74c12306641945cd89730dcdb330790d7072bca2b55ba379",
+      "size": 5188
     }
-  }
+  },
+  "composed_by": "native/hex/compose-cli-packaged-source.py",
+  "hard": [
+    "COMPOSED != INSTALLED",
+    "SOURCE_TIP != PRODUCTION_ACTIVATION"
+  ]
 }

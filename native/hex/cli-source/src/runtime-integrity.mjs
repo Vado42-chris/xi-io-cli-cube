@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
-export const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']);
+export const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs','src/sdk/qualified-command-executor.mjs','src/sdk/local-worker-host.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs','config/batches/starter-regression-20261031.json']);
 export const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 // Preserve selected runtime lookup, home and explicit transport/auth configuration;
 // never inherit interpreter preloads, dynamic loader hooks or Git config injection.
@@ -62,6 +62,8 @@ export function verifyGeneration(prefix,generation){
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/audhd-command.mjs'")&&!listed.includes('src/sdk/audhd-command.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/tool-verb-fidelity.mjs'")&&!listed.includes('src/sdk/tool-verb-fidelity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-work-packet.mjs'")&&!listed.includes('src/sdk/local-work-packet.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-worker-host.mjs'")&&!listed.includes('src/sdk/local-worker-host.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/qualified-command-executor.mjs'")&&!listed.includes('src/sdk/qualified-command-executor.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
   }
   for(const relative of listed){
     const file=path.join(root,...relative.split('/'));

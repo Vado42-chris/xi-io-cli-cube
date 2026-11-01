@@ -2,10 +2,12 @@
 // Recovers SDK continuation/babysit *contracts* as projection only — this module
 // does not invent ACK/YAR/ROTFL/lexicon semantics and grants no effect authority.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {normalizeAudhdIntent} from './audhd-command.mjs';
+import {runQualifiedWorkspaceArgv} from './qualified-command-executor.mjs';
 
 export const LOCAL_WORK_PACKET_SCHEMA = 'xiio.cli.local-work-packet/v1';
 export const LOCAL_WORK_RETURN_SCHEMA = 'xiio.cli.local-work-return/v1';
@@ -105,6 +107,9 @@ export function compileLocalWorkPacket(input = {}) {
   if (!acceptance_command || acceptance_command.length === 0) {
     throw Object.assign(new Error('ACCEPTANCE_COMMAND_INVALID'), {code: 'ACCEPTANCE_COMMAND_INVALID'});
   }
+  const admitted_step = Array.isArray(input.admitted_step)
+    ? Object.freeze(input.admitted_step.map((x) => String(x)))
+    : null;
   const packet = Object.freeze({
     schema: LOCAL_WORK_PACKET_SCHEMA,
     packet_id: clean(input.packet_id, 256),
@@ -123,6 +128,7 @@ export function compileLocalWorkPacket(input = {}) {
       ),
     }),
     acceptance_command: Object.freeze(acceptance_command),
+    admitted_step,
     expected_result: Object.freeze({...input.expected_result}),
     checkpoint_return_destination: path.resolve(workspace_root, clean(input.checkpoint_return_destination, 1024)),
     next_step_policy: policy,
@@ -141,6 +147,7 @@ export function compileLocalWorkPacket(input = {}) {
       dependencies: packet.dependencies,
       allowed_scope: packet.allowed_scope,
       acceptance_command: packet.acceptance_command,
+      admitted_step: packet.admitted_step,
       expected_result: packet.expected_result,
       checkpoint_return_destination: packet.checkpoint_return_destination,
       next_step_policy: packet.next_step_policy,
@@ -485,7 +492,7 @@ function matchExpected(result, expected) {
     const want = expected.file_sha256.sha256;
     const abs = path.resolve(result.cwd, rel);
     try {
-      const got = digest(fs.readFileSync(abs));
+      const got = crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
       if (got !== want) failures.push('file_sha256');
     } catch {
       failures.push('file_sha256_missing');
@@ -494,29 +501,224 @@ function matchExpected(result, expected) {
   return failures;
 }
 
-export function runAcceptanceCommand(packet, {spawn = spawnSync, env = process.env} = {}) {
-  const cwd = packet.workspace_root;
-  const [cmd, ...args] = packet.acceptance_command;
-  const child = spawn(cmd, args, {
-    cwd,
-    env: {...env, PATH: env.PATH},
-    encoding: 'utf8',
-    timeout: 120000,
-    maxBuffer: 2_000_000,
+function packetScope(packet) {
+  return {
+    workspaceRoot: packet.workspace_root,
+    allowedPaths: packet.allowed_scope?.paths || [],
+    allowedTools: packet.allowed_scope?.tools || [],
+  };
+}
+
+export function runAcceptanceCommand(packet, {approve = null, env = process.env} = {}) {
+  const scope = packetScope(packet);
+  const run = runQualifiedWorkspaceArgv({
+    argv: packet.acceptance_command,
+    ...scope,
+    purpose: 'acceptance_command',
+    // Deterministic acceptance of an already-accepted packet: auto-approve unless caller injects refuse.
+    approve:
+      typeof approve === 'function'
+        ? approve
+        : () => true,
+    env,
   });
+  if (run.state !== 'PASS' && run.reason && run.reason !== 'QUALIFIED_COMMAND_NONZERO_EXIT') {
+    return {
+      state: 'FAIL',
+      failures: [run.reason],
+      result: run,
+      executor: 'qualified-command-executor',
+    };
+  }
   const result = {
-    exit_code: child.status === null ? 124 : child.status,
-    signal: child.signal || null,
-    stdout: child.stdout || '',
-    stderr: child.stderr || '',
-    cwd,
+    exit_code: run.exit_code ?? 1,
+    signal: run.signal || null,
+    stdout: run.stdout || '',
+    stderr: run.stderr || '',
+    cwd: packet.workspace_root,
+    sandbox: run.sandbox || null,
   };
   const failures = matchExpected(result, packet.expected_result);
   return {
     state: failures.length ? 'FAIL' : 'PASS',
     failures,
     result,
+    executor: 'qualified-command-executor',
   };
+}
+
+/**
+ * Packet-bound admitted step via qualified sandbox executor.
+ * Allowlisted interpreter name ≠ unrestricted FS/network through argv.
+ */
+export function runPacketAdmittedStep(packet, {approve = null, env = process.env} = {}) {
+  const step = packet?.admitted_step;
+  if (step == null) {
+    return {
+      state: 'PASS',
+      note: 'NO_ADMITTED_STEP_ACCEPTANCE_ONLY',
+      effect_authority: false,
+      hard: ['MISSING_ADMITTED_STEP != HOST_MUTATION', 'ACCEPTANCE_COMMAND_STILL_REQUIRED'],
+    };
+  }
+  if (!Array.isArray(step) || step.length === 0 || step.some((x) => typeof x !== 'string' || !x.trim())) {
+    return {state: 'FAIL', reason: 'ADMITTED_STEP_INVALID', effect_authority: false};
+  }
+  const scope = packetScope(packet);
+  const run = runQualifiedWorkspaceArgv({
+    argv: step,
+    ...scope,
+    purpose: 'admitted_step',
+    approve: typeof approve === 'function' ? approve : () => true,
+    env,
+  });
+  return {
+    ...run,
+    hard: [
+      ...(run.hard || []),
+      'PACKET_ADMITTED_STEP != MODEL_COMMAND',
+      'ADMITTED_STEP != ACCEPTANCE_SKIP',
+      'QUALIFIED_EXECUTOR != DIRECT_SPAWN',
+    ],
+  };
+}
+
+function intentPath(packet) {
+  return path.join(packet.workspace_root, '.xiio', 'intents', `${packet.packet_id}.intent.json`);
+}
+
+function claimPath(packet) {
+  return path.join(packet.workspace_root, '.xiio', 'dispatch', `${packet.packet_id}.claim`);
+}
+
+function readJsonSafe(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record execution intent before starting an effect (durable lifecycle primitive).
+ */
+export function writeExecutionIntent(packet, {phase = 'BEFORE_EFFECT'} = {}) {
+  const dest = intentPath(packet);
+  fs.mkdirSync(path.dirname(dest), {recursive: true, mode: 0o700});
+  const payload = {
+    schema: 'xiio.cli.execution-intent/v1',
+    packet_id: packet.packet_id,
+    semantic_digest: packet.semantic_digest,
+    phase,
+    workspace_root: packet.workspace_root,
+    admitted_step: packet.admitted_step || null,
+    acceptance_command: packet.acceptance_command,
+    expected_result: packet.expected_result,
+    written_at: new Date().toISOString(),
+    pid: process.pid,
+    hostname: os.hostname(),
+    effect_authority: false,
+    hard: ['INTENT_WRITTEN != EFFECT_COMPLETE', 'ABSENT_RECEIPT != NO_EFFECT'],
+  };
+  const tmp = dest + '.tmp.' + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2) + '\n', {mode: 0o600, flag: 'wx'});
+  fs.renameSync(tmp, dest);
+  return {state: 'PASS', path: dest, intent: payload};
+}
+
+/**
+ * O_EXCL dispatch claim — concurrent dispatch must not double-run the same occurrence.
+ */
+export function acquireDispatchClaim(packet) {
+  const dest = claimPath(packet);
+  fs.mkdirSync(path.dirname(dest), {recursive: true, mode: 0o700});
+  const token = crypto.randomUUID();
+  const lease = {
+    schema: 'xiio.cli.dispatch-claim/v1',
+    packet_id: packet.packet_id,
+    semantic_digest: packet.semantic_digest,
+    token,
+    pid: process.pid,
+    hostname: os.hostname(),
+    acquired_at: new Date().toISOString(),
+  };
+  try {
+    const fd = fs.openSync(dest, 'wx', 0o600);
+    fs.writeFileSync(fd, JSON.stringify(lease, null, 2) + '\n');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    return {state: 'PASS', path: dest, token, lease};
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    const existing = readJsonSafe(dest);
+    if (existing?.hostname === os.hostname() && existing?.pid && existing.pid !== process.pid) {
+      try {
+        process.kill(existing.pid, 0);
+        return {state: 'HELD', reason: 'DISPATCH_CLAIM_HELD', existing};
+      } catch (aliveErr) {
+        if (aliveErr?.code !== 'ESRCH') {
+          return {
+            state: 'BLOCKED',
+            reason: 'DISPATCH_CLAIM_PROCESS_CHECK_UNRELIABLE',
+            process_check_code: aliveErr?.code || null,
+            existing,
+          };
+        }
+        const recheck = readJsonSafe(dest);
+        if (recheck?.token === existing.token && recheck?.pid === existing.pid) {
+          try {
+            fs.unlinkSync(dest);
+          } catch {
+            /* ignore */
+          }
+          return acquireDispatchClaim(packet);
+        }
+      }
+    }
+    return {state: 'HELD', reason: 'DISPATCH_CLAIM_HELD', existing};
+  }
+}
+
+export function releaseDispatchClaim(packet, token) {
+  const dest = claimPath(packet);
+  const current = readJsonSafe(dest);
+  if (current?.token === token && current?.pid === process.pid) {
+    try {
+      fs.unlinkSync(dest);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function expectedMarkerFromPacket(packet) {
+  const er = packet.expected_result || {};
+  if (er.file_sha256?.path) {
+    return {
+      kind: 'file_sha256',
+      path: path.resolve(packet.workspace_root, er.file_sha256.path),
+      sha256: er.file_sha256.sha256,
+    };
+  }
+  return null;
+}
+
+function observeEffectBytes(packet) {
+  const marker = expectedMarkerFromPacket(packet);
+  if (!marker) return {observed: false, reason: 'NO_BYTE_MARKER_IN_EXPECTED_RESULT'};
+  try {
+    const buf = fs.readFileSync(marker.path);
+    // Hash raw bytes — never JSON.stringify a Buffer (that is not content digest).
+    const got = crypto.createHash('sha256').update(buf).digest('hex');
+    return {
+      observed: true,
+      path: marker.path,
+      sha256: got,
+      matches_expected: got === marker.sha256,
+    };
+  } catch {
+    return {observed: false, path: marker.path, reason: 'MARKER_MISSING'};
+  }
 }
 
 export function writeWorkReturn(packet, body) {
@@ -539,26 +741,70 @@ export function writeWorkReturn(packet, body) {
 
 export function reconcileInterruptedEffect({packet, priorReturnPath = null} = {}) {
   const dest = priorReturnPath || packet.checkpoint_return_destination;
-  if (!fs.existsSync(dest)) {
-    return {state: 'NO_PRIOR_RETURN', duplicate_write: false};
+  const intent = readJsonSafe(intentPath(packet));
+  const bytes = observeEffectBytes(packet);
+
+  if (intent && intent.packet_id === packet.packet_id) {
+    if (intent.semantic_digest && intent.semantic_digest !== packet.semantic_digest) {
+      return {
+        state: 'BLOCKED',
+        reason: 'PACKET_SEMANTIC_DIGEST_CHANGED',
+        duplicate_write: false,
+        intent,
+        hard: ['SAME_PACKET_ID != SAME_OCCURRENCE', 'SEMANTIC_DIGEST_MISMATCH != RESUME'],
+      };
+    }
   }
-  const prior = JSON.parse(fs.readFileSync(dest, 'utf8'));
-  if (prior.packet_id !== packet.packet_id) {
-    return {state: 'BLOCKED', reason: 'RETURN_PACKET_MISMATCH', duplicate_write: false};
+
+  if (fs.existsSync(dest)) {
+    const prior = JSON.parse(fs.readFileSync(dest, 'utf8'));
+    if (prior.packet_id !== packet.packet_id) {
+      return {state: 'BLOCKED', reason: 'RETURN_PACKET_MISMATCH', duplicate_write: false};
+    }
+    if (prior.semantic_digest && prior.semantic_digest !== packet.semantic_digest) {
+      return {
+        state: 'BLOCKED',
+        reason: 'PACKET_SEMANTIC_DIGEST_CHANGED',
+        duplicate_write: false,
+        prior,
+      };
+    }
+    if (prior.state === 'PASS' && prior.acceptance?.state === 'PASS') {
+      return {
+        state: 'RECONCILED_NO_DUPLICATE',
+        duplicate_write: false,
+        prior,
+        note: 'Effect already recorded; restart must not rewrite the same acceptance.',
+      };
+    }
+    return {state: 'RESUME_ALLOWED', duplicate_write: false, prior, intent, bytes};
   }
-  if (prior.state === 'PASS' && prior.acceptance?.state === 'PASS') {
+
+  // Absent final receipt ≠ no effect. Intent or matching bytes mean uncertain completion.
+  if (intent && ['BEFORE_EFFECT', 'EFFECT_STARTED', 'ACCEPTANCE_STARTED'].includes(intent.phase)) {
+    if (bytes.observed && bytes.matches_expected) {
+      return {
+        state: 'EFFECT_COMPLETE_BEFORE_RECEIPT',
+        duplicate_write: false,
+        intent,
+        bytes,
+        hard: ['ABSENT_RECEIPT != NO_EFFECT', 'MUST_WRITE_RETURN_WITHOUT_RETRYING_EFFECT'],
+      };
+    }
     return {
-      state: 'RECONCILED_NO_DUPLICATE',
+      state: 'UNCERTAIN_EFFECT',
       duplicate_write: false,
-      prior,
-      note: 'Effect already recorded; restart must not rewrite the same acceptance.',
+      intent,
+      bytes,
+      hard: ['ABSENT_RECEIPT != NO_EFFECT', 'RECONCILE_BEFORE_RETRY'],
     };
   }
-  return {state: 'RESUME_ALLOWED', duplicate_write: false, prior};
+
+  return {state: 'NO_PRIOR_RETURN', duplicate_write: false, intent, bytes};
 }
 
 /**
- * Local controller step: bind → optional model/work hook → deterministic acceptance → return.
+ * Local controller step: claim → intent → admitted step → acceptance → return.
  * Model output never authorizes skip of acceptance_command.
  */
 export async function dispatchAcceptedWork({
@@ -568,6 +814,7 @@ export async function dispatchAcceptedWork({
   performAdmittedStep = null,
   refuse = false,
   interruptedBeforeReceipt = false,
+  approve = null,
 } = {}) {
   const binding = bindContinuationRequest({text, workspaceRoot, observedSourceSha});
   if (binding.state !== 'DISPATCH') {
@@ -589,72 +836,134 @@ export async function dispatchAcceptedWork({
       effect_authority: false,
     };
   }
-  if (refuse) {
-    const ret = writeWorkReturn(packet, {
-      state: 'REFUSED',
-      reason: 'OPERATOR_OR_POLICY_REFUSAL',
-      binding,
-    });
+  if (prior.state === 'BLOCKED') {
     return {
       schema: 'xiio.cli.local-work-dispatch/v1',
-      state: 'REFUSED',
+      state: 'BLOCKED',
+      reason: prior.reason,
       packet_id: packet.packet_id,
       workspace_root: packet.workspace_root,
       executed: false,
-      return_path: ret.path,
+      prior,
       effect_authority: false,
     };
   }
-  let step = null;
-  if (typeof performAdmittedStep === 'function') {
-    step = await performAdmittedStep(packet);
-    if (step?.state === 'FAIL') {
-      const ret = writeWorkReturn(packet, {state: 'FAIL', reason: 'ADMITTED_STEP_FAILED', step, binding});
+  if (prior.state === 'EFFECT_COMPLETE_BEFORE_RECEIPT') {
+    // Do not re-run effect; write return from observed bytes + acceptance check only.
+    const acceptance = runAcceptanceCommand(packet, {approve});
+    const ret = writeWorkReturn(packet, {
+      state: acceptance.state,
+      reason: acceptance.state === 'PASS' ? 'RECONCILED_EFFECT_BEFORE_RECEIPT' : 'ACCEPTANCE_FAILED_AFTER_EFFECT',
+      acceptance,
+      prior,
+      binding: {state: binding.state, packet_id: packet.packet_id},
+    });
+    return {
+      schema: 'xiio.cli.local-work-dispatch/v1',
+      state: acceptance.state,
+      reason: 'RECONCILED_EFFECT_BEFORE_RECEIPT',
+      packet_id: packet.packet_id,
+      workspace_root: packet.workspace_root,
+      executed: false,
+      duplicate_write: false,
+      return_path: ret.path,
+      prior,
+      acceptance,
+      effect_authority: false,
+    };
+  }
+
+  const claim = acquireDispatchClaim(packet);
+  if (claim.state !== 'PASS') {
+    return {
+      schema: 'xiio.cli.local-work-dispatch/v1',
+      state: 'BLOCKED',
+      reason: claim.reason || 'DISPATCH_CLAIM_HELD',
+      packet_id: packet.packet_id,
+      workspace_root: packet.workspace_root,
+      executed: false,
+      claim,
+      effect_authority: false,
+      hard: ['CONCURRENT_DISPATCH != DOUBLE_EFFECT'],
+    };
+  }
+
+  try {
+    if (refuse) {
+      const ret = writeWorkReturn(packet, {
+        state: 'REFUSED',
+        reason: 'OPERATOR_OR_POLICY_REFUSAL',
+        binding,
+      });
       return {
         schema: 'xiio.cli.local-work-dispatch/v1',
-        state: 'FAIL',
+        state: 'REFUSED',
         packet_id: packet.packet_id,
         workspace_root: packet.workspace_root,
-        executed: true,
-        step,
+        executed: false,
         return_path: ret.path,
         effect_authority: false,
       };
     }
-  }
-  if (interruptedBeforeReceipt) {
+
+    writeExecutionIntent(packet, {phase: 'BEFORE_EFFECT'});
+
+    let step = null;
+    if (typeof performAdmittedStep === 'function') {
+      writeExecutionIntent(packet, {phase: 'EFFECT_STARTED'});
+      step = await performAdmittedStep(packet);
+      if (step?.state === 'FAIL') {
+        const ret = writeWorkReturn(packet, {state: 'FAIL', reason: 'ADMITTED_STEP_FAILED', step, binding});
+        return {
+          schema: 'xiio.cli.local-work-dispatch/v1',
+          state: 'FAIL',
+          packet_id: packet.packet_id,
+          workspace_root: packet.workspace_root,
+          executed: true,
+          step,
+          return_path: ret.path,
+          effect_authority: false,
+        };
+      }
+    }
+    if (interruptedBeforeReceipt) {
+      return {
+        schema: 'xiio.cli.local-work-dispatch/v1',
+        state: 'INTERRUPTED_BEFORE_RECEIPT',
+        packet_id: packet.packet_id,
+        workspace_root: packet.workspace_root,
+        executed: Boolean(step),
+        step,
+        note: 'Effect may have occurred; no return written. Restart must reconcile before duplicate write.',
+        effect_authority: false,
+        hard: ['ABSENT_RECEIPT != NO_EFFECT'],
+      };
+    }
+    writeExecutionIntent(packet, {phase: 'ACCEPTANCE_STARTED'});
+    const acceptance = runAcceptanceCommand(packet, {approve});
+    const ret = writeWorkReturn(packet, {
+      state: acceptance.state,
+      reason: acceptance.state === 'PASS' ? null : 'ACCEPTANCE_FAILED',
+      acceptance,
+      step,
+      binding: {state: binding.state, packet_id: packet.packet_id},
+      next_step_policy: packet.next_step_policy,
+    });
     return {
       schema: 'xiio.cli.local-work-dispatch/v1',
-      state: 'INTERRUPTED_BEFORE_RECEIPT',
+      state: acceptance.state,
       packet_id: packet.packet_id,
       workspace_root: packet.workspace_root,
-      executed: Boolean(step),
+      objective: packet.objective,
+      executed: true,
       step,
-      note: 'Effect may have occurred; no return written. Restart must reconcile before duplicate write.',
+      acceptance,
+      return_path: ret.path,
       effect_authority: false,
     };
+  } finally {
+    releaseDispatchClaim(packet, claim.token);
   }
-  const acceptance = runAcceptanceCommand(packet);
-  const ret = writeWorkReturn(packet, {
-    state: acceptance.state,
-    reason: acceptance.state === 'PASS' ? null : 'ACCEPTANCE_FAILED',
-    acceptance,
-    step,
-    binding: {state: binding.state, packet_id: packet.packet_id},
-    next_step_policy: packet.next_step_policy,
-  });
-  return {
-    schema: 'xiio.cli.local-work-dispatch/v1',
-    state: acceptance.state,
-    packet_id: packet.packet_id,
-    workspace_root: packet.workspace_root,
-    objective: packet.objective,
-    executed: true,
-    step,
-    acceptance,
-    return_path: ret.path,
-    effect_authority: false,
-  };
 }
 
 export function formatBindingMessage(binding) {
