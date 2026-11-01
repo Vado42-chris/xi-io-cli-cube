@@ -1,0 +1,29 @@
+{
+  "qualification": "DEFECT_REPRODUCTION_ONLY",
+  "candidate": "e1862a55a89cb64cb851531e0a55c36e928dcab4",
+  "findings": [
+    {
+      "case": "absolute_path",
+      "defect_reproduced": true,
+      "observed": "ACCEPTED_OUTSIDE_ROOT",
+      "source_sha": "1111111111111111111111111111111111111111"
+    },
+    {
+      "case": "parent_traversal",
+      "defect_reproduced": true,
+      "observed": "ACCEPTED_OUTSIDE_ROOT",
+      "source_sha": "1111111111111111111111111111111111111111"
+    },
+    {
+      "case": "ancestor_symlink",
+      "defect_reproduced": true,
+      "observed": "ACCEPTED_OUTSIDE_ROOT",
+      "source_sha": "1111111111111111111111111111111111111111"
+    },
+    {
+      "case": "installer_hash_is_observed_not_authenticated",
+      "defect_reproduced": true,
+      "observed": "BOTH_ACCEPTED_WITH_SAME_EXPECTED_SOURCE"
+    }
+  ]
+}
