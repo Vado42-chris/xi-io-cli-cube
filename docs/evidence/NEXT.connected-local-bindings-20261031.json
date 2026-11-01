@@ -1,0 +1,46 @@
+{
+  "schema": "xiio.ibal.next-record/v1",
+  "slice": "IBAL-CONNECTED-LOCAL-BINDINGS-001A",
+  "state": "COMPOSED_ISOLATED_PASS_PROD_WRITE_ACTIVATION_BLOCKED",
+  "branch": "fix/ibal-connected-bindings-20261031",
+  "base_sha": "1f13e63cbcc8227751e47f031db3b9d06212d689",
+  "prior_adapter_commit": "e4e9e0de8408be7581126e067d40d60bc583a205",
+  "head_dirty": true,
+  "files": [
+    "services/connected-local-bindings.mjs",
+    "test/connected-local-bindings.test.mjs",
+    "scripts/prove-connected-local-bindings.mjs",
+    "scripts/prove-connected-composed-workflow.mjs",
+    "server.js",
+    "package.json"
+  ],
+  "proofs": {
+    "registration": "/home/chrishallberg/.local/state/xi-io/receipts/connected-local-workflow-proof-20261031.json",
+    "composed_fresh": "/home/chrishallberg/.local/state/xi-io/receipts/connected-composed-workflow-proof-20261031.json",
+    "bins_isolated": "/home/chrishallberg/.local/state/xi-io/receipts/bins-write-authority-isolated-proof-20261031.json",
+    "hex_pin": "/home/chrishallberg/.local/state/xi-io/receipts/connected-runtime-dependency-pin-20261031.json"
+  },
+  "revisions": {
+    "ibal_prior": "e4e9e0de8408be7581126e067d40d60bc583a205",
+    "bins": "044f0de0942cc18fcfb437aa8747dd34d6e588e9",
+    "inbox_wake": "8b5960c3d091d4031b7488a870d4d03ae7293fcd",
+    "cli": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
+    "sdk": "55cff051ff61c3cc55d21c364377a83f97620a32"
+  },
+  "gates_run": [
+    "node --test test/connected-local-bindings.test.mjs",
+    "node scripts/prove-connected-local-bindings.mjs",
+    "node scripts/prove-connected-composed-workflow.mjs"
+  ],
+  "remaining_blocker": "Production :8796 write activation — Chris must admit XIIO_BINS_DATAFORGE_WRITE_AUTHORITY_DIR + install bins 044f0de generation without wiping lasting store",
+  "next_verified_action": "Install/activate bins generation 044f0de0942cc18fcfb437aa8747dd34d6e588e9 under existing user unit with authority dir + restart; then enable connected features on Zed plugin / Ibal UI / SAM_LAW only after that readback",
+  "must_not": [
+    "bypass BINS write unbound on production",
+    "mutate owner Zed install",
+    "gate offline Zed/Ibal UI/SAM_LAW on BINS write",
+    "merge/PR without owner"
+  ],
+  "registration_only_note": "BOUND_OWNER_ADAPTER is registration evidence, not end-to-end connected workflow proof",
+  "composed_occurrence": "OCC-CONNECTED-COMPOSED-20261101025135",
+  "stamped_at": "2026-11-01T02:54:38.649Z"
+}
