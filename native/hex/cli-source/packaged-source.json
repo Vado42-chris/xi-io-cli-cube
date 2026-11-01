@@ -1,10 +1,10 @@
 {
   "schema": "xiio.cli.packaged-source/v1",
-  "source_sha": "958a5fe9d4a409e4ab2b690b6a2cc357539908cf",
+  "source_sha": "f2626cae872f191e980ecdfb681485f2d9e67198",
   "files": {
     "src/xiio.mjs": {
-      "sha256": "fa77fafefdf3e73e20e71b824752f15c14bd7ca3af0fb5f1396f62c162f70aed",
-      "size": 115187
+      "sha256": "40f49c10cf69fe3595726eada1aacd4fa233eb856c041011471a5f79ce6c57fa",
+      "size": 157697
     },
     "src/file-edit-cas.mjs": {
       "sha256": "f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3",
@@ -14,9 +14,33 @@
       "sha256": "a3da965da21979620358dc54f6a72dc3be537b114f3e5b8f1acbb4c47b6155a5",
       "size": 6604
     },
+    "src/sdk-provider-state.mjs": {
+      "sha256": "e83108fa0a87e91c450d4b5a613dc3b215eae47b21d29d8e812e562ffedac55e",
+      "size": 9127
+    },
+    "src/sdk/audhd-command.mjs": {
+      "sha256": "85b0adc068a51664992d0d1870b6c1deef133b1987fecb64c33f1098de43d147",
+      "size": 22457
+    },
+    "src/sdk/tool-verb-fidelity.mjs": {
+      "sha256": "a645b456395bac5c6d3881cfe76e54820e5fc6951d01f3c022ef90197e73412c",
+      "size": 15812
+    },
+    "src/sdk/local-work-packet.mjs": {
+      "sha256": "4e515388a1d8be804f98d1b49611f70127b6e997453dc0b3815fbe189bd4bb8b",
+      "size": 36051
+    },
+    "src/sdk/qualified-command-executor.mjs": {
+      "sha256": "ba2f3365695e02966e5814697c437a0d68f078e1649267183451b54ecc3ca848",
+      "size": 11037
+    },
+    "src/sdk/local-worker-host.mjs": {
+      "sha256": "28baa3a1dea73ed42b8c6edf4c6ce47a5a92b0cf933f57550ca2a5c7fbe3b82f",
+      "size": 20026
+    },
     "src/runtime-integrity.mjs": {
-      "sha256": "dd78441a47710df2c193369bd1aa829bfd08a827868e6ffa66d84281fffc1482",
-      "size": 10963
+      "sha256": "98c3a836148d3d2c2d085561f03153c70cd0b389e51c9c106ca1c8ce044fcfac",
+      "size": 14097
     },
     "config/service-catalog.json": {
       "sha256": "473a6e0d6fc2c7da21ed510906e9a85c4a9c22617b4db1f1f107e0482b75f30a",
@@ -29,6 +53,15 @@
     "scripts/reconcile-service-inventory.mjs": {
       "sha256": "eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e",
       "size": 3960
+    },
+    "config/batches/starter-regression-20261031.json": {
+      "sha256": "e9d13a37e624255d74c12306641945cd89730dcdb330790d7072bca2b55ba379",
+      "size": 5188
     }
-  }
+  },
+  "composed_by": "native/hex/compose-cli-packaged-source.py",
+  "hard": [
+    "COMPOSED != INSTALLED",
+    "SOURCE_TIP != PRODUCTION_ACTIVATION"
+  ]
 }

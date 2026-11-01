@@ -1,0 +1,68 @@
+{
+  "schema": "xiio.hex.current-cli-package-proof/v1",
+  "cli_source": "1d7543a3cf33a3c2d83363825e120a31e28a8bdf",
+  "carrier_base": "8dbd369c5c6b03637d0b04518400d405153e6885",
+  "exact_git_payload_blobs_verified": 8,
+  "delivery": {
+    "schema": "xiio.hex.offline-payload-delivery-proof/v1",
+    "state": "PASS",
+    "source_sha": "1d7543a3cf33a3c2d83363825e120a31e28a8bdf",
+    "payload_files": 8,
+    "fresh_install": true,
+    "same_sha_new_generation": true,
+    "rollback_both_directions": true,
+    "user_config_preserved": true,
+    "version_integrity_readback": true,
+    "tampered_module_refused": true,
+    "missing_module_manifest_refused": true,
+    "refusals_preserve_current": true,
+    "installed_on": "DISPOSABLE_CLOUD_ONLY"
+  },
+  "download_wrapper": {
+    "state": "PASS",
+    "transport": "SYNTHETIC_GITHUB_API_FIXTURE",
+    "actual_offline_installer": true,
+    "verified_download_install": true,
+    "cached_tamper_refused": true,
+    "current_preserved": true,
+    "production_github_auth": "NOT_TESTED"
+  },
+  "real_ollama": {
+    "schema": "xiio.cli.real-ollama-smoke/v1",
+    "state": "PASS",
+    "model": "qwen2.5-coder:1.5b",
+    "chat_first": true,
+    "provider": "ollama-loopback",
+    "synthetic_provider": false,
+    "real_tool_loop": true,
+    "human_approval": true,
+    "read_sha256": "8adcc03efa89a433ef31a97f20a9ee21d9e024623d54f1ba5450a81d70f7e852",
+    "edit_sha256": "decf7177b4d0b96aa14eede587900c6962f5271264e146e3e436892aff3ab06c",
+    "readback_matches": true,
+    "refusal": {
+      "reason": "HUMAN_APPROVAL_REQUIRED",
+      "bytes_unchanged": true,
+      "sha256": "8adcc03efa89a433ef31a97f20a9ee21d9e024623d54f1ba5450a81d70f7e852"
+    },
+    "stale_approval": {
+      "reason": "FILE_CHANGED_SINCE_APPROVAL",
+      "peer_bytes_preserved": true,
+      "sha256": "516eef48baf885345a0c30aaf2c59ec484ae0cecda009aea69603076eb3a3c4a"
+    },
+    "identity_required": false,
+    "network_connects_observed": "NOT_OBSERVED_STRACE_EPERM",
+    "paid_provider_fallback_observed": false
+  },
+  "network_observation": "UNQUALIFIED_PTRACE_EPERM",
+  "real_test_variation": "Only the optional strace launch was disabled after actual EPERM. All approve/refuse/stale assertions unchanged. Original tracing failure retained locally.",
+  "source_materialization_correction": "Extra terminal newline detected by Git blob verification on first materialization; corrected to exact 8 upstream blobs, then final install, delivery and real-model checks rerun.",
+  "known_open": [
+    "create-after-edit natural-language completion",
+    "unattended REAPER production owner/permission bindings",
+    "Search/BINS first-run provisioning integration",
+    "Aries installed acceptance",
+    "full native HEX UI and full repository gate"
+  ],
+  "installed_target": "DISPOSABLE_CLOUD_ONLY",
+  "release_state": "SOURCE_CANDIDATE_NOT_FULL_PRODUCT_ACCEPTANCE"
+}

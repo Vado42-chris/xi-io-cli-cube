@@ -1,0 +1,255 @@
+{
+  "schema": "xiio.aries.install-manifest/v1",
+  "stamped_at_utc": "2026-10-31T21:18:01Z",
+  "host": "Aries",
+  "collector": "cursor-read-only",
+  "scope": "status interfaces + config metadata only; no secrets/tokens/case bodies",
+  "products": [
+    {
+      "product": "xi-io-cli",
+      "owner": "Vado42-chris/xi-io-cli (+ HEX carrier Vado42-chris/xi-io-cli-cube)",
+      "launcher": "/home/chrishallberg/.local/bin/xi-io-cli",
+      "installation_path": "/home/chrishallberg/.local/share/xi-io/cli-v1",
+      "source_generation_installed": "c4e2b9f8738d-20261031T204721Z-SkYGhU",
+      "previous_generation": "dd6b5b0dfec7-20261031T201431Z-eruOCb",
+      "rollback_state": "PREVIOUS_POINTER_PRESENT",
+      "version_status": {
+        "schema": "xiio.cli.version/v1",
+        "state": "PASS",
+        "reason": null,
+        "integrity_verified": true,
+        "active_release": true,
+        "product": "xi-io: CLI",
+        "source_sha": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
+        "ref": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
+        "generation": "c4e2b9f8738d-20261031T204721Z-SkYGhU",
+        "running_file_sha256": "1625e3fa29570653a564eeb7d8d3250b129f081e1776ccc83c488615020a134f",
+        "receipt_file_sha256": "1625e3fa29570653a564eeb7d8d3250b129f081e1776ccc83c488615020a134f",
+        "current": "c4e2b9f8738d-20261031T204721Z-SkYGhU",
+        "previous": "dd6b5b0dfec7-20261031T201431Z-eruOCb",
+        "platform": "linux",
+        "commands": "SANDBOXED",
+        "active_workspace": {
+          "state": "PASS",
+          "path": "/home/chrishallberg/.local/state/xi-io/repair-checks/pass.l2hbcV"
+        }
+      },
+      "install_receipt_metadata": {
+        "source_sha": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
+        "ref": "c4e2b9f8738d2d2e074301608ca6b263d635852f",
+        "generation": "c4e2b9f8738d-20261031T204721Z-SkYGhU",
+        "platform": "linux",
+        "node": "24.11.1",
+        "payload_file_count": 10,
+        "payload_files": [
+          "config/service-catalog.json",
+          "scripts/reconcile-service-inventory.mjs",
+          "scripts/service-inventory.mjs",
+          "src/file-edit-cas.mjs",
+          "src/local-ops.mjs",
+          "src/runtime-integrity.mjs",
+          "src/sdk-provider-state.mjs",
+          "src/sdk/audhd-command.mjs",
+          "src/sdk/tool-verb-fidelity.mjs",
+          "src/xiio.mjs"
+        ]
+      },
+      "selected_storage": {
+        "cli_prefix": "/home/chrishallberg/.local/share/xi-io/cli-v1",
+        "exercise_workspace": "/home/chrishallberg/.local/state/xi-io/repair-checks/pass.l2hbcV",
+        "framework_workspace": "/media/chrishallberg/Storage 22/999_Work/003_Projects/003_xi-io_net",
+        "note": "exercise workspace != framework/source workspace"
+      },
+      "node_binary": "/home/chrishallberg/.nvm/versions/node/v24.11.1/bin/node",
+      "node_exists": true
+    },
+    {
+      "product": "xi-io_bins",
+      "owner": "Vado42-chris/xi-io_bins",
+      "status_path": "/media/chrishallberg/Storage 22/001_Flatpack_installs/xi-io-studio/products/bins/api/status.json",
+      "status": {
+        "schema": "xiio.studio-child-product-status/v1",
+        "id": "bins",
+        "state": "BOUND_TO_EXISTING_ACK_ORDER_O6",
+        "updated_at": "2026-10-16T17:54:28-0600",
+        "consume_not_retool": {
+          "ack_order_state": "/home/chrishallberg/.local/state/xi-io/rotfl/order.current.json",
+          "current_step_id": "O7",
+          "completed_through": "O6_BINS_CUSTODY_AND_CONVERSATION_CURRENTNESS",
+          "cli": [
+            "xi-io ack order status",
+            "xi-io work egress",
+            "xi-io search --custody 1"
+          ],
+          "seat_script": "SUPERSEDED"
+        },
+        "hard": [
+          "SEAT_RETOOL != EXISTING_ACK_ORDER",
+          "REDISCOVER != CONSUME",
+          "BINS_RUNTIME_UNIMPLEMENTED",
+          "CASE_STUDY_FEED != LIVE_APPROVAL",
+          "COMMENT != COMPLETION",
+          "GITHUB_COMMENT != RESOLVED",
+          "BADGE_IN_SYNC != MEASURED_SYNC",
+          "CUSTODY_LOCKED_BANNER != WORKER_RETURN",
+          "NARRATIVE != AUTHORITY"
+        ],
+        "effect_authority": 0,
+        "comment_neq_completion": {
+          "stamped_at_regina": "2026-10-16T17:54:28-0600",
+          "ethic": "Comments are issues waiting to be resolved \u2014 not completion",
+          "completion_credit_from_comment": 0,
+          "in_sync": false,
+          "badge_ssot": "workspaces/base44-app-qualified/public/sable/55-console/custody-badge.json",
+          "gate": "workspaces/base44-app-qualified/src/lib/multiStoreCustodyBadge.mjs",
+          "false_claim": "workspaces/ACK.stitch.multi-store-custody.FALSE_CLAIM.20261016.json",
+          "header_measured": "[GitHub net#393 EVIDENCE_ONLY \u00b7 GDrive PROBED_AUTH_FAIL \u00b7 Local PARTIAL \u00b7 deps 10/10 OPEN \u00b7 NOT In-Sync]",
+          "peer_claim": "In-Sync \u00b7 7/7 CUSTODY LOCKED \u00b7 Inode 4092-B \u2014 REFUSED"
+        }
+      }
+    },
+    {
+      "product": "local-repair-canary-exercise",
+      "owner": "local-fixture",
+      "path": "/home/chrishallberg/.local/state/xi-io/repair-checks/pass.l2hbcV",
+      "metadata": {
+        "path": "/home/chrishallberg/.local/state/xi-io/repair-checks/pass.l2hbcV",
+        "exists": true,
+        "files": [
+          {
+            "rel": "repair.mjs",
+            "size": 46
+          },
+          {
+            "rel": "repair.test.mjs",
+            "size": 211
+          }
+        ]
+      },
+      "note": "NOT source backlog / NOT framework workspace"
+    }
+  ],
+  "services": [
+    {
+      "service": "ollama",
+      "bind": "http://127.0.0.1:11434",
+      "port_open": true,
+      "tags_probe": {
+        "ok": true,
+        "status": 200,
+        "error": null
+      },
+      "working_model_reported": "qwen2.5-coder:7b",
+      "model_storage": "PRESERVE_EXISTING",
+      "installed_model_names": [
+        "nemotron-3-nano:4b",
+        "qwen2.5-coder:7b",
+        "xi-executor-001:latest",
+        "xi-analyst-001:latest",
+        "xi-strategist-001:latest",
+        "xibalba:custom",
+        "deepseek-r1:1.5b",
+        "llama3.1:8b",
+        "deepseek-coder:6.7b",
+        "xibalba:latest",
+        "codellama:latest"
+      ]
+    },
+    {
+      "service": "crm_or_ibal_8794",
+      "host": "127.0.0.1",
+      "port": 8794,
+      "port_open": true,
+      "role": "LISTEN_PROBE_ONLY"
+    },
+    {
+      "service": "pull_3099",
+      "host": "127.0.0.1",
+      "port": 3099,
+      "port_open": true,
+      "role": "LISTEN_PROBE_ONLY"
+    },
+    {
+      "service": "inbox_owner_8789",
+      "host": "127.0.0.1",
+      "port": 8789,
+      "port_open": false,
+      "role": "LISTEN_PROBE_ONLY"
+    },
+    {
+      "service": "inbox_local_web_8788",
+      "host": "127.0.0.1",
+      "port": 8788,
+      "port_open": true,
+      "role": "LISTEN_PROBE_ONLY"
+    },
+    {
+      "service": "scaffold_4488",
+      "host": "127.0.0.1",
+      "port": 4488,
+      "port_open": false,
+      "role": "LISTEN_PROBE_ONLY"
+    },
+    {
+      "service": "acp_or_hex_8801",
+      "host": "127.0.0.1",
+      "port": 8801,
+      "port_open": true,
+      "role": "LISTEN_PROBE_ONLY"
+    }
+  ],
+  "unknowns": [
+    {
+      "item": "next_record",
+      "path": "/home/chrishallberg/.local/state/xi-io/worktrees/xi-io-cli-continuation-20261031/NEXT.local-work-packet-20261031.json",
+      "state": "ABSENT"
+    }
+  ],
+  "protected": {
+    "ollama_models": "PRESERVE",
+    "bins_drive_selections": "PRESERVE",
+    "shell_profiles": "DO_NOT_MODIFY",
+    "running_sessions": "DO_NOT_RESTART_AUTOMATICALLY"
+  },
+  "loki": {
+    "access": "UNKNOWN_NOT_PROBED_WITHOUT_CONFIGURED_ENDPOINT",
+    "note": "include only already-configured Loki; no new enrollment"
+  },
+  "worktrees": [
+    {
+      "label": "cli_continuation_wt",
+      "path": "/home/chrishallberg/.local/state/xi-io/worktrees/xi-io-cli-continuation-20261031",
+      "exists": true,
+      "head": "923f3a656858366a45f5ec140326389920086fca",
+      "branch": "fix/cli-execution-return-20261026",
+      "dirty": false
+    },
+    {
+      "label": "hex_wt",
+      "path": "/home/chrishallberg/.local/state/xi-io/worktrees/xi-io-cli-cube-20261031",
+      "exists": true,
+      "head": "6690f74a3c3b9a1b4f64ef5e4dd8e74c2184bafc",
+      "branch": "fix/hex-cli-chat-first-payload-20261031",
+      "dirty": false
+    }
+  ],
+  "next_records": [
+    {
+      "path": "/home/chrishallberg/.local/state/xi-io/worktrees/xi-io-cli-cube-20261031/NEXT.local-work-packet-hex-20261031.json",
+      "json": {
+        "schema": "xiio.hex.next/v1",
+        "stamped_at": "2026-10-31T21:15:00Z",
+        "source_sha": "923f3a656858366a45f5ec140326389920086fca",
+        "hex_branch": "fix/hex-cli-chat-first-payload-20261031",
+        "pr": 32,
+        "state": "HEX_PACKAGE_PUSHED_ISOLATED_PROOF_PASS",
+        "installer_sha": "37fc6956b59c26624e7ef4c7340012e4056b6be6219f619b5636302fd8325109",
+        "manifest_sha": "27b301e8c71a4f2d3e0e677a91fc414c4eb31f7fa006806955afd246611b7140",
+        "remaining_blocker": "Production launcher still on c4e2b9f until owner runs isolated install then explicit adopt; BINS DATAFORGE_CUSTODY_WRITE_AUTHORITY_UNBOUND unchanged",
+        "hex_commit": "b9dfccfddb97def4e32bcad4bc38f989ddbac8a0",
+        "one_install_command": "python3 native/hex/download-install-cli.py --carrier-ref b9dfccfddb97def4e32bcad4bc38f989ddbac8a0 --install --prefix /tmp/xiio-cli-v1-iso --bin-dir /tmp/xiio-cli-bin-iso",
+        "packaging_commit": "88d0b7e109f2deb3b62d5291ab4c0159d0cfac5b"
+      }
+    }
+  ]
+}

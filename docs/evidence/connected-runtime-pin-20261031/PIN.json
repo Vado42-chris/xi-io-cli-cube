@@ -1,0 +1,138 @@
+{
+  "schema": "xiio.hex.connected-runtime-dependency-pin/v1",
+  "pin_id": "connected-runtime-20261031",
+  "pin_revision_note": "Honesty hotfix after peer review \u2014 integrity bytes match source tips; not install/activation qualification",
+  "stamped_at": "2026-11-01T04:35:00.000Z",
+  "temporal_root": "America/Regina",
+  "revisions": {
+    "ibal": {
+      "repo": "Vado42-chris/xi-io-ibal",
+      "head": "643437d6b88ae3b84b0530ab19abc6c7bf157ccb",
+      "branch": "fix/ibal-connected-bindings-20261031",
+      "reviewed_baseline": "0f39d6b74d88731f078c5b9501407c8f08844b3d"
+    },
+    "bins_dataforge": {
+      "repo": "Vado42-chris/xi-io_bins",
+      "head": "b408d59039a890193fa3236c8a8c8726386e843f",
+      "branch": "fix/bins-custody-write-authority-20261031",
+      "reviewed_baseline": "cd77199d2fea6bff3a57aaa16431a5d3c453d3e5"
+    },
+    "inbox_wake_pattern": {
+      "repo": "Vado42-chris/xi-io-Inbox",
+      "head": "8b5960c3d091d4031b7488a870d4d03ae7293fcd"
+    },
+    "cli": {
+      "repo": "Vado42-chris/xi-io-cli",
+      "source_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
+      "generation": "89b9c418f6e1-20261031T215522Z-rtRMEU",
+      "source_sha_peer_admitted_step": "518d0cd732647aa5c4f86af22c090542308c0df2",
+      "note": "Installed baseline remains 89b9c418\u2026 until disposable reinstall; admitted-step landed on CLI branch 518d0cd732647aa5c4f86af22c090542308c0df2"
+    },
+    "sdk": {
+      "repo": "Vado42-chris/xi-io-sdk",
+      "head": "55cff051ff61c3cc55d21c364377a83f97620a32"
+    },
+    "hex_carrier": {
+      "repo": "Vado42-chris/xi-io-cli-cube",
+      "head": "a045eda808054181e3a8e3ef7b79831545708a48",
+      "note": "CLI carrier revision \u2014 distinct from connected-runtime pin branch tip; do not overwrite with pin docs commit"
+    },
+    "connected_runtime_pin_branch": {
+      "repo": "Vado42-chris/xi-io-cli-cube",
+      "branch": "fix/connected-runtime-pin-20261031",
+      "head": "aa50217d94cef91ec20fa631003c91bb8f499b86",
+      "reviewed_baseline": "738e8b5a004d0e292fa6f294c1924e14a3a69369",
+      "head_at_stamp": "8573452ae2a9f34624010c5c61666bb0663a0e53"
+    }
+  },
+  "required_runtime_files": {
+    "ibal/services/connected-local-bindings.mjs": {
+      "sha256": "f6e65dfaf2a25256d6a773002a036949d5c51790a1a4b2601f4538785228978a",
+      "size": 36602
+    },
+    "ibal/scripts/prove-connected-composed-workflow.mjs": {
+      "sha256": "6a16f2bcd5ff4cb11679e51001f905969c453c76d81692ef452298da762afeaa",
+      "size": 776,
+      "note": "SUPERSEDED stub \u2014 exit 2; does not emit PASS_FRESH"
+    },
+    "ibal/scripts/prove-connected-local-bindings.mjs": {
+      "sha256": "21ce8b766ae9cd6be30eb49009304adfe6583f4886859ef95d06111b966800c7",
+      "size": 5304
+    },
+    "bins/src/bins/dataforge-custody.js": {
+      "sha256": "ed9dfc50da7a9973a20d5c2387b0091980532f27b82fadf69235ae216f281657",
+      "size": 14650
+    },
+    "bins/src/bins/dataforge-write-authority.mjs": {
+      "sha256": "cae930368f97a04f79b5f4153b1881fd509898fe3027cb38bb5f88316f64457a",
+      "size": 14047
+    },
+    "bins/server/dataforge-custody-runtime.mjs": {
+      "sha256": "96d238adfe35a24c5a4007c8b93538250dfd356000ee96bdbbb444c4519da9c8",
+      "size": 11257
+    },
+    "bins/src/bins/resource-contract.js": {
+      "sha256": "837b8b1a136faa72c6d391af6f60bed2e3870294d48ed5dacf7bcdaa0cc43436",
+      "size": 8282
+    }
+  },
+  "integrity_checks": [
+    "sha256 match of each required_runtime_files entry on install",
+    "xi-io-cli version \u2192 source_sha 89b9c418\u2026 + integrity_verified",
+    "node --test bins test/dataforge-write-authority.isolated.test.mjs test/dataforge-write-authority-security.test.mjs",
+    "node --test ibal test/connected-local-bindings-repair.test.mjs test/connected-local-bindings-peer-regressions.test.mjs",
+    "node scripts/prove-connected-composed-workflow.mjs \u2192 SUPERSEDED (exit 2); use prove-connected-composed-workflow-corrected.mjs for repair proof"
+  ],
+  "version_readback": {
+    "bins_endpoint": "/api/bins/dataforge/custody/version?coordinate_ref=&version=",
+    "health": "/api/bins/dataforge/health"
+  },
+  "last_known_good": {
+    "bins_generation": "dataforge-704bf816-preserve-3",
+    "cli_generation": "89b9c418f6e1-20261031T215522Z-rtRMEU",
+    "cli_previous": "c4e2b9f8738d-20261031T204721Z-SkYGhU",
+    "recovery": "Restore previous generation directory + launcher; do not roll back lasting custody records with this pin"
+  },
+  "migrations": {
+    "present": false,
+    "rollback_covers_data_migrations": false,
+    "note": "No data migration in this pin; lasting store preserved read-only until owner admits authority dir"
+  },
+  "production_data_preserved": true,
+  "activation_blocked_until": {
+    "chris_action": "Do not activate connected features. Production write remains BLOCKED_CALLER_AUTHENTICATOR_MISSING until a request-specific resolveVerifiedCaller is proven. Disposable HEX install of this integrity set is still owed; pin \u2260 install proof. Offline Zed/Ibal UI/SAM_LAW stay independent of BINS.",
+    "hard": [
+      "PIN_INTEGRITY != INSTALL_PROOF",
+      "PIN_INTEGRITY != PRODUCTION_WRITE",
+      "044f0de_ACTIVATION_TEXT_SUPERSEDED"
+    ]
+  },
+  "offline_independent_consumers": {
+    "zed_plugin": "PREPARE_AGAINST_CONTRACT \u2014 do not gate offline features on BINS write",
+    "ibal_ui": "PREPARE_AGAINST_CONTRACT \u2014 connected features only after deps pass",
+    "sam_law": "PREPARE_AGAINST_CONTRACT \u2014 offline path remains independent"
+  },
+  "must_not": [
+    "mutate regular Zed installation/profiles/third-party sessions",
+    "claim production write on :8796",
+    "merge/PR approve",
+    "advertise PASS_FRESH_COMPOSED_OCCURRENCE from prove-connected-composed-workflow.mjs stub"
+  ],
+  "cells": {
+    "process_death_composed_occurrence": "NOT_RUN",
+    "disposable_hex_install": "PARTIAL_SOURCE_TREE_LAUNCHER_NOT_FULL_INSTALLER",
+    "production_8796_write": "BLOCKED_CALLER_AUTHENTICATOR_MISSING",
+    "cli_performAdmittedStep": "SOURCE_LANDED_INSTALL_OWED"
+  },
+  "composed_proof": "/home/chrishallberg/.local/state/xi-io/receipts/connected-composed-workflow-proof-20261031.json",
+  "bins_isolated_proof": "/home/chrishallberg/.local/state/xi-io/receipts/bins-write-authority-isolated-proof-20261031.json",
+  "repair_20261031": {
+    "superseded_claim": "PASS_FRESH_COMPOSED_OCCURRENCE",
+    "correction": "connected-composed-workflow-correction-20261031.json",
+    "production_write": "BLOCKED_CALLER_AUTHENTICATOR_MISSING",
+    "installer_note": "PIN files + hashes are integrity set; disposable install test still owed for full installer claim",
+    "pin_honesty_hotfix": "prove stub 776B @ 6a16f2bcd5ff\u2026 replaces unrepaired 12874B copy; integrity line no longer expects PASS_FRESH"
+  },
+  "cli_admitted_step_source": "518d0cd732647aa5c4f86af22c090542308c0df2",
+  "disposable_install_note": "Isolated SOURCE_ONLY launcher from CLI tip 518d0cd under /tmp; integrity_verified=false; production launcher untouched. Full HEX download-install still owed."
+}

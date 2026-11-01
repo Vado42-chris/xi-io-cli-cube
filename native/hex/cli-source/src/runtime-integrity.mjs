@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
-export const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']);
+export const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs','src/sdk/qualified-command-executor.mjs','src/sdk/local-worker-host.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs','config/batches/starter-regression-20261031.json']);
 export const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 // Preserve selected runtime lookup, home and explicit transport/auth configuration;
 // never inherit interpreter preloads, dynamic loader hooks or Git config injection.
@@ -32,6 +32,24 @@ export const SUPPORTED_LEGACY_RELEASES=Object.freeze({
   '16d0fb4101d0674f8bd57858ac04d7fabf02aed2':Object.freeze({
     'src/xiio.mjs':'23b55b2524302f8d46958889b4735e37f2b04ec4b994b546c7eb38a87ba6e53b',
     'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88'
+  }),
+  // Exact six-file launcher-repair / Fixture generations. Nonce-suffixed
+  // names still map by receipt.source_sha — not permissive arbitrary legacy.
+  '0f2b444abbe8f7a99c5f4520b1222c568eba6dd1':Object.freeze({
+    'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88',
+    'scripts/reconcile-service-inventory.mjs':'eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e',
+    'scripts/service-inventory.mjs':'4711d6603f759607e79cadc1031f8668ef27b393f25b408b9ecd5516ebc18204',
+    'src/file-edit-cas.mjs':'f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3',
+    'src/runtime-integrity.mjs':'de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912',
+    'src/xiio.mjs':'561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b'
+  }),
+  'd53a1d0219f5b1707c6c1bbedfb262082179ceab':Object.freeze({
+    'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88',
+    'scripts/reconcile-service-inventory.mjs':'eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e',
+    'scripts/service-inventory.mjs':'4711d6603f759607e79cadc1031f8668ef27b393f25b408b9ecd5516ebc18204',
+    'src/file-edit-cas.mjs':'f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3',
+    'src/runtime-integrity.mjs':'de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912',
+    'src/xiio.mjs':'561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b'
   })
 });
 const legacyGenerationName=value=>typeof value==='string'&&/^[0-9a-f]{12}-\d{8}T\d{6}Z$/.test(value);
@@ -49,15 +67,22 @@ export function verifyGeneration(prefix,generation){
   if(receipt.schema!=='xiio.cli.install-receipt/v2'||receipt.generation!==generation||path.resolve(receipt.prefix||'')!==path.resolve(prefix)||!(/^[0-9a-f]{40}$/).test(receipt.source_sha)||!generation.startsWith(receipt.source_sha.slice(0,12)+'-'))throw Error('GENERATION_RECEIPT_INVALID');
   if(!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(String(receipt.node||''))||Number(process.versions.node.split('.')[0])<22||Number(receipt.node.split('.')[0])<22||receipt.platform!==process.platform)throw Error('GENERATION_RUNTIME_INCOMPATIBLE');
   const listed=Object.keys(receipt.files||{});
-  if(legacyGenerationName(generation)){
-    const expected=SUPPORTED_LEGACY_RELEASES[receipt.source_sha];
+  const expectedLegacy=SUPPORTED_LEGACY_RELEASES[receipt.source_sha];
+  if(expectedLegacy){
+    const expected=expectedLegacy;
     if(!expected||receipt.repo!=='Vado42-chris/xi-io-cli'||receipt.ref!==receipt.source_sha)throw Error('LEGACY_RELEASE_UNSUPPORTED');
     if(listed.length!==Object.keys(expected).length||listed.some(file=>!Object.hasOwn(expected,file)||receipt.files[file]!==expected[file]))throw Error('LEGACY_RELEASE_PAYLOAD_MISMATCH');
   }else{
-    const required=PAYLOAD_FILES.filter(file=>!['src/runtime-integrity.mjs','src/local-ops.mjs'].includes(file));
+    const required=PAYLOAD_FILES.filter(file=>!['src/runtime-integrity.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs'].includes(file));
     if(required.some(file=>!listed.includes(file))||listed.some(file=>!PAYLOAD_FILES.includes(file)))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './runtime-integrity.mjs'")&&!listed.includes('src/runtime-integrity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './local-ops.mjs'")&&!listed.includes('src/local-ops.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk-provider-state.mjs'")&&!listed.includes('src/sdk-provider-state.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/audhd-command.mjs'")&&!listed.includes('src/sdk/audhd-command.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/tool-verb-fidelity.mjs'")&&!listed.includes('src/sdk/tool-verb-fidelity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-work-packet.mjs'")&&!listed.includes('src/sdk/local-work-packet.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-worker-host.mjs'")&&!listed.includes('src/sdk/local-worker-host.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/qualified-command-executor.mjs'")&&!listed.includes('src/sdk/qualified-command-executor.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
   }
   for(const relative of listed){
     const file=path.join(root,...relative.split('/'));

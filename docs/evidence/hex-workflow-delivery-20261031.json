@@ -1,0 +1,35 @@
+{
+  "schema": "xiio.hex.workflow-delivery-proof/v1",
+  "source_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
+  "runtime_proven_sha": "a944d5dd5e412868940012b711fa430f81993660",
+  "interactive_evidence": "docs/evidence/cli-interactive-continuation-20261031.json",
+  "controller_evidence": "docs/evidence/cli-real-source-continuation-20261031.json",
+  "payload_files": 11,
+  "not_old_carrier": "41fc9497c3d31a6cbb082d6ac8e5003c8f28d696",
+  "package": {
+    "schema": "xiio.hex.offline-payload-delivery-proof/v1",
+    "state": "PASS",
+    "source_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
+    "payload_files": 11,
+    "fresh_install": true,
+    "same_sha_new_generation": true,
+    "rollback_both_directions": true,
+    "user_config_preserved": true,
+    "version_integrity_readback": true,
+    "tampered_module_refused": true,
+    "missing_module_manifest_refused": true,
+    "refusals_preserve_current": true,
+    "installed_on": "DISPOSABLE_CLOUD_ONLY"
+  },
+  "production_installation": "NOT_YET_ADOPTED",
+  "authority": "No Ward/BINS claims. Per-effect approvals remain.",
+  "download": {
+    "state": "PASS",
+    "transport": "SYNTHETIC_GITHUB_API_FIXTURE",
+    "actual_offline_installer": true,
+    "verified_download_install": true,
+    "cached_tamper_refused": true,
+    "current_preserved": true,
+    "production_github_auth": "NOT_TESTED"
+  }
+}

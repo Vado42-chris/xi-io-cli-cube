@@ -1,0 +1,31 @@
+{
+  "schema": "xiio.hex.readable-terminal-delivery/v1",
+  "source_sha": "dd6b5b0dfec7c75dfd5135875bb46124a30b4041",
+  "source_proof": "Vado42-chris/xi-io-cli@dd6b5b0dfec7c75dfd5135875bb46124a30b4041:docs/evidence/cli-terminal-readability-20261031.json",
+  "package": {
+    "schema": "xiio.hex.offline-payload-delivery-proof/v1",
+    "state": "PASS",
+    "source_sha": "dd6b5b0dfec7c75dfd5135875bb46124a30b4041",
+    "payload_files": 8,
+    "fresh_install": true,
+    "same_sha_new_generation": true,
+    "rollback_both_directions": true,
+    "user_config_preserved": true,
+    "version_integrity_readback": true,
+    "tampered_module_refused": true,
+    "missing_module_manifest_refused": true,
+    "refusals_preserve_current": true,
+    "installed_on": "DISPOSABLE_CLOUD_ONLY"
+  },
+  "downloader": {
+    "state": "PASS",
+    "transport": "SYNTHETIC_GITHUB_API_FIXTURE",
+    "actual_offline_installer": true,
+    "verified_download_install": true,
+    "cached_tamper_refused": true,
+    "current_preserved": true,
+    "production_github_auth": "NOT_TESTED"
+  },
+  "production_installation": "NOT_YET_VERIFIED",
+  "unchanged": "Existing installer, NVM discovery, rollback, authority, and eight-file payload composition preserved."
+}

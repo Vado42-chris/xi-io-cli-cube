@@ -1,0 +1,178 @@
+{
+  "schema": "xiio.cli.no-progress-containment-proof/v1",
+  "base_cli": "2ff2471f3f90aa3f03bcdd0fc0b1b55edabe3d17",
+  "source_sha256": "6cb3eb86b76c6951c9a6487de1e72101c2e197593a839ed57d4254a69ed0e370",
+  "baseline_loop": {
+    "tests": [
+      {
+        "mode": "structured",
+        "case": "repeat",
+        "status": "FAIL",
+        "error": "(12, 0)",
+        "provider_calls": 12,
+        "final_calls": 0
+      },
+      {
+        "mode": "native",
+        "case": "repeat",
+        "status": "FAIL",
+        "error": "(12, 0)",
+        "provider_calls": 12,
+        "final_calls": 0
+      },
+      {
+        "mode": "structured",
+        "case": "changed",
+        "status": "PASS",
+        "provider_calls": 5,
+        "final_calls": 0
+      },
+      {
+        "mode": "native",
+        "case": "changed",
+        "status": "PASS",
+        "provider_calls": 5,
+        "final_calls": 0
+      },
+      {
+        "mode": "structured",
+        "case": "hostile-final",
+        "status": "FAIL",
+        "error": "(12, 0)",
+        "provider_calls": 12,
+        "final_calls": 0
+      },
+      {
+        "mode": "native",
+        "case": "hostile-final",
+        "status": "FAIL",
+        "error": "(12, 0)",
+        "provider_calls": 12,
+        "final_calls": 0
+      }
+    ],
+    "passed": 2,
+    "failed": 4
+  },
+  "candidate_loop": {
+    "tests": [
+      {
+        "mode": "structured",
+        "case": "repeat",
+        "status": "PASS",
+        "provider_calls": 4,
+        "final_calls": 1
+      },
+      {
+        "mode": "native",
+        "case": "repeat",
+        "status": "PASS",
+        "provider_calls": 4,
+        "final_calls": 1
+      },
+      {
+        "mode": "structured",
+        "case": "changed",
+        "status": "PASS",
+        "provider_calls": 5,
+        "final_calls": 0
+      },
+      {
+        "mode": "native",
+        "case": "changed",
+        "status": "PASS",
+        "provider_calls": 5,
+        "final_calls": 0
+      },
+      {
+        "mode": "structured",
+        "case": "hostile-final",
+        "status": "PASS",
+        "provider_calls": 4,
+        "final_calls": 1
+      },
+      {
+        "mode": "native",
+        "case": "hostile-final",
+        "status": "PASS",
+        "provider_calls": 4,
+        "final_calls": 1
+      }
+    ],
+    "passed": 6,
+    "failed": 0
+  },
+  "context_guards": {
+    "passed": 10,
+    "failed": 0,
+    "results": [
+      {
+        "name": "third identical observation only",
+        "status": "PASS"
+      },
+      {
+        "name": "changed evidence resets consecutive count",
+        "status": "PASS"
+      },
+      {
+        "name": "mutating action resets count without altering facts",
+        "status": "PASS"
+      },
+      {
+        "name": "argument order does not defeat repeat detection",
+        "status": "PASS"
+      },
+      {
+        "name": "different readonly operation is progress",
+        "status": "PASS"
+      },
+      {
+        "name": "large prior receipt projects metadata without changing original",
+        "status": "PASS"
+      },
+      {
+        "name": "user instructions are not interpreted as receipts",
+        "status": "PASS"
+      },
+      {
+        "name": "malformed historical receipt is not silently discarded",
+        "status": "PASS"
+      },
+      {
+        "name": "large git result is valid JSON with explicit projection limit",
+        "status": "PASS"
+      },
+      {
+        "name": "file contents are not sliced into invalid JSON",
+        "status": "PASS"
+      }
+    ]
+  },
+  "consumer_cases": 161,
+  "input_scheduler_cases": 8,
+  "approval_preview_cases": 10,
+  "interjection_pty_cases": 3,
+  "model_work": {
+    "provider": "local Ollama qwen2.5-coder:1.5b",
+    "full_patch_attempt": "TIMEOUT_120S",
+    "first_micro": "REJECTED_INVERTED_GUARD",
+    "second_micro": "COUNTER_REUSED_AFTER_REVIEW_CORRECTIONS",
+    "review_corrections": [
+      "explicit read-only allowlist instead of invalid chained declaration",
+      "reset counts on any changed observation so only consecutive duplicates trigger"
+    ],
+    "model_output_is_not_verification": true
+  },
+  "real_large_workload": {
+    "instruction_bytes": 19779,
+    "staged_files": 1001,
+    "tool_transport": "READ_AND_GIT_RETURNED_WITHOUT_PROVIDER_ERROR",
+    "semantic_result": "FAIL_MODEL_CLAIMED_NO_UNCOMMITTED_CHANGES",
+    "accepted_as_plan_execution": false
+  },
+  "original_receipts_retained": true,
+  "history_projection_only_for_model_input": true,
+  "network_trace": "UNQUALIFIED_PTRACE_EPERM",
+  "ack_yar_affected_return_integration": "NOT_IMPLEMENTED_BY_THIS_PATCH",
+  "installed_aries": "NOT_YET"
+}

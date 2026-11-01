@@ -1,0 +1,34 @@
+{
+  "schema": "xiio.hex.next-record/v1",
+  "slice": "CONNECTED-RUNTIME-PEER-HOTFIX-20261031",
+  "branch": "fix/connected-runtime-pin-20261031",
+  "hex_head": "9d424478f2790ba691bfbac6b4ffdfa86f5a6080",
+  "dependency_heads": {
+    "ibal": "643437d6b88ae3b84b0530ab19abc6c7bf157ccb",
+    "bins": "b408d59039a890193fa3236c8a8c8726386e843f",
+    "cli_admitted_step_source": "518d0cd732647aa5c4f86af22c090542308c0df2",
+    "cli_installed_baseline": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
+    "hex_carrier": "a045eda808054181e3a8e3ef7b79831545708a48",
+    "inbox_wake": "8b5960c3d091d4031b7488a870d4d03ae7293fcd"
+  },
+  "peer_regressions": {
+    "ibal": "14/14 PASS",
+    "bins": "15/15 PASS",
+    "cli_lwp": "14 checks PASS including admitted_step scope"
+  },
+  "cells": {
+    "process_death_composed_occurrence": "NOT_RUN",
+    "disposable_hex_install": "PARTIAL_SOURCE_TREE_LAUNCHER_NOT_FULL_INSTALLER",
+    "production_8796_write": "BLOCKED_CALLER_AUTHENTICATOR_MISSING",
+    "fresh_ollama_composed": "NOT_RUN",
+    "isolated_admitted_step_no_ollama": "PASS_DISPOSABLE"
+  },
+  "preserved_dirty": "NEXT.local-work-packet-hex-20261031.json (unstaged)",
+  "next_verified_action": "Full disposable HEX download-install of corrected integrity set, then one isolated Ibal→CLI(518d0cd)→local Ollama→BINS(isolated)→Inbox babysit occurrence with explicit process-death cell — keep :8796 write blocked",
+  "must_not": [
+    "activate connected features on incomplete proof",
+    "gate offline Zed/Ibal UI/SAM_LAW on BINS",
+    "treat PIN integrity as install/activation proof"
+  ],
+  "stamped_at": "2026-11-01T04:55:00.000Z"
+}

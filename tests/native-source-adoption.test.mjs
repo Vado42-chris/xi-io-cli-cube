@@ -65,19 +65,21 @@ test('current payload provenance and bounded fresh-generation custody producer a
  const base='native/hex/cli-source/',source=json(base+'SOURCE.json'),payload=json(base+'packaged-source.json');
  assert.equal(source.current_packaged_payload.repository,'Vado42-chris/xi-io-cli');
  assert.equal(source.current_packaged_payload.ref,payload.source_sha);
+ assert.equal(payload.source_sha,'f2626cae872f191e980ecdfb681485f2d9e67198');
  assert.deepEqual(source.current_packaged_payload.files,payload.files);
- assert.equal(source.current_packaged_payload.local_payload_modifications,false);
- assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),'fa77fafefdf3e73e20e71b824752f15c14bd7ca3af0fb5f1396f62c162f70aed');
- assert.equal(source.offline_installer_successor.base_ref,'f1bca1245436167fc7767bc31925486643e5d2e7');
- assert.equal(source.offline_installer_successor.base_sha256,'6311b606049f07d35bc31e78f73218a95a114d3723c9f8b97bcb8f3262d8d5a6');
- assert.equal(source.offline_installer_successor.sha256,'14730c1f91609d40b1289b98228aef19f048833d36126ca35531e69d7fc6f418');
+ // Candidate package joins six-file legacy SHAs into runtime-integrity — flag must stay true.
+ assert.equal(source.current_packaged_payload.local_payload_modifications,true);
+ assert.equal(createHash('sha256').update(read(base+'src/xiio.mjs')).digest('hex'),payload.files['src/xiio.mjs'].sha256);
  assert.equal(createHash('sha256').update(read(base+'install.mjs')).digest('hex'),source.offline_installer_successor.sha256);
 });
 
-test('current seven-file payload and historical repair verifier keep separate exact custody',()=>{
+test('current fourteen-file candidate payload and historical repair verifier keep separate exact custody',()=>{
  const base='native/hex/cli-source/',payload=json(base+'packaged-source.json'),repair=json(base+'launcher-repair.SOURCE.json');
- assert.equal(payload.source_sha,'958a5fe9d4a409e4ab2b690b6a2cc357539908cf');
- assert.equal(Object.keys(payload.files).length,7);assert.ok(payload.files['src/local-ops.mjs']);
+ const composed=json('native/hex/COMPOSED-packaged-source.receipt.json');
+ assert.equal(payload.source_sha,'f2626cae872f191e980ecdfb681485f2d9e67198');
+ assert.equal(composed.production_baseline_sha,'89b9c418f6e161d9864bf891fd665b6a18f00dd2');
+ assert.equal(Object.keys(payload.files).length,14);assert.ok(payload.files['src/local-ops.mjs']);assert.ok(payload.files['src/sdk/local-work-packet.mjs']);
+ assert.ok(payload.files['src/sdk/local-worker-host.mjs']);assert.ok(payload.files['config/batches/starter-regression-20261031.json']);
  const helper=read(base+'src/runtime-integrity.mjs').split('\n').filter(line=>!line.startsWith('import ')).join('\n').replace(/^export /gm,'').trim();
  const producer=read(base+'install.mjs');const start=producer.indexOf('\n',producer.indexOf('// BEGIN runtime-integrity standalone mirror'));
  const mirror=producer.slice(start,producer.indexOf('// END runtime-integrity standalone mirror')).trim();
