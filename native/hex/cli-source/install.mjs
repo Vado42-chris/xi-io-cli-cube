@@ -47,9 +47,8 @@ const SUPPORTED_LEGACY_RELEASES=Object.freeze({
     'src/xiio.mjs':'23b55b2524302f8d46958889b4735e37f2b04ec4b994b546c7eb38a87ba6e53b',
     'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88'
   }),
-  // Exact six-file launcher-repair generation used by the preserved
-  // migration fixture. A nonce-suffixed name does not make these bytes a
-  // modern fourteen-file payload.
+  // Exact six-file launcher-repair / Fixture generations. Nonce-suffixed
+  // names still map by receipt.source_sha — not permissive arbitrary legacy.
   '0f2b444abbe8f7a99c5f4520b1222c568eba6dd1':Object.freeze({
     'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88',
     'scripts/reconcile-service-inventory.mjs':'eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e',
@@ -58,8 +57,6 @@ const SUPPORTED_LEGACY_RELEASES=Object.freeze({
     'src/runtime-integrity.mjs':'de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912',
     'src/xiio.mjs':'561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b'
   }),
-  // Same six-file bytes as 0f2b444a… — Fixture receipts pin SOURCE.json
-  // historical adoption base d53a1d02… (repair ref stays 0f2b444a…).
   'd53a1d0219f5b1707c6c1bbedfb262082179ceab':Object.freeze({
     'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88',
     'scripts/reconcile-service-inventory.mjs':'eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e',
@@ -98,6 +95,8 @@ function verifyGeneration(prefix,generation){
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/audhd-command.mjs'")&&!listed.includes('src/sdk/audhd-command.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/tool-verb-fidelity.mjs'")&&!listed.includes('src/sdk/tool-verb-fidelity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-work-packet.mjs'")&&!listed.includes('src/sdk/local-work-packet.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-worker-host.mjs'")&&!listed.includes('src/sdk/local-worker-host.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
+    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/qualified-command-executor.mjs'")&&!listed.includes('src/sdk/qualified-command-executor.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
   }
   for(const relative of listed){
     const file=path.join(root,...relative.split('/'));

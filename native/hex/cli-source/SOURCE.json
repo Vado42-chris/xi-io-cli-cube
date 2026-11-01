@@ -132,7 +132,7 @@
     "base_ref": "8dbd369c5c6b03637d0b04518400d405153e6885",
     "path": "native/hex/cli-source/install.mjs",
     "base_sha256": "1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a",
-    "sha256": "25825d3b1017cb42b7c9e39250c6f520816ac80ea491765db9f6088c5c3a57dd",
+    "sha256": "03da74c49c385906a25ba02698610ee1ab61378dd51b06a540048645450b1b48",
     "scope": "Existing offline installer retained; runtime-integrity mirror adopts three hash-pinned SDK modules (audhd-command, tool-verb-fidelity, local-work-packet) with conditional legacy-generation compatibility."
   }
 }
