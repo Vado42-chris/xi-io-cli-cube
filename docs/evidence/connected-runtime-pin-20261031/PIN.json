@@ -40,8 +40,9 @@
     "connected_runtime_pin_branch": {
       "repo": "Vado42-chris/xi-io-cli-cube",
       "branch": "fix/connected-runtime-pin-20261031",
-      "head": "8573452ae2a9f34624010c5c61666bb0663a0e53",
-      "reviewed_baseline": "738e8b5a004d0e292fa6f294c1924e14a3a69369"
+      "head": "aa50217d94cef91ec20fa631003c91bb8f499b86",
+      "reviewed_baseline": "738e8b5a004d0e292fa6f294c1924e14a3a69369",
+      "head_at_stamp": "8573452ae2a9f34624010c5c61666bb0663a0e53"
     }
   },
   "required_runtime_files": {
