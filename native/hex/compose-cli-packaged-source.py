@@ -82,6 +82,31 @@ def main() -> int:
     manifest_bytes = (json.dumps(manifest, indent=2) + "\n").encode()
     (DEST / "packaged-source.json").write_bytes(manifest_bytes)
 
+    # Keep the provenance projection joined to the generated packaged
+    # manifest. This updates candidate metadata only, never activation.
+    source_meta_path = DEST / "SOURCE.json"
+    if not source_meta_path.is_file():
+        raise SystemExit("HEX_SOURCE_PROVENANCE_MISSING")
+    source_meta = json.loads(source_meta_path.read_text())
+    source_meta["current_packaged_payload"] = {
+        "repository": "Vado42-chris/xi-io-cli",
+        "ref": sha,
+        "manifest": "packaged-source.json",
+        "files": files_meta,
+        "local_payload_modifications": False,
+    }
+    source_meta["ref_role"] = (
+        "Historical initial adoption base; current packaged payload authority "
+        "is current_packaged_payload and packaged-source.json."
+    )
+    # install.mjs PAYLOAD_FILES rewrite above changes bytes; keep successor
+    # hash joined to the composed candidate (still never activates).
+    successor = source_meta.get("offline_installer_successor")
+    if isinstance(successor, dict):
+        successor["sha256"] = digest(installer)
+        source_meta["offline_installer_successor"] = successor
+    source_meta_path.write_text(json.dumps(source_meta, indent=2) + "\n")
+
     # Rewrite download-install-cli.py pins to this composed tip (candidate only).
     dl = HERE / "download-install-cli.py"
     text = dl.read_text()

@@ -39,8 +39,8 @@
       "size": 20026
     },
     "src/runtime-integrity.mjs": {
-      "sha256": "7cbd84ae5bd5ebc5fc7c45ce6d94506d78d2a000df5267e0586e7f5198df5e67",
-      "size": 12584
+      "sha256": "98c3a836148d3d2c2d085561f03153c70cd0b389e51c9c106ca1c8ce044fcfac",
+      "size": 14097
     },
     "config/service-catalog.json": {
       "sha256": "473a6e0d6fc2c7da21ed510906e9a85c4a9c22617b4db1f1f107e0482b75f30a",

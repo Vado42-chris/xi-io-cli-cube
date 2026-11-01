@@ -3,13 +3,12 @@
   "state": "COMPOSED_NOT_ACTIVATED",
   "source_sha": "f2626cae872f191e980ecdfb681485f2d9e67198",
   "manifest_sha256": "114ead69aa3ebe27d5c2776a06601064a92603d0f40815a1bc62468bb4f266ab",
-  "installer_sha256": "474b76a4003b8ec9289d27505b040cf6a1591832ce6b4bc92b2fae55ecc1cf60",
+  "installer_sha256": "25825d3b1017cb42b7c9e39250c6f520816ac80ea491765db9f6088c5c3a57dd",
   "payload_files": 14,
-  "destination": "/home/chrishallberg/.local/state/xi-io/worktrees/xi-io-cli-cube-20261031/native/hex/cli-source",
+  "destination": "/tmp/xiio-cli33/native/hex/cli-source",
   "production_baseline_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
   "hard": [
     "COMPOSED != INSTALLED",
     "CANDIDATE != PRODUCTION"
-  ],
-  "note": "HEX packaged-source transport adaptation restored on composed CLI tip"
+  ]
 }

@@ -2,7 +2,7 @@
 """Pinned downloader for the EXISTING HEX offline CLI installer. No new installer."""
 import argparse,base64,hashlib,importlib.util,json,os,pathlib,re,shutil,subprocess,sys,tempfile
 SOURCE_SHA="f2626cae872f191e980ecdfb681485f2d9e67198"
-INSTALLER_SHA="474b76a4003b8ec9289d27505b040cf6a1591832ce6b4bc92b2fae55ecc1cf60"
+INSTALLER_SHA="25825d3b1017cb42b7c9e39250c6f520816ac80ea491765db9f6088c5c3a57dd"
 MANIFEST_SHA="114ead69aa3ebe27d5c2776a06601064a92603d0f40815a1bc62468bb4f266ab"
 FILES=["src/xiio.mjs", "src/file-edit-cas.mjs", "src/local-ops.mjs", "src/sdk-provider-state.mjs", "src/sdk/audhd-command.mjs", "src/sdk/tool-verb-fidelity.mjs", "src/sdk/local-work-packet.mjs", "src/sdk/qualified-command-executor.mjs", "src/sdk/local-worker-host.mjs", "src/runtime-integrity.mjs", "config/service-catalog.json", "scripts/service-inventory.mjs", "scripts/reconcile-service-inventory.mjs", "config/batches/starter-regression-20261031.json"]
 
