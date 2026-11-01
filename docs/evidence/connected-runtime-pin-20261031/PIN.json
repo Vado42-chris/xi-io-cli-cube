@@ -7,7 +7,7 @@
   "revisions": {
     "ibal": {
       "repo": "Vado42-chris/xi-io-ibal",
-      "head": "60fb211447f8db215fab86cc4dbe3b4bee1bf5a5",
+      "head": "643437d6b88ae3b84b0530ab19abc6c7bf157ccb",
       "branch": "fix/ibal-connected-bindings-20261031",
       "reviewed_baseline": "0f39d6b74d88731f078c5b9501407c8f08844b3d"
     },
@@ -24,7 +24,9 @@
     "cli": {
       "repo": "Vado42-chris/xi-io-cli",
       "source_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
-      "generation": "89b9c418f6e1-20261031T215522Z-rtRMEU"
+      "generation": "89b9c418f6e1-20261031T215522Z-rtRMEU",
+      "source_sha_peer_admitted_step": "518d0cd732647aa5c4f86af22c090542308c0df2",
+      "note": "Installed baseline remains 89b9c418\u2026 until disposable reinstall; admitted-step landed on CLI branch 518d0cd732647aa5c4f86af22c090542308c0df2"
     },
     "sdk": {
       "repo": "Vado42-chris/xi-io-sdk",
@@ -38,7 +40,7 @@
     "connected_runtime_pin_branch": {
       "repo": "Vado42-chris/xi-io-cli-cube",
       "branch": "fix/connected-runtime-pin-20261031",
-      "head": "PENDING_SELF",
+      "head": "0e389ce22275995c3a962e854ac11fbf0793f9c2",
       "reviewed_baseline": "738e8b5a004d0e292fa6f294c1924e14a3a69369"
     }
   },
