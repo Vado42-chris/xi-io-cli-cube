@@ -1,18 +1,18 @@
 {
   "schema": "xiio.hex.connected-runtime-dependency-pin/v1",
   "pin_id": "connected-runtime-20261031",
-  "stamped_at": "2026-11-01T02:54:07.229Z",
+  "stamped_at": "2026-11-01T03:20:27.284Z",
   "temporal_root": "America/Regina",
   "revisions": {
     "ibal": {
       "repo": "Vado42-chris/xi-io-ibal",
-      "head": "b274dbe83bd23af70bf22357df2a11b709737b04",
+      "head": "0f39d6b74d88731f078c5b9501407c8f08844b3d",
       "branch": "fix/ibal-connected-bindings-20261031"
     },
     "bins_dataforge": {
       "repo": "Vado42-chris/xi-io_bins",
-      "head": "044f0de0942cc18fcfb437aa8747dd34d6e588e9",
-      "installed_generation_baseline": "dataforge-704bf816-preserve-3"
+      "head": "cd77199d2fea6bff3a57aaa16431a5d3c453d3e5",
+      "branch": "fix/bins-custody-write-authority-20261031"
     },
     "inbox_wake_pattern": {
       "repo": "Vado42-chris/xi-io-Inbox",
@@ -34,8 +34,8 @@
   },
   "required_runtime_files": {
     "ibal/services/connected-local-bindings.mjs": {
-      "sha256": "2eb18b8d28a8ca0ba67e0656e4a41bd4fb46c322b22e194ec935b8dd8c909821",
-      "size": 17241
+      "sha256": "7ced373064ac2a3f7807c973fe880213352fc20035309e4dbd942891df11e471",
+      "size": 29077
     },
     "ibal/scripts/prove-connected-composed-workflow.mjs": {
       "sha256": "0ed1c9b99d36145bab2625253c9a91b0cd00a88f8fdfba23d7deb7c8c64da155",
@@ -50,12 +50,12 @@
       "size": 14650
     },
     "bins/src/bins/dataforge-write-authority.mjs": {
-      "sha256": "275df69f81dabbef855514dfb72b7a5cba5a454d0eef2fd7b7a505d08289ee4b",
-      "size": 6924
+      "sha256": "d5eea7636a4252910e3d135e1e10ddf376480550cd91352501290ea0c3d1790a",
+      "size": 12964
     },
     "bins/server/dataforge-custody-runtime.mjs": {
-      "sha256": "8349980d2f7d4c11a5d14b0dfe97343dfd1adf37e35410253c775ae79b410988",
-      "size": 9841
+      "sha256": "cbb9487ad24282c5b6bc6e1c402c621bc29f2ba58b20445cafd2b32d4b9cc059",
+      "size": 10120
     },
     "bins/src/bins/resource-contract.js": {
       "sha256": "837b8b1a136faa72c6d391af6f60bed2e3870294d48ed5dacf7bcdaa0cc43436",
@@ -64,9 +64,9 @@
   },
   "integrity_checks": [
     "sha256 match of each required_runtime_files entry on install",
-    "xi-io-cli version \u2192 source_sha 89b9c418\u2026 + integrity_verified",
+    "xi-io-cli version → source_sha 89b9c418… + integrity_verified",
     "node --test bins test/dataforge-write-authority.isolated.test.mjs",
-    "node scripts/prove-connected-composed-workflow.mjs \u2192 PASS_FRESH_COMPOSED_OCCURRENCE"
+    "node scripts/prove-connected-composed-workflow.mjs → PASS_FRESH_COMPOSED_OCCURRENCE"
   ],
   "version_readback": {
     "bins_endpoint": "/api/bins/dataforge/custody/version?coordinate_ref=&version=",
@@ -88,9 +88,9 @@
     "chris_action": "Admit XIIO_BINS_DATAFORGE_WRITE_AUTHORITY_DIR + install bins generation from 044f0de without wiping lasting root; then activate connected features per consumer"
   },
   "offline_independent_consumers": {
-    "zed_plugin": "PREPARE_AGAINST_CONTRACT \u2014 do not gate offline features on BINS write",
-    "ibal_ui": "PREPARE_AGAINST_CONTRACT \u2014 connected features only after deps pass",
-    "sam_law": "PREPARE_AGAINST_CONTRACT \u2014 offline path remains independent"
+    "zed_plugin": "PREPARE_AGAINST_CONTRACT — do not gate offline features on BINS write",
+    "ibal_ui": "PREPARE_AGAINST_CONTRACT — connected features only after deps pass",
+    "sam_law": "PREPARE_AGAINST_CONTRACT — offline path remains independent"
   },
   "must_not": [
     "mutate regular Zed installation/profiles/third-party sessions",
@@ -98,5 +98,11 @@
     "merge/PR approve"
   ],
   "composed_proof": "/home/chrishallberg/.local/state/xi-io/receipts/connected-composed-workflow-proof-20261031.json",
-  "bins_isolated_proof": "/home/chrishallberg/.local/state/xi-io/receipts/bins-write-authority-isolated-proof-20261031.json"
+  "bins_isolated_proof": "/home/chrishallberg/.local/state/xi-io/receipts/bins-write-authority-isolated-proof-20261031.json",
+  "repair_20261031": {
+    "superseded_claim": "PASS_FRESH_COMPOSED_OCCURRENCE",
+    "correction": "connected-composed-workflow-correction-20261031.json",
+    "production_write": "BLOCKED_CALLER_AUTHENTICATOR_MISSING",
+    "installer_note": "PIN files + hashes are integrity set; disposable install test still owed for full installer claim"
+  }
 }

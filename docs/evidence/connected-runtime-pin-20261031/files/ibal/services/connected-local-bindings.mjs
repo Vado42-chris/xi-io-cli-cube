@@ -1,19 +1,25 @@
 /**
  * Connected local workflow bindings for Ibal hotfolder/workspace owners.
  *
- * Produces real durable coordinationReader / applyReturn / wakeConsumer /
- * qualifiedHost.reconcile for loopback use. Does NOT grant BINS write authority,
+ * Produces durable coordinationReader / applyReturn / wakeConsumer /
+ * qualifiedHost for loopback use. Does NOT grant BINS write authority,
  * OS sandbox elevation, or fixture-only PROFILE promotion.
  *
- * Inbox WAKE/RETURN pattern provenance:
+ * Inbox receiving-product consumer (not a local wake file):
  *   Vado42-chris/xi-io-Inbox@8b5960c3 scripts/run-internal-babysit-consumer.mjs
- * CLI effect path (optional): installed xi-io-cli local-work-packet continue.
+ *   hotfolder ready → returns/{wake_id}.return.json
+ *
+ * CLI pinned surface (89b9c418): work-packet continue runs deterministic
+ * acceptance from the admitted packet; performAdmittedStep is null unless
+ * --acceptance-only (noop). Host mutation via continue alone is
+ * CLI_TASK_SURFACE_MISSING — owner: Vado42-chris/xi-io-cli local-work-packet.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
+import os from 'node:os';
 
 const digest = (value) =>
   createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
@@ -68,6 +74,73 @@ function bindFields(binding = {}) {
     'operation_ref',
   ];
   return Object.fromEntries(keys.map((k) => [k, binding[k] ?? null]));
+}
+
+function bindingDigest(binding = {}) {
+  return digest(bindFields(binding));
+}
+
+function inputDigest(parts = {}) {
+  return digest(parts);
+}
+
+/**
+ * O_EXCL claim/lease — same shape as Inbox acquireRunLease, local to this module
+ * (no absolute cross-repo import in deliverable runtime).
+ */
+async function withIdempotencyClaim(claimPath, action) {
+  await fs.mkdir(path.dirname(claimPath), { recursive: true, mode: 0o700 });
+  let handle;
+  const token = randomUUID();
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      handle = await fs.open(claimPath, 'wx', 0o600);
+      const lease = {
+        schema: 'xiio.ibal.idempotency-claim/v1',
+        pid: process.pid,
+        token,
+        hostname: os.hostname(),
+        acquired_at: new Date().toISOString(),
+      };
+      await handle.writeFile(`${JSON.stringify(lease)}\n`, 'utf8');
+      await handle.sync();
+      try {
+        return await action();
+      } finally {
+        await handle.close().catch(() => {});
+        const current = await readJson(claimPath);
+        if (current?.token === token && current?.pid === process.pid) {
+          await fs.unlink(claimPath).catch(() => {});
+        }
+      }
+    } catch (error) {
+      await handle?.close().catch(() => {});
+      handle = undefined;
+      if (error?.code !== 'EEXIST') throw error;
+      const existing = await readJson(claimPath);
+      if (existing?.hostname === os.hostname() && existing?.pid && existing.pid !== process.pid) {
+        try {
+          process.kill(existing.pid, 0);
+          throw fail('IDEMPOTENCY_CLAIM_HELD', { claimPath, existing });
+        } catch (aliveErr) {
+          if (aliveErr?.code === 'IDEMPOTENCY_CLAIM_HELD') throw aliveErr;
+          // ESRCH — dead claimant; remove and retry
+          await fs.unlink(claimPath).catch(() => {});
+          continue;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  }
+  throw fail('IDEMPOTENCY_CLAIM_EXHAUSTED', { claimPath });
+}
+
+function digestsMatch(existing, binding, parts) {
+  const wantBinding = bindingDigest(binding);
+  const wantInput = inputDigest(parts);
+  if (existing.binding_digest !== wantBinding) return false;
+  if (existing.input_digest !== wantInput) return false;
+  return true;
 }
 
 /**
@@ -173,6 +246,7 @@ export async function createConnectedLocalBindings({
   cliBin = 'xi-io-cli',
   assignmentsDir = path.join(process.env.HOME || '', '.local/state/xi-io/switchboard/assignments'),
   bins = null,
+  inboxBabysitRoot = null,
 } = {}) {
   if (typeof stateDir !== 'string' || !path.isAbsolute(stateDir)) throw fail('STATE_DIR_ABSOLUTE_REQUIRED');
   if (typeof projectId !== 'string' || !projectId.trim()) throw fail('PROJECT_ID_REQUIRED');
@@ -199,6 +273,11 @@ export async function createConnectedLocalBindings({
     typeof workId === 'string' && workId.trim()
       ? workId.trim()
       : randomUUID();
+
+  const resolvedInboxRoot =
+    typeof inboxBabysitRoot === 'string' && path.isAbsolute(inboxBabysitRoot)
+      ? inboxBabysitRoot
+      : null;
 
   async function loadAssignments() {
     const workers = [];
@@ -257,23 +336,50 @@ export async function createConnectedLocalBindings({
     return structuredClone(snapshot);
   };
 
+  const binsClient = bins || createBinsCustodyClient();
+
   const applyReturn = {
     async apply({ binding, result, idempotencyKey }) {
       if (!idempotencyKey) throw fail('IDEMPOTENCY_KEY_REQUIRED');
       const file = path.join(returnDir, `${digest(idempotencyKey)}.json`);
-      const existing = await readJson(file);
-      if (existing) return existing;
-      const value = {
-        schema: 'xiio.ibal.apply-return/v1',
-        state: 'APPLIED',
-        ...bindFields(binding),
+      const claimPath = `${file}.claim`;
+      const parts = {
         result_ref: result?.result_ref || null,
-        receipt_ref: `local:applied:${idempotencyKey}`,
-        applied_at: new Date().toISOString(),
-        bins_custody: null,
+        receipt_seed: `local:applied:${idempotencyKey}`,
       };
-      if (bins) {
-        const probe = await bins.writeCustody({
+      return withIdempotencyClaim(claimPath, async () => {
+        const existing = await readJson(file);
+        if (existing) {
+          if (!digestsMatch(existing, binding, parts)) {
+            return {
+              schema: 'xiio.ibal.apply-return/v1',
+              state: 'IDEMPOTENCY_CONFLICT',
+              reason: 'BINDING_OR_INPUT_DIGEST_MISMATCH',
+              idempotency_key: idempotencyKey,
+              existing_binding_digest: existing.binding_digest || null,
+              requested_binding_digest: bindingDigest(binding),
+              hard: ['WRITEJSONATOMIC != CLAIM_LOCK', 'CONFLICTING_REUSE != IDEMPOTENT_PASS'],
+            };
+          }
+          return existing;
+        }
+
+        const value = {
+          schema: 'xiio.ibal.apply-return/v1',
+          state: 'RECOVERABLE_CUSTODY_PENDING',
+          ...bindFields(binding),
+          binding_digest: bindingDigest(binding),
+          input_digest: inputDigest(parts),
+          result_ref: result?.result_ref || null,
+          receipt_ref: `local:applied:${idempotencyKey}`,
+          applied_at: new Date().toISOString(),
+          bins_custody: null,
+          bins_version_qualified: false,
+          bins_version_ref: null,
+          bins_digest: null,
+        };
+
+        const probe = await binsClient.writeCustody({
           coordinate_ref: value.receipt_ref,
           principal_ref: binding?.agent_id || null,
           agent_id: binding?.agent_id || null,
@@ -289,13 +395,41 @@ export async function createConnectedLocalBindings({
           source_occurrence_ref: value.receipt_ref,
         });
         value.bins_custody = probe;
-        if (probe.state === 'PASS') {
-          value.bins_version_qualified = true;
-          value.bins_version_ref = probe.body?.version_ref || null;
+
+        if (probe.state !== 'PASS' || !probe.body?.version_ref) {
+          value.state = 'RECOVERABLE_CUSTODY_PENDING';
+          value.reason = probe.reason || probe.state;
+          await writeJsonAtomic(file, value);
+          return value;
         }
-      }
-      await writeJsonAtomic(file, value);
-      return value;
+
+        const versionRead = await binsClient.readVersion({
+          coordinateRef: value.receipt_ref,
+          version: probe.body.version_ref,
+        });
+        const digestValue = versionRead.body?.digest?.value || versionRead.body?.content_sha256 || null;
+        const payloadOk = versionRead.body?.payload?.receipt_ref === value.receipt_ref;
+        if (versionRead.state !== 'PASS' || !digestValue || !payloadOk) {
+          value.state = 'RECOVERABLE_CUSTODY_PENDING';
+          value.reason = 'VERSION_READBACK_UNQUALIFIED';
+          value.bins_version_readback = versionRead;
+          await writeJsonAtomic(file, value);
+          return value;
+        }
+
+        value.state = 'APPLIED';
+        value.bins_version_qualified = true;
+        value.bins_version_ref = probe.body.version_ref;
+        value.bins_digest = digestValue;
+        value.bins_version_readback = {
+          state: 'PASS',
+          coordinate_ref: value.receipt_ref,
+          version_ref: probe.body.version_ref,
+          digest: digestValue,
+        };
+        await writeJsonAtomic(file, value);
+        return value;
+      });
     },
     async reconcile({ idempotencyKey }) {
       if (!idempotencyKey) throw fail('IDEMPOTENCY_KEY_REQUIRED');
@@ -303,6 +437,15 @@ export async function createConnectedLocalBindings({
       return (await readJson(file)) || { state: 'UNKNOWN' };
     },
   };
+
+  async function readInboxConsumerAck(wakeId) {
+    if (!resolvedInboxRoot) return null;
+    const returnPath = path.join(resolvedInboxRoot, 'returns', `${wakeId}.return.json`);
+    const row = await readJson(returnPath);
+    if (!row || row.schema !== 'xiio.hotfolder.return.v1') return null;
+    if (row.wake_id !== wakeId) return null;
+    return { return_path: returnPath, return: row };
+  }
 
   const wakeConsumer = async (wake) => {
     const wakeId = String(wake?.wake_id || '').trim();
@@ -314,17 +457,47 @@ export async function createConnectedLocalBindings({
     if (!existing) {
       await writeJsonAtomic(file, {
         schema: 'xiio.ibal.wake-ack/v1',
-        state: 'CONSUMED',
+        state: 'PENDING_CONSUMER_ACK',
         semantics: 'WAKE_ONLY',
         authority_granted: false,
         ...bindFields(wake),
         wake_id: wakeId,
         receipt_ref: wake?.receipt_ref || `local:wake:${wakeId}`,
-        consumed_at: new Date().toISOString(),
+        local_recorded_at: new Date().toISOString(),
+        hard: ['LOCAL_WAKE_RECEIPT != RECEIVING_PRODUCT_CONSUMPTION'],
       });
     }
     const stored = await readJson(file);
-    return { state: 'CONSUMED', ...bindFields(wake), wake_id: wakeId, receipt_ref: stored.receipt_ref };
+    const consumer = await readInboxConsumerAck(wakeId);
+    if (!consumer) {
+      return {
+        state: 'PENDING_CONSUMER_ACK',
+        ...bindFields(wake),
+        wake_id: wakeId,
+        receipt_ref: stored.receipt_ref,
+        reason: resolvedInboxRoot ? 'INBOX_CONSUMER_RETURN_MISSING' : 'INBOX_BABYSIT_ROOT_UNBOUND',
+        hard: ['LOCAL_WAKE_RECEIPT != RECEIVING_PRODUCT_CONSUMPTION'],
+      };
+    }
+    const consumed = {
+      ...stored,
+      state: 'CONSUMED',
+      consumer_ack: {
+        return_path: consumer.return_path,
+        consumer: consumer.return.consumer || null,
+        observed_at: consumer.return.observed_at || null,
+        apply_return_state: consumer.return.apply_return_state || null,
+      },
+      consumed_at: new Date().toISOString(),
+    };
+    await writeJsonAtomic(file, consumed);
+    return {
+      state: 'CONSUMED',
+      ...bindFields(wake),
+      wake_id: wakeId,
+      receipt_ref: stored.receipt_ref,
+      consumer_ack: consumed.consumer_ack,
+    };
   };
 
   function runCli(args, { timeoutMs = 120000, input = null } = {}) {
@@ -368,20 +541,28 @@ export async function createConnectedLocalBindings({
     });
   }
 
+  const cliTaskSurface = {
+    state: 'CLI_TASK_SURFACE_MISSING',
+    owner: 'Vado42-chris/xi-io-cli',
+    function: 'dispatchAcceptedWork.performAdmittedStep',
+    pinned_revision: '89b9c418f6e161d9864bf891fd665b6a18f00dd2',
+    note: 'work-packet continue defaults performAdmittedStep=null; only admitted acceptance_command runs. Host mutation must be supplied by packet acceptance proving an admitted effect, or a future CLI admitted-step flag — do not invent a general task engine here.',
+    smallest_next_repair: 'Expose an explicit, policy-gated admitted-step runner on work-packet continue that executes packet.admitted_step only, never model-supplied commands.',
+  };
+
   const qualifiedHost = {
     profile: 'LOCAL_LOOPBACK_CLI',
     sourceGeneration: generation,
+    cli_task_surface: cliTaskSurface,
     async qualify({ binding, readOnly = false }) {
       if (!binding?.work_id || !binding?.attempt_id || !binding?.agent_id) throw fail('BINDING_INCOMPLETE');
       if (binding.source_generation && binding.source_generation !== generation) {
         return { state: 'DENIED', reason: 'SOURCE_GENERATION_MISMATCH', ...bindFields(binding) };
       }
-      // Side-effect free: confirm CLI binary exists when not read-only path only.
       if (!readOnly) {
         try {
           await fs.access(cliBin, fsConstants.X_OK);
         } catch {
-          // PATH-resolved binaries may not be absolute
           const probe = await runCli(['version'], { timeoutMs: 5000 });
           if (!probe.ok) {
             return { state: 'DENIED', reason: 'CLI_UNAVAILABLE', ...bindFields(binding) };
@@ -395,34 +576,148 @@ export async function createConnectedLocalBindings({
         read_only: Boolean(readOnly),
       };
     },
-    async request({ binding, idempotencyKey, workspaceRoot = null, utterance = 'continue' }) {
+    async request({ binding, idempotencyKey, workspaceRoot = null, utterance = 'continue', admittedAcceptance = null } = {}) {
       if (!idempotencyKey) throw fail('IDEMPOTENCY_KEY_REQUIRED');
       const file = path.join(receiptDir, `${digest(idempotencyKey)}.json`);
-      const existing = await readJson(file);
-      if (existing) return existing;
-      const args = workspaceRoot
-        ? ['work-packet', 'continue', '--root', workspaceRoot]
-        : ['version'];
-      const probe = await runCli(args, { timeoutMs: 180000, input: workspaceRoot ? null : null });
-      let parsed = null;
-      try {
-        parsed = JSON.parse(probe.stdout);
-      } catch {
-        parsed = null;
-      }
-      const result = {
-        schema: 'xiio.ibal.qualified-host-receipt/v1',
-        state: probe.ok ? 'COMPLETE' : 'FAILED',
-        ...bindFields(binding),
-        result_ref: `local:result:${idempotencyKey}`,
-        identity_evidence_class: 'LOCAL_LOOPBACK_CLI',
-        inference: workspaceRoot ? 'CLI_WORK_PACKET' : 'VERSION_PROBE_ONLY',
+      const claimPath = `${file}.claim`;
+      const parts = {
+        workspace_root: workspaceRoot || null,
         utterance: workspaceRoot ? utterance : null,
-        cli: { exit_code: probe.exit_code, parsed, stderr: probe.stderr || null },
-        source_generation: generation,
+        admitted_acceptance: admittedAcceptance || null,
       };
-      await writeJsonAtomic(file, result);
-      return result;
+      return withIdempotencyClaim(claimPath, async () => {
+        const existing = await readJson(file);
+        if (existing) {
+          if (!digestsMatch(existing, binding, parts)) {
+            return {
+              schema: 'xiio.ibal.qualified-host-receipt/v1',
+              state: 'IDEMPOTENCY_CONFLICT',
+              reason: 'BINDING_OR_INPUT_DIGEST_MISMATCH',
+              hard: ['CONFLICTING_REUSE != IDEMPOTENT_PASS'],
+            };
+          }
+          return existing;
+        }
+
+        // Missing workspace: version probe must never become completed work.
+        if (!workspaceRoot) {
+          const probe = await runCli(['version'], { timeoutMs: 5000 });
+          let parsed = null;
+          try {
+            parsed = JSON.parse(probe.stdout);
+          } catch {
+            parsed = null;
+          }
+          const result = {
+            schema: 'xiio.ibal.qualified-host-receipt/v1',
+            state: 'VERSION_PROBE_ONLY',
+            reason: 'WORKSPACE_ROOT_REQUIRED_FOR_TASK_COMPLETION',
+            ...bindFields(binding),
+            binding_digest: bindingDigest(binding),
+            input_digest: inputDigest(parts),
+            result_ref: `local:result:${idempotencyKey}`,
+            identity_evidence_class: 'LOCAL_LOOPBACK_CLI',
+            inference: 'VERSION_PROBE_ONLY',
+            utterance: null,
+            cli: { exit_code: probe.exit_code, parsed, stderr: probe.stderr || null },
+            source_generation: generation,
+            hard: ['CLI_VERSION_EXIT_0 != TASK_COMPLETE', 'MISSING_WORKSPACE != COMPLETED_WORK'],
+          };
+          await writeJsonAtomic(file, result);
+          return result;
+        }
+
+        const statusProbe = await runCli(['work-packet', 'status', '--root', workspaceRoot], { timeoutMs: 30000 });
+        let statusParsed = null;
+        try {
+          statusParsed = JSON.parse(statusProbe.stdout);
+        } catch {
+          statusParsed = null;
+        }
+        if (!statusParsed || statusParsed.state === 'MISSING_BINDING' || !statusParsed.packet_id) {
+          const result = {
+            schema: 'xiio.ibal.qualified-host-receipt/v1',
+            state: 'MISSING_BINDING',
+            reason: 'NO_ACCEPTED_WORK_PACKET',
+            ...bindFields(binding),
+            binding_digest: bindingDigest(binding),
+            input_digest: inputDigest(parts),
+            result_ref: `local:result:${idempotencyKey}`,
+            identity_evidence_class: 'LOCAL_LOOPBACK_CLI',
+            inference: 'CLI_WORK_PACKET',
+            utterance,
+            cli: { exit_code: statusProbe.exit_code, parsed: statusParsed, stderr: statusProbe.stderr || null },
+            source_generation: generation,
+            hard: ['EXIT_0 != TASK_COMPLETE', 'ACCEPTED_PACKET_REQUIRED'],
+          };
+          await writeJsonAtomic(file, result);
+          return result;
+        }
+
+        // Acceptance comes from admitted packet only — never from model-supplied commands.
+        if (admittedAcceptance != null) {
+          const packetCmd = statusParsed.acceptance_command;
+          const admitted = Array.isArray(admittedAcceptance) ? admittedAcceptance : [String(admittedAcceptance)];
+          const same =
+            Array.isArray(packetCmd) &&
+            packetCmd.length === admitted.length &&
+            packetCmd.every((x, i) => String(x) === String(admitted[i]));
+          if (!same) {
+            const result = {
+              schema: 'xiio.ibal.qualified-host-receipt/v1',
+              state: 'ACCEPTANCE_BOUNDARY_REFUSED',
+              reason: 'MODEL_OR_EXTERNAL_ACCEPTANCE_NOT_ADMITTED',
+              ...bindFields(binding),
+              binding_digest: bindingDigest(binding),
+              input_digest: inputDigest(parts),
+              result_ref: `local:result:${idempotencyKey}`,
+              packet_id: statusParsed.packet_id,
+              hard: ['MODEL_ACCEPTANCE_COMMAND != ADMITTED_PACKET'],
+            };
+            await writeJsonAtomic(file, result);
+            return result;
+          }
+        }
+
+        const cont = await runCli(['work-packet', 'continue', '--root', workspaceRoot], { timeoutMs: 180000 });
+        let parsed = null;
+        try {
+          parsed = JSON.parse(cont.stdout);
+        } catch {
+          parsed = null;
+        }
+
+        const acceptancePass = parsed?.acceptance?.state === 'PASS' || (parsed?.state === 'PASS' && parsed?.reason === 'ALREADY_COMPLETE');
+        const taskComplete =
+          parsed &&
+          (parsed.state === 'PASS' || parsed.reason === 'ALREADY_COMPLETE') &&
+          acceptancePass &&
+          parsed.packet_id === statusParsed.packet_id;
+
+        const result = {
+          schema: 'xiio.ibal.qualified-host-receipt/v1',
+          state: taskComplete ? 'COMPLETE' : cont.ok && parsed ? 'FAILED_ACCEPTANCE_OR_DISPATCH' : 'FAILED',
+          ...bindFields(binding),
+          binding_digest: bindingDigest(binding),
+          input_digest: inputDigest(parts),
+          result_ref: `local:result:${idempotencyKey}`,
+          identity_evidence_class: 'LOCAL_LOOPBACK_CLI',
+          inference: 'CLI_WORK_PACKET',
+          utterance,
+          packet_id: statusParsed.packet_id || null,
+          acceptance: parsed?.acceptance || null,
+          cli_task_surface: cliTaskSurface,
+          cli: { exit_code: cont.exit_code, parsed, stderr: cont.stderr || null },
+          source_generation: generation,
+          hard: [
+            'EXIT_0 != TASK_COMPLETE',
+            'ADMITTED_ACCEPTANCE_REQUIRED',
+            'CLI_TASK_SURFACE_MISSING_FOR_HOST_MUTATION_WITHOUT_PACKET_ACCEPTANCE',
+          ],
+        };
+        await writeJsonAtomic(file, result);
+        return result;
+      });
     },
     async reconcile({ idempotencyKey }) {
       if (!idempotencyKey) throw fail('IDEMPOTENCY_KEY_REQUIRED');
@@ -431,8 +726,6 @@ export async function createConnectedLocalBindings({
     },
   };
 
-  const binsClient = bins || createBinsCustodyClient();
-
   return {
     schema: 'xiio.ibal.connected-local-bindings/v1',
     state: 'BOUND_LOCAL',
@@ -440,6 +733,7 @@ export async function createConnectedLocalBindings({
     work_id: snapshot.work_id,
     source_generation: generation,
     state_dir: stateDir,
+    inbox_babysit_root: resolvedInboxRoot,
     coordinationReader,
     applyReturn,
     wakeConsumer,

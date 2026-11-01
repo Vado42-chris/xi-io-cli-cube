@@ -8,10 +8,13 @@ import { createDataForgeCustodyStore, inspectDataForgeCustodyStore } from '../sr
 import { createDataForgeWriteAuthorityAdapter } from '../src/bins/dataforge-write-authority.mjs';
 
 function resolveAuthorityAdapter() {
+  // Production stays fail-closed on caller authentication: env authority dir alone
+  // does not bind resolveVerifiedCaller. Isolated servers inject an adapter explicitly.
   const authorityDir = process.env.XIIO_BINS_DATAFORGE_WRITE_AUTHORITY_DIR;
   if (typeof authorityDir !== 'string' || !authorityDir.trim()) return null;
   if (!path.isAbsolute(authorityDir)) throw new Error('WRITE_AUTHORITY_DIR_ABSOLUTE_REQUIRED');
-  return createDataForgeWriteAuthorityAdapter({ authorityDir });
+  // Without an authenticated caller primitive, adapter refuses every write.
+  return createDataForgeWriteAuthorityAdapter({ authorityDir, resolveVerifiedCaller: null });
 }
 
 async function readJsonBody(req, limit = 1024 * 1024) {
