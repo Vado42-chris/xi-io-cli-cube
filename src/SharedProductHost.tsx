@@ -25,7 +25,7 @@ function CubeProductContent({navigation, onNavigate, pluginsVisible, settingsVis
           exact receipt selection. Hidden means non-interactive, not destroyed. */}
       <div className={pluginsVisible || settingsVisible ? 'hidden h-full min-h-0' : 'h-full min-h-0'}
         aria-hidden={pluginsVisible || settingsVisible} data-hex-installer-state-host="persistent">
-        <App embedded navigation={navigation} onNavigate={onNavigate} visible={!pluginsVisible} />
+        <App embedded navigation={navigation} onNavigate={onNavigate} visible={!pluginsVisible && !settingsVisible} />
       </div>
       {pluginsVisible && <div className="p-5" data-hex-plugin-native-panel="v1"><NativePluginMarketplace /></div>}
       {settingsVisible && <BlackWindowSettingsHost />}
