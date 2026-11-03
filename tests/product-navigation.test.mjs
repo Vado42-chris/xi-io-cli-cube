@@ -211,6 +211,27 @@ test('actual tablet rail and product controls share selected views across the Sh
     for (const label of ['Minimize window', 'Maximize window', 'Close window']) {
       assert.equal(w.document.querySelector(`button[aria-label="${label}"]`).disabled, true);
     }
+    // Same compiled installer instance survives both overlays and repeated returns.
+    await click(rail('Install'));
+    const persistentInstaller = panel();
+    const persistentHost = shadow.querySelector('[data-hex-installer-state-host="persistent"]');
+    for (const label of ['Plugins', 'Settings', 'Plugins', 'Settings']) {
+      await click(rail(label));
+      assert.equal(panel(), persistentInstaller, label + ' must not remount the installer');
+      assert.equal(persistentHost.getAttribute('aria-hidden'), 'true');
+      assert.equal(persistentHost.classList.contains('hidden'), true);
+      // jsdom does not compute ShadowRoot stylesheet layout/focus. Verify the
+      // actual class and bundled rule; native keyboard/hit testing stays separate.
+      assert.match(shadow.querySelector('style').textContent, /\.hidden\{display:none\}/);
+      assert.equal(Boolean(shadow.querySelector('[data-hex-plugin-native-panel]')), label === 'Plugins');
+      assert.equal(Boolean(shadow.querySelector('[data-black-window-settings-host]')), label === 'Settings');
+      await click(rail('Install'));
+      assert.equal(panel(), persistentInstaller, 'Return retains installer identity');
+      assert.equal(persistentHost.getAttribute('aria-hidden'), 'false');
+      assert.equal(persistentHost.classList.contains('hidden'), false);
+      assert.equal(shadow.querySelector('[data-hex-plugin-native-panel]'), null);
+      assert.equal(shadow.querySelector('[data-black-window-settings-host]'), null);
+    }
     assert.deepEqual(errors, []);
   } finally { dom.window.close(); }
 });

@@ -4,22 +4,40 @@ import {readFileSync} from 'node:fs';
 
 const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
 
-test('Install remains mounted rather than conditionally replaced by Plugins',()=>{
+test('Install remains mounted rather than conditionally replaced by Plugins or Settings',()=>{
  const host=read('src/SharedProductHost.tsx');
  const segment=host.slice(host.indexOf('root && createPortal('),host.indexOf('</>, root)'));
  assert.ok(segment.length>400,'Persistent portal must exist');
  assert.equal((segment.match(/<App\b/g)||[]).length,1,'One persistent App/installer instance');
  assert.match(segment,/data-hex-installer-state-host="persistent"/);
- assert.match(segment,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} visible=\{!pluginsVisible\} \/>/);
+ assert.match(segment,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} visible=\{!pluginsVisible\s*&&\s*!settingsVisible\} \/>/);
  assert.match(segment,/\{pluginsVisible && <div[^>]*data-hex-plugin-native-panel/);
+ assert.match(segment,/\{settingsVisible && <BlackWindowSettingsHost \/>/);
  assert.doesNotMatch(segment,/pluginsVisible\s*\?\s*<div[^>]*NativePluginMarketplace[\s\S]*:\s*<App/);
 });
 
 test('Hidden Install cannot receive focus or be seen by screen readers',()=>{
  const host=read('src/SharedProductHost.tsx');
- assert.match(host,/pluginsVisible \? 'hidden h-full min-h-0' : 'h-full min-h-0'/);
- assert.match(host,/aria-hidden=\{pluginsVisible\}/);
+ assert.match(host,/pluginsVisible\s*\|\|\s*settingsVisible \? 'hidden h-full min-h-0' : 'h-full min-h-0'/);
+ assert.match(host,/aria-hidden=\{pluginsVisible\s*\|\|\s*settingsVisible\}/);
  assert.doesNotMatch(host,/new WebviewWindow|window\.open\(/);
+});
+
+test('Both overlay flags gate the actual installer visibility and accessibility expressions',()=>{
+ const host=read('src/SharedProductHost.tsx');
+ const visible=host.match(/<App\b[^>]*visible=\{([^}]+)\}/)?.[1];
+ const hidden=host.match(/aria-hidden=\{([^}]+)\} data-hex-installer-state-host="persistent"/)?.[1];
+ const classes=host.match(/className=\{([^}]+)\}\s*aria-hidden=\{[^}]+\} data-hex-installer-state-host="persistent"/)?.[1];
+ assert.ok(visible && hidden && classes,'Actual persistent installer expressions are required');
+ for(const pluginsVisible of [false,true])for(const settingsVisible of [false,true]){
+  const evaluate=expression=>Function('pluginsVisible','settingsVisible','return ('+expression+');')(pluginsVisible,settingsVisible);
+  const obscured=pluginsVisible||settingsVisible;
+  assert.equal(evaluate(visible),!obscured,'Installer active only without either overlay');
+  assert.equal(evaluate(hidden),obscured,'Assistive visibility follows both overlays');
+  assert.equal(evaluate(classes),obscured?'hidden h-full min-h-0':'h-full min-h-0','Hidden overlay blocks display/focus');
+ }
+ assert.match(host,/if \(id === 'plugins'\) \{ setPluginsVisible\(true\); setSettingsVisible\(false\); return; \}/);
+ assert.match(host,/if \(id === 'settings'\) \{ setSettingsVisible\(true\); setPluginsVisible\(false\); return; \}/);
 });
 
 test('Leaving visible Install invalidates approval without losing reviewed plan',()=>{
