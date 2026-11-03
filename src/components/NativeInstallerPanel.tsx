@@ -29,6 +29,8 @@ export default function NativeInstallerPanel() {
   const [serverResult, setServerResult] = useState<any>(null);
   const [serverApproval, setServerApproval] = useState(false);
   const [serverRollbackApproval, setServerRollbackApproval] = useState(false);
+  const [revokeApproval, setRevokeApproval] = useState(false);
+  const [permissionResult, setPermissionResult] = useState<any>(null);
   const [availability, setAvailability] = useState(() => availabilityFrom(null));
   const [history, setHistory] = useState<Plan[]>([]);
   const [preflight, setPreflight] = useState<any>(null);
@@ -63,6 +65,8 @@ export default function NativeInstallerPanel() {
       if (request.action === 'server_prepare') {
         setServerPlan(result); setServerPlanDigest(result.server_plan_digest || '');
         setServerResult(null); setServerApproval(false); setServerRollbackApproval(false);
+      } else if (request.action === 'permission_replace') {
+        setPermissionResult(result.permission_profile || result); setRevokeApproval(false);
       } else {
         setServerResult(result);
         if (request.action === 'server_rollback') { setServerPlan(null); setServerPlanDigest(''); }
@@ -194,6 +198,12 @@ export default function NativeInstallerPanel() {
           </details>}
           {serverPlan && !serverInstalled && <><label className="block text-sm text-workspace-text"><input type="checkbox" checked={serverApproval} disabled={busy} onChange={e => setServerApproval(e.target.checked)} /> I approve this exact server package, user-service unit set and local startup. Required probes must pass or HEX rolls the package back.</label><button className={button} disabled={busy || !serverApproval || !serverPlanDigest} onClick={() => void runServer({action:'server_apply',plan_id:plan.plan_id,package_root:serverPackageRoot,server_plan:serverPlan,server_plan_digest:serverPlanDigest,approved:true})}>Install and start reviewed server profile</button></>}
           {serverInstalled && <><p role="status" className="text-sm text-workspace-success">Server package installed, services started and required local probes read back.</p><details className="hex-installer-disclosure text-xs"><summary>Server effect receipt</summary><pre className="hex-detail-scroll text-workspace-muted">{JSON.stringify(serverResult, null, 2)}</pre></details><label className="block text-sm text-workspace-text"><input type="checkbox" checked={serverRollbackApproval} disabled={busy} onChange={e => setServerRollbackApproval(e.target.checked)} /> Stop these user services and roll back only this server package.</label><button className={button} disabled={busy || !serverRollbackApproval || !serverPlanDigest} onClick={() => void runServer({action:'server_rollback',plan_id:plan.plan_id,server_plan:serverPlan,server_plan_digest:serverPlanDigest,approved:true})}>Roll back server package</button></>}
+          <div className="border-t border-workspace-border-strong/40 pt-3 space-y-2">
+            <h5 className="font-bold text-workspace-text">Permission management</h5>
+            <p className="text-xs text-workspace-muted">Revoking the grant blocks future service, central-update and hotpatch actions. It does not delete installed files or silently stop currently running services.</p>
+            {permissionResult?.revoked && <p role="status" className="text-sm text-workspace-success">Local effect grant revoked. Future managed effects require a new reviewed grant.</p>}
+            {!permissionResult?.revoked && <><label className="block text-sm text-workspace-text"><input type="checkbox" checked={revokeApproval} disabled={busy} onChange={e => setRevokeApproval(e.target.checked)} /> Revoke all HEX-managed effect permissions for this installation.</label><button className={button} disabled={busy || !revokeApproval || !plan.permission_profile?.permission_digest} onClick={() => void runServer({action:'permission_replace',plan_id:plan.plan_id,current_digest:plan.permission_profile.permission_digest,new_profile:{schema:'xiio.hex.permission-profile/v1',profile_id:'revoked-by-user',capabilities:[],service_scopes:[],update_policy:'off',central_updates:false,remote_access:false,revoked:true},approved:true})}>Revoke managed permissions</button></>}
+          </div>
         </div>}
       </div>}
       {busy && <p role="status" className="text-sm text-workspace-focus">Working on the real local request. Please keep HEX open; duplicate actions are disabled.</p>}
