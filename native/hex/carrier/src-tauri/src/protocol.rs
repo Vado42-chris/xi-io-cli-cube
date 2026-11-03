@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::{Component, Path};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -17,15 +18,43 @@ pub enum InstallerRequest {
     PrepareRepair { prefix: String, node: String, bin_dir: String },
     #[serde(rename = "apply_repair")]
     ApplyRepair { plan_id: String, approval_digest: String, approved: bool },
-    Prepare { prefix: String, node: String, components: Vec<String> },
+    Prepare { prefix: String, node: String, components: Vec<String>, permission_profile: Value },
     Readback { plan_id: String },
     Apply { plan_id: String, approval_digest: String, approved: bool },
     Rollback { plan_id: String, approval_digest: String, approved: bool },
+    #[serde(rename = "permission_replace")]
+    PermissionReplace { plan_id: String, current_digest: String, new_profile: Value, approved: bool },
+    #[serde(rename = "central_update_decision")]
+    CentralUpdateDecision { plan_id: String, request: Value },
+    #[serde(rename = "service_plan")]
+    ServicePlan { plan_id: String, service_ids: Vec<String> },
+    #[serde(rename = "service_start")]
+    ServiceStart { plan_id: String, service_ids: Vec<String>, service_plan_digest: String, approved: bool },
+    #[serde(rename = "service_stop")]
+    ServiceStop { plan_id: String, service_ids: Vec<String>, service_plan_digest: String, approved: bool },
+    #[serde(rename = "server_prepare")]
+    ServerPrepare { plan_id: String, package_root: String },
+    #[serde(rename = "server_apply")]
+    ServerApply { plan_id: String, package_root: String, server_plan: Value, server_plan_digest: String, approved: bool },
+    #[serde(rename = "server_rollback")]
+    ServerRollback { plan_id: String, server_plan: Value, server_plan_digest: String, approved: bool },
+    #[serde(rename = "hotpatch_prepare")]
+    HotpatchPrepare { plan_id: String, request: Value, package_root: String },
+    #[serde(rename = "hotpatch_apply")]
+    HotpatchApply { plan_id: String, request: Value, package_root: String, server_plan: Value, server_plan_digest: String, authorization: Value, approved: bool },
 }
 fn id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 fn lower_hex(s:&str,n:usize)->bool { s.len()==n && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
+fn bounded_object(v:&Value,max_bytes:usize)->bool {
+    v.is_object() && serde_json::to_vec(v).map(|b| b.len()<=max_bytes).unwrap_or(false)
+}
+fn service_ids(values:&[String])->bool {
+    !values.is_empty() && values.len()<=32
+        && values.iter().all(|v| id(v))
+        && values.iter().enumerate().all(|(i,v)| !values[..i].contains(v))
+}
 fn absolute(s: &str) -> bool {
     !s.contains('\0') && s.len() <= 4096 && Path::new(s).is_absolute()
         && !Path::new(s).components().any(|c| matches!(c, Component::ParentDir | Component::CurDir))
@@ -41,15 +70,37 @@ impl InstallerRequest {
             Self::Inspect { plan_id } => plan_id.as_deref().map(id).unwrap_or(true),
             Self::Readback { plan_id } => id(plan_id),
             Self::PrepareRepair { prefix, node, bin_dir } => absolute(prefix) && absolute(node) && absolute(bin_dir),
-            Self::Prepare { prefix, node, components } => absolute(prefix) && absolute(node)
+            Self::Prepare { prefix, node, components, permission_profile } => absolute(prefix) && absolute(node)
                 && (1..=3).contains(&components.len()) && components.iter().any(|x| x == "cli")
                 && components.iter().all(|x| ["cli", "bins", "switchboard"].contains(&x.as_str()))
-                && components.iter().enumerate().all(|(i, x)| !components[..i].contains(x)),
+                && components.iter().enumerate().all(|(i, x)| !components[..i].contains(x))
+                && bounded_object(permission_profile, 16 * 1024),
             Self::ApplyRepair { plan_id, approval_digest, approved }
             | Self::Apply { plan_id, approval_digest, approved }
             | Self::Rollback { plan_id, approval_digest, approved } => *approved && id(plan_id)
-                && approval_digest.len() == 64
-                && approval_digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                && lower_hex(approval_digest,64),
+            Self::PermissionReplace { plan_id, current_digest, new_profile, approved } =>
+                *approved && id(plan_id) && lower_hex(current_digest,64) && bounded_object(new_profile,16*1024),
+            Self::CentralUpdateDecision { plan_id, request } =>
+                id(plan_id) && bounded_object(request,16*1024),
+            Self::ServicePlan { plan_id, service_ids: ids } =>
+                id(plan_id) && service_ids(ids),
+            Self::ServiceStart { plan_id, service_ids: ids, service_plan_digest, approved }
+            | Self::ServiceStop { plan_id, service_ids: ids, service_plan_digest, approved } =>
+                *approved && id(plan_id) && service_ids(ids) && lower_hex(service_plan_digest,64),
+            Self::ServerPrepare { plan_id, package_root } =>
+                id(plan_id) && absolute(package_root),
+            Self::ServerApply { plan_id, package_root, server_plan, server_plan_digest, approved } =>
+                *approved && id(plan_id) && absolute(package_root)
+                && bounded_object(server_plan,128*1024) && lower_hex(server_plan_digest,64),
+            Self::ServerRollback { plan_id, server_plan, server_plan_digest, approved } =>
+                *approved && id(plan_id) && bounded_object(server_plan,128*1024) && lower_hex(server_plan_digest,64),
+            Self::HotpatchPrepare { plan_id, request, package_root } =>
+                id(plan_id) && absolute(package_root) && bounded_object(request,16*1024),
+            Self::HotpatchApply { plan_id, request, package_root, server_plan, server_plan_digest, authorization, approved } =>
+                *approved && id(plan_id) && absolute(package_root)
+                && bounded_object(request,16*1024) && bounded_object(server_plan,128*1024)
+                && bounded_object(authorization,16*1024) && lower_hex(server_plan_digest,64),
         };
         if valid { Ok(()) } else { Err("INVALID_INSTALLER_REQUEST") }
     }
@@ -60,7 +111,7 @@ mod tests {
     fn valid(s: &str) -> bool { serde_json::from_str::<InstallerRequest>(s).map(|r| r.validate().is_ok()).unwrap_or(false) }
     #[test] fn finite_protocol() {
         assert!(valid(r#"{"action":"inspect"}"#));
-        assert!(valid(r#"{"action":"prepare","prefix":"/home/a/xiio","node":"/usr/bin/node","components":["cli"]}"#));
+        assert!(valid(r#"{"action":"prepare","prefix":"/home/a/xiio","node":"/usr/bin/node","components":["cli"],"permission_profile":{"schema":"xiio.hex.permission-profile/v1","profile_id":"local-standard","capabilities":["install_files"],"service_scopes":[],"update_policy":"notify","central_updates":false,"remote_access":false,"revoked":false}}"#));
         assert!(!valid(r#"{"action":"inspect","command":"bash"}"#));
         assert!(!valid(r#"{"action":"exec","command":"bash"}"#));
         assert!(!valid(r#"{"action":"readback","plan_id":"../x"}"#));
