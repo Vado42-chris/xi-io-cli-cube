@@ -23,7 +23,7 @@ class Software(base.Native):
 
     def initialized(self):
         nodes = self.nodes()
-        matches = [n for n in nodes if n.get_name() == 'HEX software marketplace initialized' and self.visible(n)]
+        matches = [n for n in nodes if n.get_name() == 'HEX software marketplace initialized' and n.get_role() == self.ax.Role.STATUS_BAR and self.visible(n)]
         if not matches:
             # Bounded allowlisted failure categories only, never an AX tree dump.
             for node in nodes:

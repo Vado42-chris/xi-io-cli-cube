@@ -21,17 +21,20 @@ class Proof(unittest.TestCase):
                 m.Software(2,'3','a'*64,'b'*40,d,str(p))
     def test_initialization_requires_unique_visible_exact_label(self):
         native=m.Software.__new__(m.Software)
+        native.ax=type('Ax',(),{'Role':type('Role',(),{'STATUS_BAR':42})})()
         class Node:
-            def __init__(self,name,visible=True):self.name,self.visible=name,visible
+            def __init__(self,name,visible=True,role=42):self.name,self.visible,self.role=name,visible,role
             def get_name(self):return self.name
+            def get_role(self):return self.role
         native.visible=lambda n:n.visible
-        for nodes in [[],[Node('HEX software marketplace')],[Node('HEX software marketplace initialized',False)], [Node('HEX software marketplace initialized')]*2]:
+        for nodes in [[],[Node('HEX software marketplace')],[Node('HEX software marketplace initialized',False)],[Node('HEX software marketplace initialized',True,99)], [Node('HEX software marketplace initialized')]*2]:
             native.nodes=lambda:nodes
             with self.assertRaisesRegex(m.base.Unverified,'ARTCRAFT_INITIALIZATION_NOT_OBSERVED'):native.initialized()
         native.nodes=lambda:[Node('HEX software marketplace initialized')]
         self.assertTrue(native.initialized())
     def test_local_policy_failure_stays_typed(self):
         native=m.Software.__new__(m.Software)
+        native.ax=type('Ax',(),{'Role':type('Role',(),{'STATUS_BAR':42})})()
         class Node:
             def get_name(self):return 'ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED_WITH_UNATTRIBUTED_COMPILE_POLICY_EVENT'
         native.nodes=lambda:[Node()]

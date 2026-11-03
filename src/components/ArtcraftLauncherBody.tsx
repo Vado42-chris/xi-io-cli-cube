@@ -47,7 +47,11 @@ export default function ArtcraftLauncherBody({loadModule, lifecycle}: {loadModul
     };
   }, [loadModule, owner]);
   return <section aria-label="HEX launcher body" className="h-full min-h-0 relative" data-artcraft-mount-status={status}>
-    <canvas ref={canvas} aria-label={status === 'mounted' ? 'HEX software marketplace initialized' : 'HEX software marketplace'} className="w-full h-full block" />
-    {status !== 'mounted' && <p role={status === 'loading' ? 'status' : 'alert'}>{status}</p>}
+    <canvas ref={canvas} aria-label="HEX software marketplace" className="w-full h-full block" />
+    <p className="absolute top-3 left-3 right-3 pointer-events-none"
+      role={status === 'loading' || status === 'mounted' ? 'status' : 'alert'}
+      aria-label={status === 'mounted' ? 'HEX software marketplace initialized' : undefined}>
+      {status === 'mounted' ? 'ArtCraft launcher initialized' : status}
+    </p>
   </section>;
 }
