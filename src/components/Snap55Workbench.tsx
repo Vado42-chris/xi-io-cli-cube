@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {calculateDesktopSnap55} from '../math/snap55-desktop.mjs';
 
 // Synthetic example only; no profile, private health history, storage or network.
@@ -18,6 +18,52 @@ export default function Snap55Workbench() {
   const [source, setSource] = useState(EXAMPLE);
   const [output, setOutput] = useState<any>(null);
   const [error, setError] = useState('');
+  const [persistence, setPersistence] = useState('Native save not checked.');
+  const native = typeof (globalThis as any).__TAURI__?.core?.invoke === 'function';
+
+  useEffect(() => {
+    let live = true;
+    if (!native) { setPersistence('Open native HEX to save and restore this workbench.'); return; }
+    void (async () => {
+      try {
+        const result = await (globalThis as any).__TAURI__.core.invoke('snap55_state', {action:'load', source:null});
+        if (!live) return;
+        if (result?.state === 'LOADED_READBACK_VERIFIED' && typeof result.source === 'string') {
+          setSource(result.source);
+          try { setOutput(calculateDesktopSnap55(result.source)); setError(''); }
+          catch (failure) { setOutput(null); setError(failure instanceof Error ? failure.message : 'SNAP_CALCULATION_FAILED'); }
+          setPersistence('Saved input restored and read back from native HEX storage.');
+        } else {
+          setPersistence('No saved SNAP input on this computer yet.');
+        }
+      } catch (failure) {
+        if (live) setPersistence('Saved SNAP state could not be read. No restored state is claimed.');
+      }
+    })();
+    return () => { live = false; };
+  }, [native]);
+
+  async function save() {
+    if (!native) { setPersistence('Open native HEX to save this workbench.'); return; }
+    setError('');
+    try {
+      const result = await (globalThis as any).__TAURI__.core.invoke('snap55_state', {action:'save', source});
+      if (result?.state !== 'SAVED_READBACK_VERIFIED' || result?.source !== source) throw new Error('SNAP_SAVE_READBACK_UNVERIFIED');
+      setPersistence('Saved and read back. Reopening native HEX will restore this exact input.');
+    } catch (failure) {
+      setPersistence('Save failed or readback was not verified. Nothing is claimed saved.');
+    }
+  }
+  async function clearSaved() {
+    if (!native) { setPersistence('Open native HEX to clear saved workbench state.'); return; }
+    try {
+      const result = await (globalThis as any).__TAURI__.core.invoke('snap55_state', {action:'clear', source:null});
+      if (result?.state !== 'CLEARED_READBACK_VERIFIED') throw new Error('SNAP_CLEAR_READBACK_UNVERIFIED');
+      setPersistence('Saved SNAP input cleared and read back.');
+    } catch {
+      setPersistence('Saved SNAP state could not be cleared.');
+    }
+  }
   function calculate() {
     setError('');
     setOutput(null);
@@ -43,9 +89,18 @@ export default function Snap55Workbench() {
         className="w-full min-h-[260px] font-mono text-xs p-3 border border-workspace-border-strong bg-workspace-canvas text-workspace-text"
         aria-label="SNAP 5.5 input JSON"
       />
-      <button type="button" onClick={calculate} className="min-h-[44px] px-4 py-2 bg-workspace-focus text-workspace-inverse font-semibold focus-visible:ring-2 focus-visible:ring-workspace-focus">
-        Calculate locally
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={calculate} className="min-h-[44px] px-4 py-2 bg-workspace-focus text-workspace-inverse font-semibold focus-visible:ring-2 focus-visible:ring-workspace-focus">
+          Calculate locally
+        </button>
+        <button type="button" onClick={() => void save()} disabled={!native} className="min-h-[44px] px-4 py-2 border border-workspace-border-strong text-workspace-text disabled:opacity-40">
+          Save on this computer
+        </button>
+        <button type="button" onClick={() => void clearSaved()} disabled={!native} className="min-h-[44px] px-4 py-2 border border-workspace-border-strong text-workspace-muted disabled:opacity-40">
+          Clear saved input
+        </button>
+      </div>
+      <p role="status" data-snap55-persistence className="text-xs text-workspace-muted">{persistence}</p>
     </div>
     {error && <p role="alert" data-snap55-error className="text-sm text-workspace-danger">Calculation rejected: {error}</p>}
     {output && <div role="status" data-snap55-result className="space-y-2 border-t border-workspace-border pt-3" aria-live="polite">
