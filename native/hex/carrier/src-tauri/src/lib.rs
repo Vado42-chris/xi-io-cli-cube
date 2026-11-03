@@ -1,5 +1,6 @@
 mod chooser;
 mod protocol;
+mod state;
 mod transport;
 use protocol::InstallerRequest;
 use serde_json::{json, Value};
@@ -57,7 +58,7 @@ fn native_product_window(window:WebviewWindow, action:String, direction:Option<S
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){
     tauri::Builder::default().manage(Arc::new(Mutex::new(())) as transport::Gate)
-        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,chooser::native_select_directory])
+        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,chooser::native_select_directory,state::snap55_state])
         .setup(|app|{
             WebviewWindowBuilder::new(app,"hex",WebviewUrl::App("index.html".into()))
                 .title("XI-IO HEX").inner_size(1440.,900.).min_inner_size(720.,480.)
