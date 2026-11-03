@@ -62,13 +62,23 @@ def children(proc, pid):
 
 def frontend_observation(item):
     keys = {'sample', 'errors', 'nodes', 'root_children', 'document_visible', 'raf', 'shadow'}
-    if not isinstance(item, dict) or set(item) != keys:
+    # Historical fixed-shape observations remain readable. New native
+    # generations may append only the bounded CSP pair, never a blocked URL.
+    if not isinstance(item, dict) or set(item) not in (keys, keys | {'csp'}):
         return None
     integer = lambda x, high: type(x) is int and 0 <= x <= high
     if not integer(item['sample'], 2):
         return None
     if any(type(item[k]) is not bool for k in ('root_children', 'document_visible', 'raf', 'shadow')):
         return None
+    if 'csp' in item:
+        csp = item['csp']
+        if not isinstance(csp, list) or len(csp) != 2:
+            return None
+        if not integer(csp[0], 7) or not integer(csp[1], 5):
+            return None
+        if csp[0] == 0 and csp[1] != 0:
+            return None
     errors, nodes = item['errors'], item['nodes']
     if not isinstance(errors, list) or len(errors) != 5 or not all(integer(x, 255) for x in errors):
         return None
@@ -81,7 +91,7 @@ def frontend_observation(item):
             return None
         if n[0] == 0 and any(n[1:]):
             return None
-    return item  # Exact keys, primitive bounded values only; no strings.
+    return item  # Exact legacy/new keys, primitive bounded values only; no strings.
 
 
 def events(path):
