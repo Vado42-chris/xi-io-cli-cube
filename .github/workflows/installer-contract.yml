@@ -119,6 +119,10 @@ jobs:
         run: |
           set -euo pipefail
           PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s native/hex/adapter -p test_bundle.py -v
+      - name: Verify user permission, server package start/readback and rollback contracts
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest             native.hex.adapter.test_permission_profile             native.hex.adapter.test_server_profile -v
       - name: Keep composed payload installation distinct from running product/remote authority
         run: |
           echo "CHILD_BUNDLE_SOURCE_AND_DISPOSABLE_FILESYSTEM_TEST_ONLY"
