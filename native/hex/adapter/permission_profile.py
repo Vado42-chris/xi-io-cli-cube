@@ -114,3 +114,46 @@ def authorize_central_request(profile,request):
   'hard':['CENTRAL_REQUEST!=LOCAL_AUTHORITY','PROFILE_ALLOW!=EFFECT_AUTHORITY',
           'AUTO_ELIGIBLE!=EFFECT_EXECUTED','ROLLBACK_REQUIRED'],
  }
+
+
+def _grant_path(base,plan_id):
+ from pathlib import Path
+ if not isinstance(plan_id,str) or len(plan_id)!=32 or any(c not in '0123456789abcdef' for c in plan_id):
+  raise ValueError('PERMISSION_PLAN_ID_INVALID')
+ root=Path(base)/'permissions'
+ root.mkdir(parents=True,exist_ok=True,mode=0o700)
+ return root/(plan_id+'.json')
+
+def save_grant(base,plan_id,profile):
+ """Persist a reviewed permission ceiling atomically. No effect is performed."""
+ import os, tempfile
+ p=compile_profile({k:v for k,v in profile.items() if k!='permission_digest'})
+ target=_grant_path(base,plan_id)
+ payload=json.dumps(p,sort_keys=True,separators=(',',':')).encode()+b'\n'
+ fd,tmp=tempfile.mkstemp(dir=target.parent,prefix='.permission-')
+ try:
+  with os.fdopen(fd,'wb') as out:
+   out.write(payload);out.flush();os.fsync(out.fileno())
+  os.chmod(tmp,0o600);os.replace(tmp,target)
+ finally:
+  if os.path.exists(tmp):os.unlink(tmp)
+ if target.read_bytes()!=payload: raise ValueError('PERMISSION_GRANT_READBACK_MISMATCH')
+ return p
+
+def load_grant(base,plan_id):
+ p=_grant_path(base,plan_id)
+ try: raw=p.read_bytes()
+ except FileNotFoundError: raise ValueError('PERMISSION_GRANT_NOT_FOUND')
+ try: doc=json.loads(raw)
+ except ValueError: raise ValueError('PERMISSION_GRANT_INVALID')
+ checked=compile_profile({k:v for k,v in doc.items() if k!='permission_digest'})
+ if doc.get('permission_digest')!=checked['permission_digest']:
+  raise ValueError('PERMISSION_GRANT_DIGEST_MISMATCH')
+ return checked
+
+def replace_grant(base,plan_id,current_digest,new_profile,approved):
+ if approved is not True: raise ValueError('EXPLICIT_PERMISSION_CHANGE_APPROVAL_REQUIRED')
+ current=load_grant(base,plan_id)
+ if current['permission_digest']!=current_digest: raise ValueError('PERMISSION_CURRENTNESS_CHANGED')
+ new=compile_profile(new_profile)
+ return save_grant(base,plan_id,new)
