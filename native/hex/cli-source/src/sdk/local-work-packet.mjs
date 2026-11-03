@@ -156,6 +156,68 @@ export function compileLocalWorkPacket(input = {}) {
   return Object.freeze(withDigest);
 }
 
+export const AUTHORITATIVE_WORK_PACKET_SCHEMA = 'xiio.cli.authoritative-work-packet/v1';
+
+function requiredIdentity(value, field, max = 512) {
+  const out = clean(value, max);
+  if (!out) throw Object.assign(new Error(field + '_REQUIRED'), {code: field + '_REQUIRED'});
+  return out;
+}
+
+/**
+ * Project an already-accepted local packet onto the canonical Work identity
+ * required by the existing Ibal/Switchboard binding materializer.
+ *
+ * This does not accept Work, grant authority, write provider stores, or mint
+ * missing identity. Every canonical identity input must be supplied by its
+ * existing owner.
+ *
+ * Hard:
+ * LOCAL_PACKET_ACCEPTED != CANONICAL_WORK_BOUND
+ * WORK_UUID != PACKET_ID
+ * LOCAL_PATH != AUTHORITY
+ * PROJECTION != EFFECT_AUTHORITY
+ */
+export function compileAuthoritativeWorkPacket({localPacket, identity} = {}) {
+  if (!localPacket || typeof localPacket !== 'object') {
+    throw Object.assign(new Error('LOCAL_PACKET_REQUIRED'), {code: 'LOCAL_PACKET_REQUIRED'});
+  }
+  const packet = compileLocalWorkPacket(localPacket);
+  if (!identity || typeof identity !== 'object' || Array.isArray(identity)) {
+    throw Object.assign(new Error('CANONICAL_IDENTITY_REQUIRED'), {code: 'CANONICAL_IDENTITY_REQUIRED'});
+  }
+  const projected = {
+    schema: AUTHORITATIVE_WORK_PACKET_SCHEMA,
+    packet_id: packet.packet_id,
+    accepted: true,
+    pinned_source: packet.pinned_source,
+    workspace_root: packet.workspace_root,
+    semantic_digest: packet.semantic_digest,
+    punch_card_digest: requiredIdentity(identity.punch_card_digest, 'PUNCH_CARD_DIGEST', 256),
+    work_uuid: requiredIdentity(identity.work_uuid, 'WORK_UUID', 256),
+    project_id: identity.project_id == null ? null : requiredIdentity(identity.project_id, 'PROJECT_ID', 256),
+    assignment_ref: requiredIdentity(identity.assignment_ref, 'ASSIGNMENT_REF', 256),
+    attempt_ref: requiredIdentity(identity.attempt_ref, 'ATTEMPT_REF', 256),
+    source_generation: requiredIdentity(identity.source_generation, 'SOURCE_GENERATION', 256),
+    operation_ref: requiredIdentity(identity.operation_ref, 'OPERATION_REF', 256),
+    claim_ref: requiredIdentity(identity.claim_ref, 'CLAIM_REF', 256),
+    claim_generation: requiredIdentity(identity.claim_generation, 'CLAIM_GENERATION', 256),
+    authority_ref: requiredIdentity(identity.authority_ref, 'AUTHORITY_REF', 256),
+    return_ref: requiredIdentity(identity.return_ref ?? identity.return_target_ref, 'RETURN_REF', 512),
+    return_target_ref: requiredIdentity(identity.return_target_ref ?? identity.return_ref, 'RETURN_TARGET_REF', 512),
+    local_packet_schema: packet.schema,
+    local_packet_semantic_digest: packet.semantic_digest,
+    effect_authority: false,
+  };
+  if (projected.return_ref !== projected.return_target_ref) {
+    throw Object.assign(new Error('RETURN_TARGET_MISMATCH'), {code: 'RETURN_TARGET_MISMATCH'});
+  }
+  if (projected.work_uuid === projected.packet_id) {
+    throw Object.assign(new Error('WORK_UUID_PACKET_ID_COLLISION'), {code: 'WORK_UUID_PACKET_ID_COLLISION'});
+  }
+  return Object.freeze(projected);
+}
+
 export function isContinuationPhrase(text) {
   const line = clean(text, 512);
   if (!line) return false;
