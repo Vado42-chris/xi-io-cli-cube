@@ -12,6 +12,7 @@ import connection_profile
 import install_preflight
 import local_step_actions
 import permission_profile
+import service_profile
 from xiio_installer.observability import OperationJournal, inspect_operation
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
@@ -339,7 +340,7 @@ def handle_repair(req,base,p):
 
 def handle(req):
     demand(isinstance(req,dict),'REQUEST_OBJECT_REQUIRED')
-    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components','permission_profile'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
+    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components','permission_profile'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'permission_replace':{'action','plan_id','current_digest','new_profile','approved'},'central_update_decision':{'action','plan_id','request'},'service_plan':{'action','plan_id','service_ids'},'service_start':{'action','plan_id','service_ids','service_plan_digest','approved'},'service_stop':{'action','plan_id','service_ids','service_plan_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
     act=req.get('action');demand(act in allowed and set(req)<=allowed[act],'REQUEST_FIELDS_INVALID')
     base=root();lock=base/'native-adapter.lock'
     fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
@@ -380,6 +381,24 @@ def handle(req):
         if p.get('kind')=='launcher_repair':return handle_repair(req,base,p)
         demand(act!='apply_repair','INSTALL_PLAN_ACTION_MISMATCH')
         if act=='inspect': return view
+        if act=='permission_replace':
+            return {'permission_profile':permission_profile.replace_grant(base,p['plan_id'],req.get('current_digest'),req.get('new_profile'),req.get('approved')),'effect_authorized':False}
+        if act in ['central_update_decision','service_plan','service_start','service_stop']:
+            demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and not view['do_not_retry'],'VERIFIED_INSTALLED_CLI_REQUIRED')
+            op=observation(base,p,'apply')
+            demand(digest(canonical(tree(Path(p['prefix']))))==op['events'][-1]['details'].get('destination_tree_digest'),'INSTALLED_STATE_DRIFT')
+            installed(p,expected_generation=op['events'][-1]['details'].get('generation'))
+            grant=permission_profile.load_grant(base,p['plan_id'])
+            if act=='central_update_decision':
+                return permission_profile.authorize_central_request(grant,req.get('request'))
+            catalog=service_profile.load_catalog(SOURCE)
+            service_plan=service_profile.compile_service_plan(catalog,grant,req.get('service_ids'))
+            service_plan_digest=digest(canonical(service_plan))
+            if act=='service_plan':
+                return {**service_plan,'service_plan_digest':service_plan_digest}
+            demand(req.get('service_plan_digest')==service_plan_digest,'SERVICE_PLAN_CHANGED_SINCE_REVIEW')
+            effect=service_profile.apply_service_action(service_plan,grant,'start' if act=='service_start' else 'stop',req.get('approved'))
+            return {**effect,'service_plan_digest':service_plan_digest}
         if act=='safe_task_inspect':return local_step_actions.handle(req,base,p,None)
         if act in ['local_ai_status','safe_task_prepare','safe_task_apply']:
             demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and not view['do_not_retry'],'VERIFIED_INSTALLED_CLI_REQUIRED')
@@ -398,8 +417,9 @@ def handle(req):
             cr=connection_profile.readback(base,p,SOURCE/'connection',op['events'][-1]['details'].get('connection_receipt_sha256'),view['phase']=='ROLLED_BACK')
             return {**view,'readback':rb,'connection_readback':cr,'connection_state':'CONFIGURATION_REQUIRED','connected':False,'observation_current':True}
         demand(req.get('approved') is True and req.get('approval_digest')==p['approval_digest'],'EXACT_APPROVAL_REQUIRED')
-        permissions=permission_profile.require_capability(p.get('permission_profile',{}),'install_files')
-        demand(permissions['permission_digest']==p.get('permission_digest'),'PERMISSION_DIGEST_CHANGED')
+        if act=='apply':
+            permissions=permission_profile.require_capability(p.get('permission_profile',{}),'install_files')
+            demand(permissions['permission_digest']==p.get('permission_digest'),'PERMISSION_DIGEST_CHANGED')
         demand(not view['do_not_retry'],'UNCERTAIN_OUTCOME_DO_NOT_RETRY')
         verify_node(p)
         demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
@@ -429,8 +449,21 @@ def handle(req):
                 connection_profile.revert(base,p,SOURCE/'connection',connection_receipt['receipt_sha256'])
             rb=installed(p,p.get('previous_source_sha') if act=='rollback' else None)
             cr=connection_profile.readback(base,p,SOURCE/'connection',connection_receipt['receipt_sha256'],act=='rollback')
-            journal.finish('passed' if act=='apply' else 'rolled_back','CLI generation and independent version readback verified',expected_action=act,details={'generation':rb['generation'],'source_sha':rb['source_sha'],'approval_digest':p['approval_digest'],'destination_tree_digest':digest(canonical(tree(Path(p['prefix'])))),'connection_receipt_sha256':connection_receipt['receipt_sha256']})
-            return {**project(base,p),'readback':rb,'connection_readback':cr,'connection_state':'CONFIGURATION_REQUIRED','connected':False,'observation_current':True}
+            permission_state='UNCHANGED'
+            try:
+                if act=='apply':
+                    permission_profile.save_grant(base,p['plan_id'],p['permission_profile'])
+                    permission_state='GRANT_READBACK_VERIFIED'
+                else:
+                    permission_profile.save_grant(base,p['plan_id'],{
+                      'schema':permission_profile.SCHEMA,'profile_id':'revoked-after-rollback',
+                      'capabilities':[],'service_scopes':[],'update_policy':'off',
+                      'central_updates':False,'remote_access':False,'revoked':True})
+                    permission_state='REVOKED_AFTER_ROLLBACK'
+            except Exception:
+                permission_state='GRANT_READBACK_UNCONFIRMED'
+            journal.finish('passed' if act=='apply' else 'rolled_back','CLI generation and independent version readback verified',expected_action=act,details={'generation':rb['generation'],'source_sha':rb['source_sha'],'approval_digest':p['approval_digest'],'destination_tree_digest':digest(canonical(tree(Path(p['prefix'])))),'connection_receipt_sha256':connection_receipt['receipt_sha256'],'permission_state':permission_state})
+            return {**project(base,p),'readback':rb,'connection_readback':cr,'permission_state':permission_state,'connection_state':'CONFIGURATION_REQUIRED','connected':False,'observation_current':True}
         except Exception:
             connection_recovery='NOT_ATTEMPTED'
             if act=='apply' and connection_receipt:
