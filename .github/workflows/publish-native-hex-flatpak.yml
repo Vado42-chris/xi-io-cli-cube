@@ -1,0 +1,108 @@
+name: Publish native HEX Flatpak release
+
+on:
+  push:
+    tags:
+      - 'hex-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hex-native-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact release source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Use qualified Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+
+      - name: Install native and Flatpak build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 flatpak flatpak-builder
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.gnome.Platform//46 org.gnome.Sdk//46
+
+      - name: Build exact native HEX product
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix native/hex/carrier --no-audit --no-fund
+          npm run lint
+          npm run native:build
+          test -x native/hex/carrier/src-tauri/target/release/xi-io-hex-dev
+
+      - name: Build Flatpak repository and standalone bundle
+        run: |
+          set -euo pipefail
+          bash scripts/build-flatpak.sh
+          test -s dist/flatpak/com.xiio.hex.flatpak
+          sha256sum dist/flatpak/com.xiio.hex.flatpak | tee dist/flatpak/SHA256SUMS
+          printf '%s\n' "${GITHUB_SHA}" > dist/flatpak/SOURCE_SHA
+          python3 - <<'PY'
+          import hashlib,json,pathlib,os
+          root=pathlib.Path('dist/flatpak')
+          bundle=root/'com.xiio.hex.flatpak'
+          data=bundle.read_bytes()
+          doc={
+            'schema':'xiio.hex.native-release/v1',
+            'source_sha':os.environ['GITHUB_SHA'],
+            'artifact':bundle.name,
+            'sha256':hashlib.sha256(data).hexdigest(),
+            'bytes':len(data),
+            'app_id':'com.xiio.hex',
+            'branch':'stable',
+            'binary':'xi-io-hex-dev',
+            'runtime_credit':0,
+            'hard':['RELEASE_ASSET!=INSTALLED_PRODUCT','INSTALLED_PRODUCT!=USER_ACTION_PROOF']
+          }
+          (root/'release-manifest.json').write_text(json.dumps(doc,indent=2,sort_keys=True)+'\n')
+          PY
+
+      - name: Publish source-bound GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "RELEASE_ALREADY_EXISTS=$tag"
+          else
+            gh release create "$tag" --verify-tag --target "$GITHUB_SHA" --title "XI-IO HEX $tag" --notes "Native HEX Flatpak built from exact source $GITHUB_SHA."
+          fi
+          gh release upload "$tag"             dist/flatpak/com.xiio.hex.flatpak             dist/flatpak/SHA256SUMS             dist/flatpak/SOURCE_SHA             dist/flatpak/release-manifest.json             --clobber
+
+      - name: Read back published release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" --json tagName,targetCommitish,assets > dist/flatpak/published-release.json
+          grep -F 'com.xiio.hex.flatpak' dist/flatpak/published-release.json
+          grep -F 'release-manifest.json' dist/flatpak/published-release.json
+
+      - name: Preserve build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiio-hex-native-release-${{ github.sha }}
+          path: dist/flatpak/
+          if-no-files-found: error
+          retention-days: 30
