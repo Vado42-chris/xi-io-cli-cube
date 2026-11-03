@@ -60,9 +60,10 @@ test('native SNAP useful action saves, readbacks, closes and restores on next bo
     const textarea=first.shadow.querySelector('[data-hex-snap55-workbench] textarea');
     assert.ok(textarea);
     const edited=textarea.value.replace('"example-a": 4','"example-a": 3');
-    textarea.value=edited;
+    const valueSetter=Object.getOwnPropertyDescriptor(first.w.HTMLTextAreaElement.prototype,'value')?.set;
+    assert.equal(typeof valueSetter,'function');
+    valueSetter.call(textarea,edited);
     textarea.dispatchEvent(new first.w.Event('input',{bubbles:true,composed:true}));
-    textarea.dispatchEvent(new first.w.Event('change',{bubbles:true,composed:true}));
     await pause(30);
     const button=label=>[...first.shadow.querySelectorAll('button')].find(x=>x.textContent.trim()===label);
     await first.click(button('Calculate locally'));
