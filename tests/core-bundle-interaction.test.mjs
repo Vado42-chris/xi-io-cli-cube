@@ -103,6 +103,31 @@ for (const [phase, response, hasApproval, isUnknown] of [
   });
 }
 
+test('native reopen restores installed core bytes from independent inspection', async () => {
+  const view = await mount(request => {
+    assert.equal(request.action, 'bundle_inspect');
+    return success(installed);
+  });
+  try {
+    await until(() => view.panel.textContent.includes('Verified child bytes installed'));
+    assert.equal(view.requests.filter(request => request.action === 'bundle_inspect').length, 1);
+    assert.equal(view.apply(), undefined, 'reopen must not offer a duplicate install');
+    assert.equal(view.unknown(), false, 'installed bytes are known, not uncertain');
+  } finally { view.dom.window.close(); }
+});
+
+test('native reopen surfaces the missing core release instead of silence', async () => {
+  const view = await mount(request => {
+    assert.equal(request.action, 'bundle_inspect');
+    return success({phase: 'BLOCKED_RELEASE_PROFILE_UNPUBLISHED', installable: false});
+  });
+  try {
+    await until(() => view.panel.textContent.includes('qualified release package manifest is not yet shipped'));
+    assert.equal(view.requests.filter(request => request.action === 'bundle_inspect').length, 1);
+    assert.equal(view.apply(), undefined);
+  } finally { view.dom.window.close(); }
+});
+
 test('successful apply then nonretryable installed inspection stays known without offering duplicate apply', async () => {
   let applied = false;
   const view = await mount(request => {
