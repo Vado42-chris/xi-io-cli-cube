@@ -13,6 +13,7 @@ import install_preflight
 import local_step_actions
 import permission_profile
 import service_profile
+import server_profile
 from xiio_installer.observability import OperationJournal, inspect_operation
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
@@ -340,7 +341,7 @@ def handle_repair(req,base,p):
 
 def handle(req):
     demand(isinstance(req,dict),'REQUEST_OBJECT_REQUIRED')
-    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components','permission_profile'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'permission_replace':{'action','plan_id','current_digest','new_profile','approved'},'central_update_decision':{'action','plan_id','request'},'service_plan':{'action','plan_id','service_ids'},'service_start':{'action','plan_id','service_ids','service_plan_digest','approved'},'service_stop':{'action','plan_id','service_ids','service_plan_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
+    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components','permission_profile'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'permission_replace':{'action','plan_id','current_digest','new_profile','approved'},'central_update_decision':{'action','plan_id','request'},'service_plan':{'action','plan_id','service_ids'},'service_start':{'action','plan_id','service_ids','service_plan_digest','approved'},'service_stop':{'action','plan_id','service_ids','service_plan_digest','approved'},'server_prepare':{'action','plan_id','package_root'},'server_apply':{'action','plan_id','package_root','server_plan','server_plan_digest','approved'},'server_rollback':{'action','plan_id','server_plan','server_plan_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
     act=req.get('action');demand(act in allowed and set(req)<=allowed[act],'REQUEST_FIELDS_INVALID')
     base=root();lock=base/'native-adapter.lock'
     fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
@@ -399,6 +400,23 @@ def handle(req):
             demand(req.get('service_plan_digest')==service_plan_digest,'SERVICE_PLAN_CHANGED_SINCE_REVIEW')
             effect=service_profile.apply_service_action(service_plan,grant,'start' if act=='service_start' else 'stop',req.get('approved'))
             return {**effect,'service_plan_digest':service_plan_digest}
+        if act in ['server_prepare','server_apply','server_rollback']:
+            demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and not view['do_not_retry'],'VERIFIED_INSTALLED_CLI_REQUIRED')
+            op=observation(base,p,'apply')
+            demand(digest(canonical(tree(Path(p['prefix']))))==op['events'][-1]['details'].get('destination_tree_digest'),'INSTALLED_STATE_DRIFT')
+            installed(p,expected_generation=op['events'][-1]['details'].get('generation'))
+            grant=permission_profile.load_grant(base,p['plan_id'])
+            if act=='server_prepare':
+                server_plan=server_profile.prepare_server_package(req.get('package_root'),Path.home(),grant)
+                return {**server_plan,'server_plan_digest':digest(canonical(server_plan))}
+            reviewed=req.get('server_plan')
+            demand(isinstance(reviewed,dict),'SERVER_PLAN_REQUIRED')
+            demand(req.get('server_plan_digest')==digest(canonical(reviewed)),'SERVER_PLAN_DIGEST_MISMATCH')
+            receipt=base/'server-packages'/(p['plan_id']+'.receipt.json')
+            receipt.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            if act=='server_apply':
+                return server_profile.apply_server_package(req.get('package_root'),Path.home(),grant,reviewed,receipt,req.get('approved'))
+            return server_profile.rollback_server_package(Path.home(),grant,reviewed,receipt,req.get('approved'))
         if act=='safe_task_inspect':return local_step_actions.handle(req,base,p,None)
         if act in ['local_ai_status','safe_task_prepare','safe_task_apply']:
             demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and not view['do_not_retry'],'VERIFIED_INSTALLED_CLI_REQUIRED')
