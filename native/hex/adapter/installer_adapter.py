@@ -341,7 +341,7 @@ def handle_repair(req,base,p):
 
 def handle(req):
     demand(isinstance(req,dict),'REQUEST_OBJECT_REQUIRED')
-    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components','permission_profile'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'permission_replace':{'action','plan_id','current_digest','new_profile','approved'},'central_update_decision':{'action','plan_id','request'},'service_plan':{'action','plan_id','service_ids'},'service_start':{'action','plan_id','service_ids','service_plan_digest','approved'},'service_stop':{'action','plan_id','service_ids','service_plan_digest','approved'},'server_prepare':{'action','plan_id','package_root'},'server_apply':{'action','plan_id','package_root','server_plan','server_plan_digest','approved'},'server_rollback':{'action','plan_id','server_plan','server_plan_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
+    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components','permission_profile'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'permission_replace':{'action','plan_id','current_digest','new_profile','approved'},'central_update_decision':{'action','plan_id','request'},'service_plan':{'action','plan_id','service_ids'},'service_start':{'action','plan_id','service_ids','service_plan_digest','approved'},'service_stop':{'action','plan_id','service_ids','service_plan_digest','approved'},'server_prepare':{'action','plan_id','package_root'},'server_apply':{'action','plan_id','package_root','server_plan','server_plan_digest','approved'},'server_rollback':{'action','plan_id','server_plan','server_plan_digest','approved'},'hotpatch_prepare':{'action','plan_id','request','package_root'},'hotpatch_apply':{'action','plan_id','request','package_root','server_plan','server_plan_digest','authorization','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
     act=req.get('action');demand(act in allowed and set(req)<=allowed[act],'REQUEST_FIELDS_INVALID')
     base=root();lock=base/'native-adapter.lock'
     fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
@@ -417,6 +417,32 @@ def handle(req):
             if act=='server_apply':
                 return server_profile.apply_server_package(req.get('package_root'),Path.home(),grant,reviewed,receipt,req.get('approved'))
             return server_profile.rollback_server_package(Path.home(),grant,reviewed,receipt,req.get('approved'))
+        if act in ['hotpatch_prepare','hotpatch_apply']:
+            demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and not view['do_not_retry'],'VERIFIED_INSTALLED_CLI_REQUIRED')
+            op=observation(base,p,'apply')
+            demand(digest(canonical(tree(Path(p['prefix']))))==op['events'][-1]['details'].get('destination_tree_digest'),'INSTALLED_STATE_DRIFT')
+            installed(p,expected_generation=op['events'][-1]['details'].get('generation'))
+            grant=permission_profile.load_grant(base,p['plan_id'])
+            decision=permission_profile.authorize_central_request(grant,req.get('request'))
+            server_plan=server_profile.prepare_server_package(req.get('package_root'),Path.home(),grant)
+            server_plan_digest=digest(canonical(server_plan))
+            if act=='hotpatch_prepare':
+                return {'schema':'xiio.hex.hotpatch-plan/v1','decision':decision,
+                        'server_plan':server_plan,'server_plan_digest':server_plan_digest,
+                        'effect_authorized':False}
+            reviewed=req.get('server_plan')
+            demand(isinstance(reviewed,dict) and req.get('server_plan_digest')==digest(canonical(reviewed)),
+                   'HOTPATCH_SERVER_PLAN_CHANGED')
+            demand(server_plan_digest==req.get('server_plan_digest') and server_plan==reviewed,
+                   'HOTPATCH_PACKAGE_CHANGED_SINCE_REVIEW')
+            auth=permission_profile.require_effect_authorization(
+                decision,req.get('authorization'),req.get('approved') is True)
+            receipt=base/'server-hotpatches'/(p['plan_id']+'-'+str(decision.get('request_id')).replace('/','_')+'.receipt.json')
+            receipt.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            effect=server_profile.apply_server_package(
+                req.get('package_root'),Path.home(),grant,reviewed,receipt,True)
+            return {'schema':'xiio.hex.hotpatch-effect/v1','decision':decision,
+                    'authorization':auth,'effect':effect,'effect_authorized':True}
         if act=='safe_task_inspect':return local_step_actions.handle(req,base,p,None)
         if act in ['local_ai_status','safe_task_prepare','safe_task_apply']:
             demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and not view['do_not_retry'],'VERIFIED_INSTALLED_CLI_REQUIRED')
