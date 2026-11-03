@@ -90,16 +90,18 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           if [[ "${GITHUB_REF_TYPE}" = "branch" && "${GITHUB_REF_NAME}" = "release/native-hex" ]]; then
             tag="hex-v0.0.0-${GITHUB_SHA:0:12}"
-            if ! git rev-parse "$tag" >/dev/null 2>&1; then
-              git tag "$tag" "$GITHUB_SHA"
-              git push origin "$tag"
+            if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+              gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$tag" \
+                -f sha="$GITHUB_SHA" >/dev/null
             fi
           elif [[ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]]; then
             tag="${{ inputs.release_tag }}"
             [[ "$tag" =~ ^hex-v[0-9A-Za-z._-]+$ ]] || { echo "INVALID_RELEASE_TAG=$tag"; exit 2; }
-            if ! git rev-parse "$tag" >/dev/null 2>&1; then
-              git tag "$tag" "$GITHUB_SHA"
-              git push origin "$tag"
+            if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+              gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$tag" \
+                -f sha="$GITHUB_SHA" >/dev/null
             fi
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
