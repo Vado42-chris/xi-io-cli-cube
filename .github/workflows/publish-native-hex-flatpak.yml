@@ -5,6 +5,11 @@ on:
     tags:
       - 'hex-v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag, e.g. hex-v0.1.0-dev.10'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -81,6 +86,14 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]]; then
+            tag="${{ inputs.release_tag }}"
+            [[ "$tag" =~ ^hex-v[0-9A-Za-z._-]+$ ]] || { echo "INVALID_RELEASE_TAG=$tag"; exit 2; }
+            if ! git rev-parse "$tag" >/dev/null 2>&1; then
+              git tag "$tag" "$GITHUB_SHA"
+              git push origin "$tag"
+            fi
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "RELEASE_ALREADY_EXISTS=$tag"
           else
@@ -94,6 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
+          [[ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]] && tag="${{ inputs.release_tag }}"
           gh release view "$tag" --json tagName,targetCommitish,assets > dist/flatpak/published-release.json
           grep -F 'com.xiio.hex.flatpak' dist/flatpak/published-release.json
           grep -F 'release-manifest.json' dist/flatpak/published-release.json
