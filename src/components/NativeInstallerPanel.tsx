@@ -5,7 +5,8 @@ import {selectNativeDirectory} from '../lib/nativeDirectory.mjs';
 import {availabilityFrom, availableSelection, canPrepareComponents, canRollbackPlan, installerComponents} from '../lib/installerAvailability.mjs';
 
 type Plan = {plan_id: string; phase: string; prefix?: string; components?: string[]; approval_digest?: string; payload_files?: number; payload_bytes?: number; created_at?: string; [key: string]: any};
-type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true};
+type PermissionProfile = {schema:'xiio.hex.permission-profile/v1';profile_id:string;capabilities:string[];service_scopes:string[];update_policy:'off'|'notify'|'review_each'|'auto_security';central_updates:boolean;remote_access:boolean;revoked:boolean};
+type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]; permission_profile: PermissionProfile} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true};
 
 /** Local native controls within the accepted Cube design, not another launcher. */
 export default function NativeInstallerPanel() {
@@ -18,6 +19,10 @@ export default function NativeInstallerPanel() {
   const [repairMode, setRepairMode] = useState(false);
   const [binDir, setBinDir] = useState('');
   const [components, setComponents] = useState<string[]>([]);
+  const [allowServiceManagement, setAllowServiceManagement] = useState(false);
+  const [allowCentralUpdates, setAllowCentralUpdates] = useState(false);
+  const [allowHotpatches, setAllowHotpatches] = useState(false);
+  const [autoSecurityHotpatch, setAutoSecurityHotpatch] = useState(false);
   const [availability, setAvailability] = useState(() => availabilityFrom(null));
   const [history, setHistory] = useState<Plan[]>([]);
   const [preflight, setPreflight] = useState<any>(null);
@@ -73,6 +78,21 @@ export default function NativeInstallerPanel() {
   const canApply = plan?.phase === 'PREPARED_NOT_INSTALLED' && !unknown && runtimeReady;
   const canRepair = plan?.phase === 'PREPARED_REPAIR_NOT_APPLIED' && !unknown;
   const canRollback = canRollbackPlan(plan, unknown);
+  const permissionProfile: PermissionProfile = {
+    schema:'xiio.hex.permission-profile/v1',
+    profile_id: allowCentralUpdates ? (autoSecurityHotpatch ? 'managed-security-auto' : 'managed-review') : 'local-standard',
+    capabilities:[
+      'install_files',
+      ...(allowServiceManagement ? ['configure_services','start_services','stop_services'] : []),
+      ...(allowCentralUpdates ? ['receive_central_updates'] : []),
+      ...(allowHotpatches ? ['apply_hotpatches'] : []),
+    ],
+    service_scopes: allowServiceManagement || allowCentralUpdates ? ['api-glass-private','inbox','crm','hex','ibal','studio-ui','ollama'] : [],
+    update_policy: !allowCentralUpdates ? 'off' : (autoSecurityHotpatch ? 'auto_security' : 'review_each'),
+    central_updates: allowCentralUpdates,
+    remote_access: false,
+    revoked: false,
+  };
   const button = 'min-h-[44px] rounded-none border border-workspace-border-strong px-4 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:border-workspace-border-strong';
   return <section aria-label="Native HEX installer" className="hex-installer-panel space-y-4 p-5 rounded-none border border-workspace-border-strong/40 bg-workspace-canvas">
     <div><h3 className="font-bold text-workspace-text">Install on this computer</h3>
@@ -86,9 +106,17 @@ export default function NativeInstallerPanel() {
         {repairMode && <label className="text-xs text-workspace-text">Existing launcher directory<input aria-label="Existing launcher directory" value={binDir} onChange={e => {edit(); setBinDir(e.target.value);}} className="mt-1 w-full rounded bg-workspace-surface border border-workspace-border-strong p-2 font-mono" /></label>}
         {!repairMode && <div className="hex-grid-full flex flex-wrap gap-3">{installerComponents.map(name => <label key={name} className="text-sm"><input type="checkbox" checked={components.includes(name)} disabled={name === 'cli' || !availability[name].available} onChange={e => {edit(); setComponents(current => e.target.checked ? [...current, name] : current.filter(x => x !== name));}} /> {name.toUpperCase()}{name === 'cli' ? ' (required)' : ''}{!availability[name].available ? ' — unavailable' : ''}</label>)}</div>}
       </fieldset>
+      {!repairMode && <fieldset disabled={busy || unknown} className="border border-workspace-border-strong/40 p-3 space-y-2">
+        <legend className="px-2 text-xs font-bold text-workspace-text">Installation permissions</legend>
+        <label className="block text-sm"><input type="checkbox" checked={allowServiceManagement} onChange={e => {edit(); setAllowServiceManagement(e.target.checked);}} /> Allow HEX to configure, start and stop the selected XI-IO local services when a qualified service package is present.</label>
+        <label className="block text-sm"><input type="checkbox" checked={allowCentralUpdates} onChange={e => {edit(); setAllowCentralUpdates(e.target.checked); if(!e.target.checked){setAllowHotpatches(false);setAutoSecurityHotpatch(false);}}} /> Receive update proposals from the XI-IO central service. This does not authorize an effect.</label>
+        <label className="block text-sm"><input type="checkbox" checked={allowHotpatches} disabled={!allowCentralUpdates} onChange={e => {edit(); setAllowHotpatches(e.target.checked); if(!e.target.checked)setAutoSecurityHotpatch(false);}} /> Permit signed, rollback-capable hotpatch proposals for the granted service scope.</label>
+        <label className="block text-sm"><input type="checkbox" checked={autoSecurityHotpatch} disabled={!allowHotpatches} onChange={e => {edit(); setAutoSecurityHotpatch(e.target.checked);}} /> Allow security hotpatches to become auto-eligible. Ward/currentness/effect verification still applies.</label>
+        <p className="text-xs text-workspace-muted">Remote access is not granted here. Permissions are bound into the reviewed plan digest and can be revoked by replacing the local grant with a zero-capability profile.</p>
+      </fieldset>
       {!repairMode && installerComponents.filter(name => !availability[name].available).map(name => <p key={name} className="text-xs text-workspace-muted">{name.toUpperCase()}: unavailable — {availability[name].reason}. No installation is offered for this payload.</p>)}
       <div className="flex flex-wrap gap-2">
-        <button className={button} disabled={busy || unknown || !prefix.startsWith('/') || !node.startsWith('/') || (repairMode ? !binDir.startsWith('/') : !canPrepareComponents(components, availability))} onClick={() => void run(repairMode ? {action: 'prepare_repair', prefix, node, bin_dir: binDir} : {action: 'prepare', prefix, node, components})}>Check selected Node & prepare plan</button>
+        <button className={button} disabled={busy || unknown || !prefix.startsWith('/') || !node.startsWith('/') || (repairMode ? !binDir.startsWith('/') : !canPrepareComponents(components, availability))} onClick={() => void run(repairMode ? {action: 'prepare_repair', prefix, node, bin_dir: binDir} : {action: 'prepare', prefix, node, components, permission_profile: permissionProfile})}>Check selected Node & prepare plan</button>
         <button className={button} disabled={busy} onClick={() => void run({action: 'inspect'}, false)}>Refresh requirements & history</button>
       </div>
       <div aria-label="Detected installation requirements" className="space-y-2 text-xs text-workspace-text" role="status">
@@ -109,7 +137,7 @@ export default function NativeInstallerPanel() {
       </details>}
       {plan && <div className="space-y-3 border-t border-workspace-border-strong pt-4">
         <p role="status" className={`text-sm ${status.tone === 'success' && !unknown ? 'text-workspace-success' : 'text-workspace-focus'}`}>{unknown ? 'Outcome uncertain. Check actual state; do not repeat an operation.' : status.message}</p>
-        <div className="text-xs font-mono text-workspace-text break-all"><p>Target: {plan.prefix}</p><p>Components: {plan.components?.join(', ')}</p><p>Payload: {plan.payload_files ?? '?'} files · {plan.payload_bytes ?? '?'} bytes</p><p>Plan: {plan.plan_id}</p><p>Receipts: {plan.receipt_directory || 'See saved plan evidence'}</p></div>
+        <div className="text-xs font-mono text-workspace-text break-all"><p>Target: {plan.prefix}</p><p>Components: {plan.components?.join(', ')}</p><p>Payload: {plan.payload_files ?? '?'} files · {plan.payload_bytes ?? '?'} bytes</p><p>Plan: {plan.plan_id}</p><p>Receipts: {plan.receipt_directory || 'See saved plan evidence'}</p><p>Permissions: {plan.permission_profile?.profile_id || 'legacy/unbound'} · {plan.permission_profile?.update_policy || 'none'}</p></div>
         <details className="hex-installer-disclosure text-xs"><summary>Exact file changes, source generations and receipts</summary><pre className="hex-detail-scroll text-workspace-muted" tabIndex={0} role="region" aria-label="Exact reviewed plan and receipts">{JSON.stringify(plan, null, 2)}</pre></details>
         {plan.phase === 'PREPARED_NOT_INSTALLED' && !runtimeReady && <p role="alert" className="text-sm text-workspace-danger">Installation unavailable: the reviewed Node 22.13+ runtime and mandatory connection payload must both be verified. Prepare a new plan; no partial CLI-only install is offered.</p>}
         {canRepair && <><label className="block text-sm text-workspace-text"><input type="checkbox" checked={approval} disabled={busy} onChange={e => setApproval(e.target.checked)} /> I approve only the displayed launcher repair, original SHA and existing Node binding. No new runtime or CLI generation.</label><button className={button} disabled={busy || !approval} onClick={() => void run({action: 'apply_repair', plan_id: plan.plan_id, approval_digest: plan.approval_digest!, approved: true})}>Repair this existing launcher</button></>}
