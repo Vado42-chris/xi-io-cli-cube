@@ -8,7 +8,7 @@ await build({
     lib: {
       entry: 'src/components/ArtcraftLauncherBody.tsx',
       formats: ['es'],
-      fileName: 'body',
+      fileName: () => 'body.mjs',
     },
     rollupOptions: {external: ['react', 'react/jsx-runtime']},
   },
