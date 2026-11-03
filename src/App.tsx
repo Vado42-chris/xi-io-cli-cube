@@ -276,7 +276,7 @@ const ROSETTA_LEXICON = [
 
 export type ProductNavigation = { perspective: PerspectiveMode; activeView: ActiveView };
 
-export default function App({ embedded = false, navigation, onNavigate, visible = true }: { embedded?: boolean; navigation?: ProductNavigation; onNavigate?: (patch: Partial<ProductNavigation>) => void; visible?: boolean }) {
+export default function App({ embedded = false, navigation, onNavigate, visible = true, softwareBody }: { embedded?: boolean; navigation?: ProductNavigation; onNavigate?: (patch: Partial<ProductNavigation>) => void; visible?: boolean; softwareBody?: React.ReactNode }) {
   // The tablet and product controls share the same views; standalone keeps its local state.
   const [localNavigation, setLocalNavigation] = useState<ProductNavigation>({perspective: 'client', activeView: 'catalog'});
   const {perspective, activeView} = navigation ?? localNavigation;
@@ -1174,6 +1174,7 @@ export default function App({ embedded = false, navigation, onNavigate, visible 
               {activeView === 'maths' && <Snap55Workbench />}
 
               {/* AUDITOR TAB 1: HEX SOFTWARE SUITE */}
+              {activeView === 'catalog' && softwareBody !== undefined && visible && <div className="h-[min(70vh,720px)] min-h-[420px]" data-hex-generated-launcher-body>{softwareBody}</div>}
               {activeView === 'catalog' && (
                 <section className="space-y-4">
                   <div>

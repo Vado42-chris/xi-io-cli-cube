@@ -74,6 +74,11 @@ test('actual tablet rail and product controls share selected views across the Sh
     assert.equal(rail('Data'), null, 'unbound generic navigation is not shown');
     await click(rail('Software')); selectedRail('Software'); selectedProduct('Tools & Diagnostics'); selectedProduct('1. HEX Software Suite');
     assert.ok(shadow.textContent.includes('Software reference catalog.'));
+    const launcher = shadow.querySelector('[data-artcraft-mount-status]');
+    assert.ok(launcher?.querySelector('canvas'), 'Software mounts the actual canvas consumer inside the existing ShadowRoot');
+    assert.equal(launcher.querySelector('canvas').getRootNode(), shadow);
+    assert.notEqual(launcher.dataset.artcraftMountStatus, 'mounted', 'fixture has no generated donor module and earns no WASM render credit');
+    assert.ok(launcher.querySelector('[role=alert]'), 'missing generated module is visible, not silently replaced');
     const componentPanel = panel();
     const ids = ['cli', 'editor', 'studio', 'web', 'switchboard', 'bins', 'ward'];
     for (const id of ids) {
@@ -99,6 +104,7 @@ test('actual tablet rail and product controls share selected views across the Sh
     await click(shadow.querySelector('[data-product-availability="cli"]').closest('[role="button"]'));
     await click(rail('Install')); selectedRail('Install'); selectedProduct('2. Install & Compile');
     const retainedPanel = panel(); assert.ok(retainedPanel); assert.equal(retainedPanel.closest('.hidden'), null);
+    assert.equal(shadow.querySelector('[data-artcraft-mount-status]'), null, 'leaving Software disposes its canvas consumer while retaining the installer');
     assert.ok(retainedPanel.textContent.includes('Native HEX is required.'));
     await click(rail('Status')); selectedRail('Status'); selectedProduct('3. System Diagnostics');
     const diagnostics = shadow.querySelector('[aria-label="System Diagnostics"]');

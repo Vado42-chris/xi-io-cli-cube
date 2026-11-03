@@ -3,6 +3,8 @@ import {createPortal} from 'react-dom';
 import {NativeProductWindowShell} from './shared/window-frame.mjs';
 import App, {type ProductNavigation} from './App';
 import NativePluginMarketplace from './components/NativePluginMarketplace';
+import ArtcraftLauncherBody from './components/ArtcraftLauncherBody';
+import {loadPackagedArtcraftLauncher} from './lib/artcraftLauncherAssets.mjs';
 import BlackWindowSettingsHost from './components/BlackWindowSettingsHost';
 import {Compass, Grid, Download, Activity, History, Puzzle, Calculator, Settings} from 'lucide-react';
 import {nativeInstallerAvailable} from './lib/nativeInstaller.mjs';
@@ -13,6 +15,7 @@ import productStyles from './index.css?inline';
 // This is CSS containment, not a second window or a private copy of the frame.
 function CubeProductContent({navigation, onNavigate, pluginsVisible, settingsVisible}: {navigation: ProductNavigation; onNavigate: (patch: Partial<ProductNavigation>) => void; pluginsVisible:boolean; settingsVisible:boolean}) {
   const host = useRef<HTMLDivElement>(null);
+  const launcherLifecycle = useRef<{pending: Promise<void>; cleanupFailure: string | null}>({pending: Promise.resolve(), cleanupFailure: null});
   const [root, setRoot] = useState<ShadowRoot | null>(null);
   useEffect(() => {
     if (host.current) setRoot(host.current.shadowRoot || host.current.attachShadow({mode: 'open'}));
@@ -25,7 +28,7 @@ function CubeProductContent({navigation, onNavigate, pluginsVisible, settingsVis
           exact receipt selection. Hidden means non-interactive, not destroyed. */}
       <div className={pluginsVisible || settingsVisible ? 'hidden h-full min-h-0' : 'h-full min-h-0'}
         aria-hidden={pluginsVisible || settingsVisible} data-hex-installer-state-host="persistent">
-        <App embedded navigation={navigation} onNavigate={onNavigate} visible={!pluginsVisible && !settingsVisible} />
+        <App embedded navigation={navigation} onNavigate={onNavigate} visible={!pluginsVisible && !settingsVisible} softwareBody={<ArtcraftLauncherBody loadModule={loadPackagedArtcraftLauncher} lifecycle={launcherLifecycle.current} />} />
       </div>
       {pluginsVisible && <div className="p-5" data-hex-plugin-native-panel="v1"><NativePluginMarketplace /></div>}
       {settingsVisible && <BlackWindowSettingsHost />}

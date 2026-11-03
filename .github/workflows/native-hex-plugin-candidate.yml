@@ -11,6 +11,8 @@ on:
       - 'native/hex/**'
       - 'scripts/native-package.mjs'
       - 'scripts/qualify-artcraft-hosted-donor.sh'
+      - 'scripts/stage-artcraft-runtime.mjs'
+      - 'tests/artcraft-runtime-stage.test.mjs'
       - 'tools/artcraft-launcher/lifecycle.patch'
       - 'scripts/verify-extracted-hex-gui.sh'
       - 'scripts/journal-hex-gui-observation.py'
@@ -119,7 +121,9 @@ jobs:
           set -euo pipefail
           cargo install wasm-bindgen-cli --version 0.2.129 --locked
           bash scripts/qualify-artcraft-hosted-donor.sh "$GITHUB_WORKSPACE/.ci-donor/artcraft-launcher" "$GITHUB_WORKSPACE/tools/artcraft-launcher/lifecycle.patch" "$RUNNER_TEMP/hex-artcraft-hosted-donor"
-          echo DONOR_GENERATED_EXPORTS_ONLY_NOT_NATIVE_MOUNT
+          node --test tests/artcraft-runtime-stage.test.mjs
+          node scripts/stage-artcraft-runtime.mjs
+          echo DONOR_GENERATED_ASSETS_STAGED_NOT_NATIVE_MOUNT
       - name: Check TypeScript and source-owned frontend
         run: |
           npm run lint

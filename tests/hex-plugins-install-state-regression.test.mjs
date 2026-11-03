@@ -10,7 +10,7 @@ test('Install remains mounted rather than conditionally replaced by Plugins or S
  assert.ok(segment.length>400,'Persistent portal must exist');
  assert.equal((segment.match(/<App\b/g)||[]).length,1,'One persistent App/installer instance');
  assert.match(segment,/data-hex-installer-state-host="persistent"/);
- assert.match(segment,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} visible=\{!pluginsVisible\s*&&\s*!settingsVisible\} \/>/);
+ assert.match(segment,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} visible=\{!pluginsVisible\s*&&\s*!settingsVisible\} softwareBody=\{<ArtcraftLauncherBody loadModule=\{loadPackagedArtcraftLauncher\} lifecycle=\{launcherLifecycle\.current\} \/>\} \/>/);
  assert.match(segment,/\{pluginsVisible && <div[^>]*data-hex-plugin-native-panel/);
  assert.match(segment,/\{settingsVisible && <BlackWindowSettingsHost \/>/);
  assert.doesNotMatch(segment,/pluginsVisible\s*\?\s*<div[^>]*NativePluginMarketplace[\s\S]*:\s*<App/);

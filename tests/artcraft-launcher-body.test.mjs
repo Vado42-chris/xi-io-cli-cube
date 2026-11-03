@@ -85,3 +85,38 @@ test('compiled consumer contains late cleanup failure and blocks queued replacem
   assert.ok(f.shadow.querySelector('canvas'));assert.deepEqual(calls,['destroy','free']);
  }finally{await f.close();}
 });
+for (const cleanupFails of [false,true]) test(`host lifecycle survives Software removal and return; cleanup failure=${cleanupFails}`,async()=>{
+ const f=setup(),pending=deferred(),calls=[];
+ const lifecycle={pending:Promise.resolve(),cleanupFailure:null};
+ const loadModule=async()=>({mount_launcher:()=>{
+   calls.push('mount');
+   return calls.filter(c=>c==='mount').length===1 ? pending.promise : Promise.resolve({destroy(){calls.push('destroy2');},free(){calls.push('free2');}});
+ }});
+ try {
+  await act(async()=>f.root.render(React.createElement(Body,{loadModule,lifecycle})));
+  await act(async()=>f.root.render(React.createElement('div',null,'Install')));
+  await act(async()=>f.root.render(React.createElement(Body,{loadModule,lifecycle})));
+  assert.deepEqual(calls,['mount'],'a new component must wait for previous canvas cleanup');
+  await act(async()=>pending.resolve({destroy(){calls.push('destroy1');if(cleanupFails)throw new Error('cleanup');},free(){calls.push('free1');}}));
+  if(cleanupFails){
+   assert.deepEqual(calls,['mount','destroy1','free1']);
+   assert.equal(f.shadow.querySelector('section').dataset.artcraftMountStatus,'ARTCRAFT_CLEANUP_UNVERIFIED');
+   assert.equal(lifecycle.cleanupFailure,'ARTCRAFT_CLEANUP_UNVERIFIED');
+  }else{
+   assert.deepEqual(calls,['mount','destroy1','free1','mount']);
+   assert.equal(f.shadow.querySelector('section').dataset.artcraftMountStatus,'mounted');
+  }
+ }finally{await f.close();}
+});
+test('host lifecycle refuses a new canvas after an invalid donor handle',async()=>{
+ const f=setup();let started=0;const lifecycle={pending:Promise.resolve(),cleanupFailure:null};
+ const loadModule=async()=>({mount_launcher:async()=>{started++;return {};}});
+ try{
+  await act(async()=>f.root.render(React.createElement(Body,{loadModule,lifecycle})));
+  assert.equal(f.shadow.querySelector('section').dataset.artcraftMountStatus,'ARTCRAFT_DONOR_HANDLE_INVALID');
+  await act(async()=>f.root.render(React.createElement('div',null,'Install')));
+  await act(async()=>f.root.render(React.createElement(Body,{loadModule,lifecycle})));
+  assert.equal(started,1);assert.equal(lifecycle.cleanupFailure,'ARTCRAFT_DONOR_HANDLE_INVALID');
+  assert.equal(f.shadow.querySelector('section').dataset.artcraftMountStatus,'ARTCRAFT_DONOR_HANDLE_INVALID');
+ }finally{await f.close();}
+});

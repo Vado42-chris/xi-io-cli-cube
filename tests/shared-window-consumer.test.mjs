@@ -24,7 +24,7 @@ test('Cube is self-contained and shares one existing appearance store',()=>{
  assert.match(host,/NativeProductWindowShell.*from '\.\/shared\/window-frame.mjs'/);
  assert.match(host,/controlsAvailable=\{nativeInstallerAvailable\(\)\}/);
  assert.match(host,/attachShadow\(\{mode: 'open'\}\)/);
- assert.match(host,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} visible=\{!pluginsVisible && !settingsVisible\} \/>/);
+ assert.match(host,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} visible=\{!pluginsVisible && !settingsVisible\} softwareBody=\{<ArtcraftLauncherBody loadModule=\{loadPackagedArtcraftLauncher\} lifecycle=\{launcherLifecycle\.current\} \/>\} \/>/);
  assert.doesNotMatch(app,/Traffic Light Window Dots|bg-rose-500\/80/);
 });
 test('unbound product/context is honest, with no fake authority or navigation',()=>{
