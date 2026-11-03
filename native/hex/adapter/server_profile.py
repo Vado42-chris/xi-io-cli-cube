@@ -112,10 +112,11 @@ def apply_server_package(package_root,home,permissions,reviewed_plan,receipt_pat
    if r.returncode!=0: raise ValueError('SERVER_SERVICE_START_FAILED:'+sid)
    after=service_profile.observe_user_unit(unit)
    if after['active_state']!='active': raise ValueError('SERVER_SERVICE_ACTIVE_READBACK_FAILED:'+sid)
+   started.append({'service_id':sid,'unit':unit,'before':before,'after':after,'probe':None})
    probe=_probe(row.get('probe'))
+   started[-1]['probe']=probe
    if row.get('required',True) is not False and row.get('probe') and probe['state']!='PASS':
     raise ValueError('SERVER_SERVICE_PROBE_FAILED:'+sid)
-   started.append({'service_id':sid,'unit':unit,'before':before,'after':after,'probe':probe})
   return {'schema':'xiio.hex.server-package-effect/v1','state':'INSTALLED_STARTED_READBACK_VERIFIED',
           'package_id':live['package_id'],'package_sha256':live['package_sha256'],
           'permission_digest':permissions['permission_digest'],'services':started,
