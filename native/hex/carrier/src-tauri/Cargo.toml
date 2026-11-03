@@ -1,7 +1,7 @@
 [package]
 name = "xi-io-hex-dev"
-version = "0.1.0-dev.9"
-description = "DEV candidate for the XI-IO HEX local CLI installer; not a LIVE release"
+version = "0.1.0-dev.10"
+description = "DEV10 native HEX Plugins and six-product installer carrier; payloads not yet published"
 authors = ["xi-io"]
 edition = "2021"
 autobins = false

@@ -74,6 +74,13 @@ test('actual tablet rail and product controls share selected views across the Sh
     assert.equal(rail('Data'), null, 'unbound generic navigation is not shown');
     await click(rail('Software')); selectedRail('Software'); selectedProduct('Tools & Diagnostics'); selectedProduct('1. HEX Software Suite');
     assert.ok(shadow.textContent.includes('Software reference catalog.'));
+    const launcher = shadow.querySelector('[data-artcraft-mount-status]');
+    assert.ok(launcher?.querySelector('canvas'), 'Software mounts the actual canvas consumer inside the existing ShadowRoot');
+    assert.equal(launcher.querySelector('canvas').getRootNode(), shadow);
+    assert.notEqual(launcher.dataset.artcraftMountStatus, 'mounted', 'fixture has no generated donor module and earns no WASM render credit');
+    for (let attempt=0; attempt<50 && launcher.dataset.artcraftMountStatus==='loading'; attempt++) await pause(10);
+    assert.equal(launcher.dataset.artcraftMountStatus, 'ARTCRAFT_LOCAL_MODULE_IMPORT_FAILED');
+    assert.ok(launcher.querySelector('[role=alert]'), 'missing generated module is visible, not silently replaced');
     const componentPanel = panel();
     const ids = ['cli', 'editor', 'studio', 'web', 'switchboard', 'bins', 'ward'];
     for (const id of ids) {
@@ -85,7 +92,11 @@ test('actual tablet rail and product controls share selected views across the Sh
       assert.doesNotMatch(card.textContent, /Aries|Loki|54509965|verified socket|mutual TLS|409|qualified CLI|D-Bus|background monitors/i);
       await click(card);
       assert.equal(panel(), componentPanel, 'product selection retains actual installer recovery state');
-      assert.equal(Boolean(panel().closest('.hidden')), !['cli', 'bins', 'switchboard'].includes(id));
+      // HEX installs the same six-product baseline regardless of which
+      // catalog card opened the Install tab. Product-specific detail remains
+      // explanatory and cannot hide the actual native bundle installer.
+      assert.equal(Boolean(panel().closest('.hidden')), false, 'core installer remains available for ' + id);
+      assert.match(panel().textContent, /XI-IO core baseline/);
       const reference = [...shadow.querySelectorAll('details')].find(el => el.querySelector('summary')?.textContent.includes('Historical CLI developer reference'));
       assert.ok(reference && !reference.open, 'unrelated old CLI commands are closed historical reference');
       assert.match(reference.textContent, /not the current release or evidence of what is installed/);
@@ -95,6 +106,7 @@ test('actual tablet rail and product controls share selected views across the Sh
     await click(shadow.querySelector('[data-product-availability="cli"]').closest('[role="button"]'));
     await click(rail('Install')); selectedRail('Install'); selectedProduct('2. Install & Compile');
     const retainedPanel = panel(); assert.ok(retainedPanel); assert.equal(retainedPanel.closest('.hidden'), null);
+    assert.equal(shadow.querySelector('[data-artcraft-mount-status]'), null, 'leaving Software disposes its canvas consumer while retaining the installer');
     assert.ok(retainedPanel.textContent.includes('Native HEX is required.'));
     await click(rail('Status')); selectedRail('Status'); selectedProduct('3. System Diagnostics');
     const diagnostics = shadow.querySelector('[aria-label="System Diagnostics"]');
@@ -206,6 +218,27 @@ test('actual tablet rail and product controls share selected views across the Sh
     assert.equal(w.__TAURI__, undefined);
     for (const label of ['Minimize window', 'Maximize window', 'Close window']) {
       assert.equal(w.document.querySelector(`button[aria-label="${label}"]`).disabled, true);
+    }
+    // Same compiled installer instance survives both overlays and repeated returns.
+    await click(rail('Install'));
+    const persistentInstaller = panel();
+    const persistentHost = shadow.querySelector('[data-hex-installer-state-host="persistent"]');
+    for (const label of ['Plugins', 'Settings', 'Plugins', 'Settings']) {
+      await click(rail(label));
+      assert.equal(panel(), persistentInstaller, label + ' must not remount the installer');
+      assert.equal(persistentHost.getAttribute('aria-hidden'), 'true');
+      assert.equal(persistentHost.classList.contains('hidden'), true);
+      // jsdom does not compute ShadowRoot stylesheet layout/focus. Verify the
+      // actual class and bundled rule; native keyboard/hit testing stays separate.
+      assert.match(shadow.querySelector('style').textContent, /\.hidden\{display:none\}/);
+      assert.equal(Boolean(shadow.querySelector('[data-hex-plugin-native-panel]')), label === 'Plugins');
+      assert.equal(Boolean(shadow.querySelector('[data-black-window-settings-host]')), label === 'Settings');
+      await click(rail('Install'));
+      assert.equal(panel(), persistentInstaller, 'Return retains installer identity');
+      assert.equal(persistentHost.getAttribute('aria-hidden'), 'false');
+      assert.equal(persistentHost.classList.contains('hidden'), false);
+      assert.equal(shadow.querySelector('[data-hex-plugin-native-panel]'), null);
+      assert.equal(shadow.querySelector('[data-black-window-settings-host]'), null);
     }
     assert.deepEqual(errors, []);
   } finally { dom.window.close(); }

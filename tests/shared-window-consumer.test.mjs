@@ -24,14 +24,14 @@ test('Cube is self-contained and shares one existing appearance store',()=>{
  assert.match(host,/NativeProductWindowShell.*from '\.\/shared\/window-frame.mjs'/);
  assert.match(host,/controlsAvailable=\{nativeInstallerAvailable\(\)\}/);
  assert.match(host,/attachShadow\(\{mode: 'open'\}\)/);
- assert.match(host,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} \/>/);
+ assert.match(host,/<App embedded navigation=\{navigation\} onNavigate=\{onNavigate\} visible=\{!pluginsVisible && !settingsVisible\} softwareBody=\{<ArtcraftLauncherBody loadModule=\{loadPackagedArtcraftLauncher\} lifecycle=\{launcherLifecycle\.current\} \/>\} \/>/);
  assert.doesNotMatch(app,/Traffic Light Window Dots|bg-rose-500\/80/);
 });
 test('unbound product/context is honest, with no fake authority or navigation',()=>{
  const host=read('../src/SharedProductHost.tsx');
  assert.match(host,/Owner-directed HEX accent uses the existing Node cyan-500 token/);
  assert.match(host,/id: 'hex', title: 'XI-IO HEX', theme: 'cyan-500'/);
- assert.match(host,/Account tools\/settings and Return to Studio remain unbound/);
+ assert.match(host,/Account\/provider tools and Return to Studio remain unbound/);
 
  assert.match(host,/isAuthenticated=\{false\}/);
  assert.doesNotMatch(host,/AuthProvider|shell\.navigate|theme: ['"](?:amber|violet)/);
@@ -71,7 +71,7 @@ test('original carved plate is bundled locally with exact source custody',()=>{
 
 test('product backdrop retains existing parallax layers with reduced-motion and cleanup',()=>{
  const app=read('../src/components/TabletBackdrop.tsx'),css=read('../src/styles/product-workspace.css');
- assert.match(read('../src/App.tsx'),/<TabletBackdrop \/>/);
+ assert.match(read('../src/App.tsx'),/<TabletBackdrop active=\{visible\} \/>/);
  for(const coefficient of ['*-34','*-22','*-.018'])assert.ok(app.includes(coefficient));
  assert.match(read('../src/lib/backdropMotion.mjs'),/\*\.055/);
  for(const cleanup of ["motion.dispose()","removeEventListener('pointermove'","removeEventListener('scroll'","removeEventListener('change'","removeEventListener('pagehide'","removeEventListener('pageshow'"])assert.ok(app.includes(cleanup));
@@ -93,4 +93,23 @@ test('comfort names and typography bindings are real, idle background has no inf
  assert.match(app,/data-comfort=\{comfort\}/);assert.ok(app.includes('{lvl}'));assert.ok(!app.includes('{lvl[0].toUpperCase()}'));
  assert.match(css,/data-comfort="comfortable"/);assert.match(css,/data-comfort="compact"/);
  assert.doesNotMatch(css,/animation:[^;]*infinite/);assert.doesNotMatch(css,/transition: transform 80ms/);assert.doesNotMatch(css,/backdrop-filter: blur/);
+});
+
+
+test('signed-out HEX mounts the qualified standard Black-level settings producer in the same host',()=>{
+ const host=read('../src/SharedProductHost.tsx');
+ const adapter=read('../src/components/BlackWindowSettingsHost.tsx');
+ const settings=read('../src/shared/black-window-settings.mjs');
+ assert.match(host,/BlackWindowSettingsHost/);
+ assert.match(host,/id: 'settings', label: 'Settings'/);
+ assert.match(host,/settingsVisible && <BlackWindowSettingsHost \/>/);
+ assert.doesNotMatch(host,/new WebviewWindow|window\.open/);
+ assert.match(adapter,/mountBlackWindowSettings/);
+ assert.match(adapter,/86105cd69e9787770aca7d2ffe5f7c372ca2b583/);
+ assert.match(adapter,/97ab9f81610228f04939844ad199ca15dd140247/);
+ assert.match(settings,/BLACK_WINDOW_SETTINGS_SCHEMA='xiio\.studio\.black-window-settings\/v1'/);
+ assert.match(settings,/authority_granted:false/);
+ assert.match(settings,/LOCAL_PRESENTATION_AND_RECOVERY_PREFERENCES_ONLY/);
+ assert.match(settings,/SETTINGS_READBACK_MISMATCH/);
+ assert.match(settings,/paid_provider_fallback.*values:\['never','ask'\].*default:'never'/);
 });

@@ -1,0 +1,338 @@
+"""Hostile tests for published, uncredentialed Cube distribution qualification.
+
+The entire test suite is synthetic, offline and non-publishing.
+"""
+import importlib.util
+import hashlib
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/qualify-public-core-six.py"
+spec = importlib.util.spec_from_file_location("xiio_core_public_release", SCRIPT)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+TAG = "xiio-core-six-20261028-alpha1"
+
+
+class PublicCoreRelease(unittest.TestCase):
+    def setUp(self):
+        self.t = tempfile.TemporaryDirectory(prefix="xiio-core-release-hvt-")
+        self.addCleanup(self.t.cleanup)
+        self.root = Path(self.t.name)
+        self.contents = {}
+        products = []
+        for role in module.ROLES:
+            b = ("synthetic payload for " + role).encode()
+            self.contents[role + ".bin"] = b
+            manifest = {
+                "schema_version": "xiio-installer-product-manifest-v1",
+                "profile_id": "core-six",
+                "product_id": "xi-io-" + role,
+                "display_name": "XI-IO " + role,
+                "version": "0.1.0-alpha.1",
+                "channel": "alpha",
+                "fixture": False,
+                "payload": [{
+                    "source": role + ".bin", "sha256": module.sha(b),
+                    "size": len(b), "destination_scope": "xdg_data",
+                    "destination": "xi-io/core/" + role + "/" + role + ".bin",
+                    "mode": "0644", "overwrite": "fail",
+                }],
+            }
+            raw = json.dumps(manifest, sort_keys=True).encode()
+            (self.root / (role + ".json")).write_bytes(raw)
+            self.contents[role + ".json"] = raw
+            products.append({
+                "role": role, "product_id": manifest["product_id"],
+                "manifest": role + ".json",
+                "manifest_sha256": module.sha(raw),
+                "depends_on": [] if role == "cli" else ["cli"],
+                "payload_urls": {role + ".bin":
+                    module.RELEASE_ASSET_PREFIX + TAG + "/" + role + ".bin"},
+            })
+        lock = {
+            "schema_version": "xiio-installer-bundle-profile-v1",
+            "profile_id": "core-six", "fixture": False,
+            "products": products,
+        }
+        self.lock = self.root / "core-release.lock.json"
+        self.set_lock(lock)
+        provenance = {
+            "schema": "xiio.cube.core-runtime-provenance/v1",
+            "release_tag": TAG, "runtime_only": True,
+            "products": [{
+                "role": role, "owner_repository": module.OWNERS[role],
+                "source_commit": "a" * 40,
+                "assets": [role + ".bin"],
+                "owner_review_url":
+                    "https://github.com/" + module.OWNERS[role] + "/issues/1",
+                "owner_review_state": "APPROVED_FOR_RUNTIME_DISTRIBUTION",
+            } for role in module.ROLES],
+        }
+        self.contents["PROVENANCE.json"] = json.dumps(provenance, sort_keys=True).encode()
+        self.update_checksum_index()
+
+    def update_checksum_index(self):
+        self.contents["SHA256SUMS"] = "".join(
+            module.sha(self.contents[name]) + "  " + name + "\n"
+            for name in sorted(self.contents) if name != "SHA256SUMS"
+        ).encode()
+
+    def set_lock(self, lock):
+        raw = json.dumps(lock, sort_keys=True).encode()
+        self.lock.write_bytes(raw)
+        self.contents["core-release.lock.json"] = raw
+
+    def release(self, *, omit=(), additional=()):
+        expected = module.qualify_local(self.lock, TAG)["expected_assets"]
+        assets = []
+        for name, (_, length) in expected.items():
+            if name not in omit:
+                assets.append({
+                    "name": name, "size": length, "state": "uploaded",
+                    "content_type": "application/octet-stream",
+                    "browser_download_url":
+                    module.RELEASE_ASSET_PREFIX + TAG + "/" + name,
+                })
+        for name in module.META_ASSETS:
+            assets.append({
+                "name": name, "size": len(self.contents[name]), "state": "uploaded",
+                "content_type": "application/octet-stream",
+                "browser_download_url": module.RELEASE_ASSET_PREFIX + TAG + "/" + name,
+            })
+        assets.extend(additional)
+        return {
+            "tag_name": TAG, "draft": False,
+            "published_at": "2026-10-28T12:00:00Z",
+            "assets": assets,
+        }
+
+    def test_exact_six_role_profile_qualifies_locally(self):
+        result = module.qualify_local(self.lock, TAG)
+        self.assertEqual(result["role_count"], 6)
+        self.assertEqual(set(result["roles"]), set(module.ROLES))
+        self.assertEqual(len(result["expected_assets"]), 13)
+        self.assertEqual(result["state"], "LOCAL_LOCK_AND_OWNER_MANIFESTS_VALID")
+        self.assertEqual(result["owner_distribution_approval"], "NOT_VERIFIED")
+        self.assertEqual(result["native_install_readback"], "NOT_VERIFIED")
+
+    def test_missing_lock_cannot_fake_a_release(self):
+        self.lock.unlink()
+        with self.assertRaisesRegex(module.Refused, "CORE_RELEASE_LOCK_UNPUBLISHED"):
+            module.qualify_local(self.lock, TAG)
+
+    def test_source_is_not_a_distribution_asset(self):
+        lock = json.loads(self.lock.read_bytes())
+        lock["products"][0]["payload_urls"]["bins.bin"] = (
+            "https://raw.githubusercontent.com/Vado42-chris/xi-io_bins/main/index.js")
+        self.set_lock(lock)
+        with self.assertRaisesRegex(module.Refused, "CORE_PAYLOAD_NOT_IN_PUBLIC_CUBE_RELEASE"):
+            module.qualify_local(self.lock, TAG)
+
+    def test_private_repo_release_url_refused(self):
+        lock = json.loads(self.lock.read_bytes())
+        lock["products"][0]["payload_urls"]["bins.bin"] = (
+            "https://github.com/Vado42-chris/xi-io_bins/releases/download/" +
+            TAG + "/bins.bin")
+        self.set_lock(lock)
+        with self.assertRaisesRegex(module.Refused, "CORE_PAYLOAD_NOT_IN_PUBLIC_CUBE_RELEASE"):
+            module.qualify_local(self.lock, TAG)
+
+    def test_wrong_release_tag_and_encoded_name_refused(self):
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_TAG_INVALID"):
+            module.qualify_local(self.lock, "../bad")
+        for name in ("%2e%2e", "something%2Felse", "wrong name"):
+            with self.subTest(name=name), self.assertRaisesRegex(
+                    module.Refused, "CORE_PAYLOAD_ASSET_NAME_UNSAFE"):
+                module.payload_asset(module.RELEASE_ASSET_PREFIX + TAG + "/" + name, TAG)
+
+    def test_owner_release_requires_exact_assets(self):
+        local = module.qualify_local(self.lock, TAG)
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_ASSETS_MISSING"):
+            module.published_metadata(local, self.release(omit=("cli.bin",)))
+
+    def test_unpublished_or_draft_release_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        data = self.release()
+        data["draft"] = True
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_NOT_PUBLISHED"):
+            module.published_metadata(local, data)
+
+    def test_stale_asset_size_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        data = self.release()
+        data["assets"][0]["size"] += 1
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_ASSET_METADATA_MISMATCH"):
+            module.published_metadata(local, data)
+
+    def test_duplicate_asset_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        data = self.release()
+        data["assets"].append(dict(data["assets"][0]))
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_DUPLICATE_ASSET"):
+            module.published_metadata(local, data)
+
+    def test_metadata_is_not_byte_acceptance(self):
+        local = module.qualify_local(self.lock, TAG)
+        observed = module.published_metadata(local, self.release())
+        self.assertEqual(observed["state"], "PUBLIC_RELEASE_METADATA_ONLY")
+        self.assertEqual(observed["verified_assets"], 0)
+        self.assertEqual(observed["native_install_readback"], "NOT_VERIFIED")
+
+    def test_unapproved_extra_source_asset_is_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        unknown = {
+            "name": "private-source.tar.gz", "size": 100,
+            "state": "uploaded", "content_type": "application/gzip",
+            "browser_download_url": module.RELEASE_ASSET_PREFIX + TAG +
+                                    "/private-source.tar.gz",
+        }
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_UNREVIEWED_EXTRA_OR_MISSING_METADATA_ASSETS"):
+            module.published_metadata(local, self.release(additional=(unknown,)))
+
+    def test_missing_public_provenance_is_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        data = self.release()
+        data["assets"] = [a for a in data["assets"] if a["name"] != "PROVENANCE.json"]
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_UNREVIEWED_EXTRA_OR_MISSING_METADATA_ASSETS"):
+            module.published_metadata(local, data)
+
+    def staging_dir(self):
+        stage = self.root / "staging"
+        stage.mkdir()
+        for name, contents in self.contents.items():
+            (stage / name).write_bytes(contents)
+        return stage
+
+    def test_prepublication_staged_bytes_verified_without_network_or_release(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        with patch.object(module.child_bundle, "_fetch_https",
+                          side_effect=AssertionError("NETWORK_NOT_ALLOWED")):
+            observed = module.qualify_staged(qualified, stage)
+        self.assertEqual(observed["state"], "STAGED_RELEASE_BYTES_VERIFIED_NOT_PUBLISHED")
+        self.assertEqual(observed["verified_assets"], 13)
+        self.assertFalse(observed["public_release_published"])
+        self.assertEqual(observed["owner_distribution_approval"], "SEPARATELY_REQUIRED")
+        self.assertEqual(observed["native_install_readback"], "NOT_VERIFIED")
+
+    def test_prepublication_missing_and_extra_payloads_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        (stage / "ward.bin").unlink()
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_ASSETS_INCOMPLETE_OR_UNREVIEWED"):
+            module.qualify_staged(qualified, stage)
+        (stage / "ward.bin").write_bytes(self.contents["ward.bin"])
+        (stage / "private-source.tar.gz").write_bytes(b"PRIVATE SOURCE MUST NOT PUBLISH")
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_ASSETS_INCOMPLETE_OR_UNREVIEWED"):
+            module.qualify_staged(qualified, stage)
+
+    def test_prepublication_tamper_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        b = self.contents["ibal.bin"]
+        (stage / "ibal.bin").write_bytes(bytes([b[0] ^ 1]) + b[1:])
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_BYTES_MISMATCH"):
+            module.qualify_staged(qualified, stage)
+
+    def test_prepublication_symlink_and_hardlink_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        file = stage / "inbox.bin"
+        file.unlink()
+        file.symlink_to(self.root / "inbox.json")
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_FILE_UNTRUSTED"):
+            module.qualify_staged(qualified, stage)
+        file.unlink()
+        file.write_bytes(self.contents["inbox.bin"])
+        outside = self.root / "inbox-hardlink"
+        outside.hardlink_to(file)
+        with self.assertRaisesRegex(module.Refused, "CORE_STAGED_FILE_NOT_EXCLUSIVE_REGULAR"):
+            module.qualify_staged(qualified, stage)
+
+    def test_prepublication_unapproved_owner_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        provenance = json.loads((stage / "PROVENANCE.json").read_bytes())
+        provenance["products"][0]["owner_review_state"] = "PENDING"
+        (stage / "PROVENANCE.json").write_text(json.dumps(provenance))
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_PROVENANCE_OWNER_UNVERIFIED"):
+            module.qualify_staged(qualified, stage)
+
+    def test_prepublication_checksum_index_tamper_refused(self):
+        qualified = module.qualify_local(self.lock, TAG)
+        stage = self.staging_dir()
+        (stage / "SHA256SUMS").write_bytes(b"0" * 64 + b"  bins.bin\n")
+        with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_SHA256SUMS_COVERAGE_INVALID"):
+            module.qualify_staged(qualified, stage)
+
+    def test_all_public_bytes_reopened_and_verified(self):
+        local = module.qualify_local(self.lock, TAG)
+        calls = []
+        def fetch(url, dest, size, hosts):
+            name = url.rsplit("/", 1)[-1]
+            self.assertIn(name, self.contents)
+            self.assertEqual(size, len(self.contents[name]))
+            self.assertIn("github.com", hosts)
+            dest.write_bytes(self.contents[name])
+            calls.append(name)
+        with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
+            observed = module.published_metadata(local, self.release(), verify_bytes=True)
+        self.assertEqual(observed["state"], "PUBLIC_RELEASE_BYTES_VERIFIED")
+        self.assertEqual(observed["verified_assets"], 13)
+        self.assertEqual(set(calls), set(self.contents))
+        self.assertTrue(observed["release_provenance_verified"])
+        self.assertTrue(observed["release_checksum_index_verified"])
+        self.assertEqual(observed["native_install_readback"], "NOT_VERIFIED")
+
+    def test_tampered_download_refused_even_when_metadata_matches(self):
+        local = module.qualify_local(self.lock, TAG)
+        def fetch(url, dest, size, hosts):
+            name = url.rsplit("/", 1)[-1]
+            b = self.contents[name]
+            dest.write_bytes(bytes([b[0] ^ 1]) + b[1:] if name == "bins.bin" else b)
+        with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
+            with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_BYTES_MISMATCH"):
+                module.published_metadata(local, self.release(), verify_bytes=True)
+
+    def test_provenance_must_cover_all_six_source_owners(self):
+        local = module.qualify_local(self.lock, TAG)
+        doc = json.loads(self.contents["PROVENANCE.json"])
+        doc["products"][0]["owner_repository"] = "someone/fake"
+        self.contents["PROVENANCE.json"] = json.dumps(doc).encode()
+        self.update_checksum_index()
+        def fetch(url, dest, size, hosts):
+            dest.write_bytes(self.contents[url.rsplit("/", 1)[-1]])
+        with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
+            with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_PROVENANCE_OWNER_UNVERIFIED"):
+                module.published_metadata(local, self.release(), verify_bytes=True)
+
+    def test_checksum_metadata_is_verified_not_just_named(self):
+        local = module.qualify_local(self.lock, TAG)
+        self.contents["SHA256SUMS"] = b"unrelated filename list\n"
+        def fetch(url, dest, size, hosts):
+            dest.write_bytes(self.contents[url.rsplit("/", 1)[-1]])
+        with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
+            with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_SHA256SUMS_INVALID"):
+                module.published_metadata(local, self.release(), verify_bytes=True)
+
+    def test_false_runtime_rights_state_is_refused(self):
+        local = module.qualify_local(self.lock, TAG)
+        doc = json.loads(self.contents["PROVENANCE.json"])
+        doc["products"][1]["owner_review_state"] = "PENDING"
+        self.contents["PROVENANCE.json"] = json.dumps(doc).encode()
+        self.update_checksum_index()
+        def fetch(url, dest, size, hosts):
+            dest.write_bytes(self.contents[url.rsplit("/", 1)[-1]])
+        with patch.object(module.child_bundle, "_fetch_https", side_effect=fetch):
+            with self.assertRaisesRegex(module.Refused, "PUBLIC_CORE_RELEASE_PROVENANCE_OWNER_UNVERIFIED"):
+                module.published_metadata(local, self.release(), verify_bytes=True)
+
+
+
+if __name__ == "__main__":
+    unittest.main()

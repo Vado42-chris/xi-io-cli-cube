@@ -3,9 +3,12 @@ import {createBackdropMotion} from '../lib/backdropMotion.mjs';
 import {cursorLightGradient, cursorLightGeometry, sourcePanelShadow, LIGHT_SETTINGS_QUALIFICATION} from '../lib/source-owned-light/cursorLight.mjs';
 
 /** Existing PNG/parallax and source-owned pointer light share one bounded clock. */
-export default function TabletBackdrop() {
+export default function TabletBackdrop({active = true}: {active?: boolean}) {
   const fieldRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    // Keep visual state mounted but stop animation frames, pointer handlers,
+    // ResizeObserver and scroll work while Plugins hides the installer.
+    if (!active) return;
     const field=fieldRef.current,product=field?.closest<HTMLElement>('[data-tablet-surface]');
     if(!field||!product)return;
     const media=window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -73,7 +76,7 @@ export default function TabletBackdrop() {
       window.removeEventListener('pagehide',hide);window.removeEventListener('pageshow',show);window.removeEventListener('blur',hide);window.removeEventListener('focus',show);
       if(oldShadow)product.style.setProperty('--workspace-source-shadow',oldShadow);else product.style.removeProperty('--workspace-source-shadow');
     };
-  },[]);
+  },[active]);
   return <div ref={fieldRef} className="ca-brand-field" aria-hidden="true" data-light-settings={LIGHT_SETTINGS_QUALIFICATION}>
     <div className="ca-brand-plate"/><div className="ca-atmosphere"/><div className="ca-vignette"/>
     <div className="ca-cursor-light" data-source-owned-light="node-system-cursor" style={{backgroundImage:cursorLightGradient()}}/>
