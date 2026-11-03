@@ -1,0 +1,72 @@
+name: XI-IO HEX local-first GitHub prerelease
+on:
+  # The first guarded push already published the immutable prerelease.
+  # Future release qualification must be explicitly invoked, not silently rerun.
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  local-first:
+    if: github.repository == 'Vado42-chris/xi-io-cli-cube' && github.ref == 'refs/heads/release/local-first-7ab90403-20261027'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout this approved release integration source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: release/local-first-7ab90403-20261027
+      - name: Checkout immutable product source separately
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 7ab90403678bcaaef73b2bf465915aa25b8acffd
+          path: checked-product
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Reopen exact CI bytes and produce unique Linux package
+        run: (cd checked-product && bash ../scripts/hex-local-first-release.sh)
+      - name: Install the unique package on disposable Linux
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          deb="$RUNNER_TEMP/xiio-local-first/publish/xi-io-hex-dev_0.1.0-dev.9+xiio7ab90403_amd64.deb"
+          sudo apt-get -y --no-remove install "$deb"
+          test "$(dpkg-query -W -f='${Version}' xi-io-hex-dev)" = '0.1.0-dev.9+xiio7ab90403'
+          test "$(dpkg-query -W -f='${Status}' xi-io-hex-dev)" = 'install ok installed'
+          test -z "$(sudo dpkg --verify xi-io-hex-dev)"
+          test "$(sha256sum /usr/bin/xi-io-hex-dev | awk '{print $1}')" = '05ea58005b9f3ecbf249d1a82a2cde9cac5ad37efdb5346c0ab2b68e1ba774b8'
+      - name: Exercise installed local CLI without XI-IO account or Ward, update and rollback
+        run: python3 scripts/test-installed-local-first-no-account.py
+      - name: Publish uniquely versioned GitHub LOCAL-ONLY prerelease
+        run: |
+          set -euo pipefail
+          tag=xiio-hex-local-7ab90403-20261027
+          out="$RUNNER_TEMP/xiio-local-first/publish"
+          (cd "$out" && sha256sum -c SHA256SUMS)
+          # A preexisting lightweight/annotated tag can have no GitHub release.
+          # gh release create --target does not retarget existing Git refs.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "GIT_TAG_EXISTS_REFUSE_OVERWRITE"; exit 1
+          fi
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "RELEASE_EXISTS_REFUSE_OVERWRITE"; exit 1
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+            --target 7ab90403678bcaaef73b2bf465915aa25b8acffd \
+            --title 'XI-IO HEX local-first Linux DEV (7ab90403)' \
+            --notes-file "$out/INSTALL-LOCAL-FIRST.txt" \
+            --prerelease --latest=false \
+            "$out/xi-io-hex-dev_0.1.0-dev.9+xiio7ab90403_amd64.deb" \
+            "$out/SHA256SUMS" "$out/PROVENANCE.json" "$out/INSTALL-LOCAL-FIRST.txt"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isPrerelease,targetCommitish,assets
+      - name: Retain local first-install qualification receipts if publication blocked
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hex-local-first-7ab90403-release-proof
+          path: ${{ runner.temp }}/xiio-local-first/publish/
+          if-no-files-found: warn
+          retention-days: 7
