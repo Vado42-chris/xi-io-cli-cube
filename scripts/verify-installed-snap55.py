@@ -173,7 +173,9 @@ class Native:
         self.stage = 'native-navigation'
         self.command(['xdotool','windowfocus','--sync',self.window])
         roles = [self.ax.Role.PUSH_BUTTON, self.ax.Role.PAGE_TAB]
+        self.stage = 'native-navigation-maths-control'
         self.click(self.wait(lambda: self.find('Maths', roles)))
+        self.stage = 'native-navigation-input-control'
         editor = self.wait(lambda: self.find('SNAP 5.5 input JSON', [self.ax.Role.ENTRY, self.ax.Role.TEXT]))
         rows = self.results
         for negative in [False, True]:

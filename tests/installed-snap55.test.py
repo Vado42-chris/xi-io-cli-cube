@@ -68,6 +68,44 @@ class Readback(unittest.TestCase):
             self.assertEqual(receipt['source_commit'],'b'*40)
             self.assertEqual(receipt['failure_category'],'ACCESSIBILITY_PROVIDER_UNAVAILABLE')
             self.assertFalse(receipt['semantic_ui_verified'])
+    def test_navigation_failures_persist_distinct_stages(self):
+        roles=type('Role',(),{'PUSH_BUTTON':1,'PAGE_TAB':2,'ENTRY':3,'TEXT':4})
+        maths=type('Node',(),{'get_name':lambda _:'Maths','get_role':lambda _:roles.PUSH_BUTTON})()
+        for input_reached in [False,True]:
+            with self.subTest(input_reached=input_reached),tempfile.TemporaryDirectory() as directory:
+                native=m.Native.__new__(m.Native);native.results=[]
+                native.ax=type('Ax',(),{'Role':roles})()
+                native.window='456'
+                native.command=lambda args:''
+                native.wait=lambda fn:fn()
+                native.visible=lambda node:True
+                native.nodes=lambda:[maths] if input_reached else []
+                clicks=[]
+                native.click=lambda node:clicks.append(node)
+                args=['verify','123','456','a'*64,'b'*40,directory]
+                with patch.dict(m.os.environ,{'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted'}),patch.object(m.sys,'argv',args),patch.object(m,'Native',return_value=native):
+                    self.assertEqual(m.main(),61)
+                receipt=json.loads((Path(directory)/'maths-interaction.json').read_text())
+                expected='native-navigation-input-control' if input_reached else 'native-navigation-maths-control'
+                self.assertEqual(receipt['last_stage'],expected)
+                self.assertEqual(receipt['failure_category'],'ACCESSIBLE_CONTROL_UNVERIFIED')
+                self.assertEqual(receipt['status'],'UNVERIFIED')
+                self.assertFalse(receipt['semantic_ui_verified'])
+                self.assertEqual(receipt['cases'],[])
+                self.assertEqual(len(clicks),int(input_reached))
+    def test_control_lookup_stays_exact_unique_and_visible(self):
+        def node(name='Maths',role=1,visible=True):
+            return type('Node',(),{'get_name':lambda _:name,'get_role':lambda _:role,'visible':visible})()
+        native=m.Native.__new__(m.Native)
+        native.visible=lambda n:n.visible
+        good=node()
+        native.nodes=lambda:[good]
+        self.assertIs(native.find('Maths',[1,2]),good)
+        for candidates in [[],[good,good],[node(name='maths')],[node(role=3)],[node(visible=False)]]:
+            with self.subTest(candidates=candidates):
+                native.nodes=lambda:candidates
+                with self.assertRaisesRegex(m.Unverified,'ACCESSIBLE_CONTROL_UNVERIFIED'):
+                    native.find('Maths',[1,2])
     def test_guarded_workflow(self):
         text=(ROOT/'.github/workflows/installer-contract.yml').read_text().split('  maths-installed-window:',1)[1]
         for value in ['github-hosted','scrot -z -o','verify-installed-snap55.py','timeout --signal=KILL 110s','maths-numeric.png','maths-unknown.png','maths-interaction.json']:
