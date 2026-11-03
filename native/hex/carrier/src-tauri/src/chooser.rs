@@ -7,10 +7,10 @@ static CHOOSER_OPEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all="lowercase")]
-pub enum DirectoryPurpose { Workspace, Installation }
+pub enum DirectoryPurpose { Workspace, Installation, ServerPackage }
 impl DirectoryPurpose {
     fn title(&self)-> &'static str { match self {
-        Self::Workspace=>"Choose workspace folder", Self::Installation=>"Choose CLI installation folder",
+        Self::Workspace=>"Choose workspace folder", Self::Installation=>"Choose CLI installation folder", Self::ServerPackage=>"Choose XI-IO server package folder",
     }}
 }
 fn selected_path(path:Option<std::path::PathBuf>)->Result<Value,String>{
@@ -72,6 +72,7 @@ mod tests{
     #[test] fn finite_purposes_only(){
         assert!(serde_json::from_str::<DirectoryPurpose>("\"workspace\"").is_ok());
         assert!(serde_json::from_str::<DirectoryPurpose>("\"installation\"").is_ok());
+        assert!(serde_json::from_str::<DirectoryPurpose>("\"server-package\"").is_ok());
         assert!(serde_json::from_str::<DirectoryPurpose>("\"arbitrary-file\"").is_err());
     }
     #[test] fn no_relative_or_missing_selection(){
