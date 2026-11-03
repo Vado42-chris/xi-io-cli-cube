@@ -1,6 +1,6 @@
 // The existing native chooser selects a directory; selection grants no authority.
 export async function selectNativeDirectory(purpose, host = globalThis) {
-  if (!['workspace', 'installation'].includes(purpose)) throw new Error('Directory purpose is not supported.');
+  if (!['workspace', 'installation', 'server-package'].includes(purpose)) throw new Error('Directory purpose is not supported.');
   const invoke = host.__TAURI__?.core?.invoke;
   if (typeof invoke !== 'function') throw new Error('Open the native HEX application to choose a local directory.');
   const result = await invoke('native_select_directory', {purpose});
