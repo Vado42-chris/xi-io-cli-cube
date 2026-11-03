@@ -1,0 +1,31 @@
+name: qualify xi-io.net PR1422 exact head
+on:
+  push:
+    branches: [fix/native-hex-plugin-catalog-20261028]
+    paths:
+      - '.github/workflows/qualify-xiio-rotfl-1422.yml'
+permissions:
+  contents: read
+jobs:
+  qualify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Vado42-chris/xi-io.net
+          ref: ab275e4587497d12f2f949ec57494c65065eab24
+          path: xiio
+          persist-credentials: false
+      - name: Syntax current autopilot and successor helper
+        working-directory: xiio
+        run: |
+          set -euo pipefail
+          bash -n scripts/xiio-rotfl-autopilot
+          python3 -m py_compile scripts/rotfl-successor-wake.py
+      - name: Run exact hostile bundle
+        working-directory: xiio
+        run: bash scripts/validate-rotfl-yield-hostile-bundle.sh
+      - name: Run ROTFL validator
+        working-directory: xiio
+        run: bash scripts/validate-xiio-rotfl.sh
