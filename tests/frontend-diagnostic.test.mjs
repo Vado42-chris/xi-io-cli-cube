@@ -29,7 +29,7 @@ test('exactly three bounded data-only observations, no text or error details',()
  assert.equal(f.calls.length,3);assert.equal(f.listeners.size,0);
  for(const [sample,[command,args]] of f.calls.entries()) {
   assert.equal(command,'native_product_window');assert.equal(args.action,'state');
-  assert.deepEqual(args.diagnostic,{sample,errors:[255,1,1,1,1],nodes:Array.from({length:4},()=>[1,1440,900,1]),root_children:true,document_visible:true,raf:true,shadow:true});
+  assert.deepEqual(args.diagnostic,{sample,errors:[255,1,1,1,1],csp:[0,0],nodes:Array.from({length:4},()=>[1,1440,900,1]),root_children:true,document_visible:true,raf:true,shadow:true});
  }
 });
 test('missing React root after an error stays absent, no fallback UI',()=>{
@@ -52,9 +52,47 @@ test('browser-only mode makes no observation, IPC rejection does not retry',asyn
 test('native boundary remains local, typed, bounded and state-only',()=>{
  const s=read('native/hex/carrier/src-tauri/src/lib.rs');
  assert.match(s,/#\[serde\(deny_unknown_fields\)\]/);
- assert.match(s,/errors: \[u8; 5\]/);assert.match(s,/nodes: \[\[u16; 4\]; 4\]/);
+ assert.match(s,/errors: \[u8; 5\]/);assert.match(s,/csp: \[u8; 2\]/);assert.match(s,/nodes: \[\[u16; 4\]; 4\]/);
  assert.match(s,/count < 3/);assert.match(s,/action != "state" \|\| direction.is_some\(\) \|\| !observation.valid\(\)/);
  const command=s.slice(s.indexOf('fn native_product_window'),s.indexOf('/// Read only'));
  assert.ok(command.indexOf('local_caller(&window)?')<command.indexOf('HEX_FRONTEND_DIAGNOSTIC'));
  assert.match(read('src/main.tsx'),/createRoot\(document.getElementById\('root'\)!, startFrontendDiagnostic\(window\)\)/);
+});
+
+test('CSP event exposes only directive and exact local WASM class',()=>{
+ const f=fixture();f.view.location={href:'tauri://localhost/index.html'};
+ startFrontendDiagnostic(f.view);
+ f.listeners.get('securitypolicyviolation')({
+  effectiveDirective:'connect-src',
+  blockedURI:'tauri://localhost/donor/artcraft_launcher_web_bg.wasm?secret=DO_NOT_EMIT'
+ });
+ f.timers[0].fn();
+ const observation=f.calls[0][1].diagnostic;
+ assert.deepEqual(observation.csp,[1,2]);
+ assert.equal(observation.errors[4],1);
+ assert.doesNotMatch(JSON.stringify(observation),/DO_NOT_EMIT|artcraft_launcher_web_bg\.wasm|tauri:\/\//);
+});
+
+test('CSP raw values and unsupported directives never enter native IPC',()=>{
+ const f=fixture();f.view.location={href:'tauri://localhost/index.html'};
+ startFrontendDiagnostic(f.view);
+ f.listeners.get('securitypolicyviolation')({
+  effectiveDirective:'frame-src',
+  blockedURI:'https://example.invalid/?token=NEVER_EMIT'
+ });
+ f.timers[0].fn();
+ const observation=f.calls[0][1].diagnostic;
+ assert.deepEqual(observation.csp,[0,0]);
+ assert.equal(observation.errors[4],1);
+ assert.doesNotMatch(JSON.stringify(observation),/NEVER_EMIT|frame-src|example.invalid/);
+});
+
+test('unparseable blocked URI still preserves the directive code',()=>{
+ const f=fixture();f.view.location={href:'tauri://localhost/index.html'};
+ startFrontendDiagnostic(f.view);
+ f.listeners.get('securitypolicyviolation')({
+  effectiveDirective:'connect-src', blockedURI:'https://%bad'
+ });
+ f.timers[0].fn();
+ assert.deepEqual(f.calls[0][1].diagnostic.csp,[1,0]);
 });
