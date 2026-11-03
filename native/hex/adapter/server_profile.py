@@ -26,8 +26,11 @@ def _read(p):
  return p.read_bytes()
 def _roots(home):
  h=Path(home)
- return {'HOME':str(h),'XDG_CONFIG_HOME':str(h/'config'),'XDG_DATA_HOME':str(h/'data'),
-         'XDG_STATE_HOME':str(h/'state'),'XDG_CACHE_HOME':str(h/'cache')}
+ return {'HOME':str(h),
+         'XDG_CONFIG_HOME':os.environ.get('XDG_CONFIG_HOME',str(h/'.config')),
+         'XDG_DATA_HOME':os.environ.get('XDG_DATA_HOME',str(h/'.local/share')),
+         'XDG_STATE_HOME':os.environ.get('XDG_STATE_HOME',str(h/'.local/state')),
+         'XDG_CACHE_HOME':os.environ.get('XDG_CACHE_HOME',str(h/'.cache'))}
 
 def load_server_package(root):
  root=Path(root)
