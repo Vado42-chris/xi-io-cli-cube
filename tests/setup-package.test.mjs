@@ -18,7 +18,11 @@ for(const native of [false,true])test('first Setup package truth and existing pr
  if(native){const invoke=async(command,args)=>{
   if(command==='native_product_window')return {maximized:false,fullscreen:false};
   assert.equal(command,'installer_request');requests.push(JSON.parse(JSON.stringify(args)));
-  assert.deepEqual(requests.at(-1),{request:{action:'inspect'}});
+  // Navigation may perform read-only CLI and core custody inspection. It must
+  // never prepare, apply, roll back or reuse an approval.
+  assert.ok(['inspect','bundle_inspect'].includes(args.request?.action),'navigation attempted an installer effect');
+  if(args.request.action==='bundle_inspect')
+   return {ok:true,result:{phase:'BLOCKED_RELEASE_PROFILE_UNPUBLISHED',installable:false}};
   return {ok:true,result:{supported_components:{cli:{available:true},bins:{available:false,reason:'NOT_PACKAGED'},switchboard:{available:false,reason:'NOT_PACKAGED'}},plans:[]}};
  };w.__TAURI__={core:{invoke}};w.__TAURI_INTERNALS__={invoke};}
  try{
@@ -39,7 +43,11 @@ for(const native of [false,true])test('first Setup package truth and existing pr
   [...setup.querySelectorAll('button')].find(b=>b.textContent.includes('Review local installation')).click();await pause();
   const panel=shadow.querySelector('[aria-label="Native HEX installer"]');assert.ok(panel);assert.equal(panel.closest('.hidden'),null);
   assert.ok(w.document.querySelector('[data-window-rail-tabs] button[aria-label="Install"] > div'));
-  assert.ok(requests.every(r=>r.request.action==='inspect'),'navigation never prepares or applies an installation');
+  assert.ok(requests.every(r=>['inspect','bundle_inspect'].includes(r.request.action)),'navigation never prepares or applies an installation');
+  if(native) {
+   assert.equal(requests.filter(r=>r.request.action==='bundle_inspect').length,1);
+   assert.match(panel.textContent,/qualified release package manifest is not yet shipped/);
+  }
   assert.equal(shadow.querySelector('[aria-label="Software available in this build"]'),null);
  }finally{w.close();}
 });
