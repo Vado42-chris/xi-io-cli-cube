@@ -113,7 +113,7 @@ export default function NativeInstallerPanel() {
         <label className="block text-sm"><input type="checkbox" checked={allowHotpatches} disabled={!allowCentralUpdates} onChange={e => {edit(); setAllowHotpatches(e.target.checked); if(!e.target.checked)setAutoSecurityHotpatch(false);}} /> Permit signed, rollback-capable hotpatch proposals for the granted service scope.</label>
         <label className="block text-sm"><input type="checkbox" checked={autoSecurityHotpatch} disabled={!allowHotpatches} onChange={e => {edit(); setAutoSecurityHotpatch(e.target.checked);}} /> Allow security hotpatches to become auto-eligible. Ward/currentness/effect verification still applies.</label>
         <p className="text-xs text-workspace-muted">Remote access is not granted here. Permissions are bound into the reviewed plan digest and can be revoked by replacing the local grant with a zero-capability profile.</p>
-      </fieldset>
+      </fieldset>}
       {!repairMode && installerComponents.filter(name => !availability[name].available).map(name => <p key={name} className="text-xs text-workspace-muted">{name.toUpperCase()}: unavailable — {availability[name].reason}. No installation is offered for this payload.</p>)}
       <div className="flex flex-wrap gap-2">
         <button className={button} disabled={busy || unknown || !prefix.startsWith('/') || !node.startsWith('/') || (repairMode ? !binDir.startsWith('/') : !canPrepareComponents(components, availability))} onClick={() => void run(repairMode ? {action: 'prepare_repair', prefix, node, bin_dir: binDir} : {action: 'prepare', prefix, node, components, permission_profile: permissionProfile})}>Check selected Node & prepare plan</button>
