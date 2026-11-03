@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROTFL="$SCRIPT_DIR/xiio-rotfl"
+TEXTPACK="$SCRIPT_DIR/xiio-case-textpack"
+LEDGER_DIR="${XIIO_ROTFL_LEDGER_DIR:-$ROOT/.xiio/rotfl}"
+mkdir -p "$LEDGER_DIR"
+LOG="$LEDGER_DIR/autopilot.log"
+PIDFILE="$LEDGER_DIR/autopilot.pid"
+HEARTBEAT="$LEDGER_DIR/autopilot-heartbeat.json"
+CURRENT_RUN="$LEDGER_DIR/autopilot-current-run.json"
+RUN_BUNDLE_LEDGER="$LEDGER_DIR/run-bundles.jsonl"
+SUCCESSOR_HELPER="$ROOT/scripts/rotfl-successor-wake.py"
+NEXT_INPUT_DIR="$LEDGER_DIR/next-inputs"
+WAKE_CONSUMPTION_LEDGER="$LEDGER_DIR/wake-consumption.jsonl"
+mkdir -p "$NEXT_INPUT_DIR"
+touch "$WAKE_CONSUMPTION_LEDGER"
+DEFAULT_QUERY="Compile the current bounded Work into source-derived facts, missing proof, contradictions or stale items, and no-effect next tasks. Preserve exact Work identity and say UNKNOWN when unsupported. Do not send, file, serve, contact, or modify anything."
+AIMAIL_TO="${XIIO_ROTFL_AIMAIL_TO:-}"
+AIMAIL_PROJECT="${XIIO_ROTFL_AIMAIL_PROJECT:-}"
+AIMAIL_ROOT="${XIIO_ROTFL_AIMAIL_ROOT:-}"
+json_escape(){ local s="${1:-}"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; s="${s//$'\r'/}"; printf '%s' "$s"; }
+now_utc(){ date -u +%Y-%m-%dT%H:%M:%SZ; }
+new_id(){ printf 'AUTORUN-%s' "$(date +%s%N 2>/dev/null || date +%s)"; }
+json_field(){
+  local raw="${1:-}" key="$2" quoted unquoted
+  quoted="$(printf '%s' "$raw" | sed -n "s/.*\"$key\":\"\([^\"]*\)\".*/\1/p" | tail -n 1)"
+  if [ -n "$quoted" ]; then printf '%s' "$quoted"; return 0; fi
+  unquoted="$(printf '%s' "$raw" | sed -n "s/.*\"$key\":\([^,\"{}][^,}]*\).*/\1/p" | tail -n 1 | tr -d '[:space:]')"
+  printf '%s' "$unquoted"
+}
+classify_case_root(){ local cr="$1"; [ -z "$cr" ] && { printf UNKNOWN; return; }; [ "$(cd "$cr" 2>/dev/null && pwd || printf '%s' "$cr")" = "$ROOT" ] && { printf FRAMEWORK_DEV_REPO; return; }; case "$(printf '%s' "$cr" | tr '[:upper:]' '[:lower:]')" in *legal*|*court*|*evidence*|*case*|*hallberg*|*andersen*) printf LEGAL_EVIDENCE_OR_CASE_PACKAGE ;; *) printf UNKNOWN_OR_OTHER ;; esac; }
+last_completed_run_id(){ [ -f "$RUN_BUNDLE_LEDGER" ] || return 0; local last id; last="$(tail -n 1 "$RUN_BUNDLE_LEDGER" 2>/dev/null || true)"; id="$(json_field "$last" run_id)"; [ -n "$id" ] && printf '%s' "$id"; }
+next_due_at(){ date -u -d "+${1:-900} seconds" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf UNKNOWN; }
+write_heartbeat(){ local phase="$1" case_root="$2" current_run_id="$3" last_error="$4" interval="${5:-900}" last_completed; last_completed="$(last_completed_run_id)"; [ -n "$last_completed" ] || last_completed=UNKNOWN; cat > "$HEARTBEAT" <<JSON
+{"schema":"xiio.rotfl.autopilot-heartbeat/v1","updated_at":"$(now_utc)","loop_started_at":"${LOOP_STARTED_AT:-UNKNOWN}","current_phase":"$(json_escape "$phase")","current_run_id":"$(json_escape "$current_run_id")","last_completed_run_id":"$(json_escape "$last_completed")","last_error":"$(json_escape "$last_error")","next_due":"$(next_due_at "$interval")","case_root":"$(json_escape "$case_root")","case_root_class":"$(json_escape "$(classify_case_root "$case_root")")","effect_authority":0,"hard":"AUTOPILOT_RUNNING != COMPLETED_RUN; OLLAMA_API_PASS != GENERATION_COMPLETE; FRAMEWORK_DEV_REPO != LEGAL_PROGRESS"}
+JSON
+}
+get_flag(){ local key="$1" prev=""; shift; for arg in "$@"; do [ "$prev" = "--$key" ] && { printf '%s' "$arg"; return 0; }; prev="$arg"; done; return 1; }
+coherence_for(){ local gen="$1" xiio_run_id="$2" context_file="$3" prompt_file="$4" output_file="$5"; if [ "$gen" != GENERATION_COMPLETE ]; then printf NO_STALE_FILES_ATTACHED_FAILED_RUN; return; fi; if [ -z "$xiio_run_id" ] || [ "$xiio_run_id" = UNKNOWN ]; then printf FAIL_NO_XIIO_RUN_ID; return; fi; case "$context_file" in *"$xiio_run_id"*) ;; *) printf FAIL_CONTEXT_MISMATCH; return ;; esac; case "$prompt_file" in *"$xiio_run_id"*) ;; *) printf FAIL_PROMPT_MISMATCH; return ;; esac; case "$output_file" in *"$xiio_run_id"*) ;; *) printf FAIL_OUTPUT_MISMATCH; return ;; esac; printf PASS_COHERENT_BUNDLE; }
+successor_validate(){
+  local receipt="${1:-}" raw wake_path wake_ref next_ref
+  raw="$(cat "$receipt" 2>/dev/null || true)"
+  wake_path="$(json_field "$raw" wake_receipt_path)"
+  wake_ref="$(json_field "$raw" wake_ref)"
+  next_ref="$(json_field "$raw" next_input_ref)"
+  python3 "$SUCCESSOR_HELPER" validate \
+    --wake-path "$wake_path" --wake-ref "$wake_ref" --next-ref "$next_ref" --next-dir "$NEXT_INPUT_DIR"
+}
+
+successor_claim(){
+  local receipt="${1:-}" raw wake_path wake_ref next_ref
+  raw="$(cat "$receipt" 2>/dev/null || true)"
+  wake_path="$(json_field "$raw" wake_receipt_path)"
+  wake_ref="$(json_field "$raw" wake_ref)"
+  next_ref="$(json_field "$raw" next_input_ref)"
+  python3 "$SUCCESSOR_HELPER" claim \
+    --wake-path "$wake_path" --wake-ref "$wake_ref" --next-ref "$next_ref" --next-dir "$NEXT_INPUT_DIR" \
+    --ledger "$WAKE_CONSUMPTION_LEDGER" --nul
+}
+
+successor_complete(){
+  python3 "$SUCCESSOR_HELPER" complete \
+    --ledger "$WAKE_CONSUMPTION_LEDGER" --wake-ref "$1" --next-ref "$2" --digest "$3" --successor-run-id "$4"
+}
+
+current_pending_run_id(){
+  [ -f "$CURRENT_RUN" ] || return 0
+  local raw state run
+  raw="$(cat "$CURRENT_RUN" 2>/dev/null || true)"
+  state="$(json_field "$raw" state)"
+  run="$(json_field "$raw" last_bundle_run_id)"
+  [ "$state" = AWAITING_LIFECYCLE_RETURN ] && [ -n "$run" ] && printf '%s' "$run"
+}
+
+lifecycle_gate(){
+  local receipt="${1:-}" expected_run_id="${2:-}" expected_agent_id="${3:-}" expected_principal_ref="${4:-}" expected_assignment_ref="${5:-}" raw schema run_id agent_id principal_ref assignment_ref assignment_generation return_state apply_verdict reverse_state silent next_input wake authority
+  [ -n "$receipt" ] || { printf 'WAIT_CONTINUATION_RECEIPT_REQUIRED'; return 10; }
+  [ -f "$receipt" ] || { printf 'WAIT_CONTINUATION_RECEIPT_NOT_FOUND'; return 11; }
+  raw="$(cat "$receipt" 2>/dev/null || true)"
+  schema="$(json_field "$raw" schema)"
+  [ "$schema" = "xiio.rotfl.lifecycle-owner-proof/v1" ] || { printf 'BLOCKED_OWNER_PROOF_SCHEMA_INVALID'; return 12; }
+  run_id="$(json_field "$raw" run_id)"
+  agent_id="$(json_field "$raw" agent_id)"
+  principal_ref="$(json_field "$raw" principal_ref)"
+  assignment_ref="$(json_field "$raw" assignment_ref)"
+  assignment_generation="$(json_field "$raw" assignment_generation)"
+  if [ -n "$expected_run_id" ] && [ "$expected_run_id" != UNKNOWN ] && [ "$run_id" != "$expected_run_id" ]; then printf 'BLOCKED_LIFECYCLE_RUN_ID_MISMATCH'; return 13; fi
+  [ -n "$agent_id" ] && [ -n "$principal_ref" ] && [ -n "$assignment_ref" ] && [ -n "$assignment_generation" ] || { printf 'BLOCKED_AGENT_ASSIGNMENT_IDENTITY_MISSING'; return 14; }
+  # #351: UserPrincipal(agent) is permanent. run_id / model / provider / session / caller agent_id are leases, not identity.
+  # Caller --principal-ref / env are probe-only; owner binding paths are the resolve surface.
+  case "$principal_ref" in
+    "$run_id"|"$agent_id"|"$assignment_ref"|"$assignment_generation") printf 'BLOCKED_PRINCIPAL_COLLAPSED_TO_LEASE'; return 31 ;;
+    principal:*|userprincipal:*|up:agent:*) ;;
+    *) printf 'BLOCKED_PRINCIPAL_REF_NOT_USERPRINCIPAL_AGENT'; return 32 ;;
+  esac
+  case "$(printf '%s' "$principal_ref" | tr '[:upper:]' '[:lower:]')" in
+    *ollama*|*openai*|*anthropic*|*model:*|*provider:*|*session:*|*chatgpt*|*cursor:*)
+      printf 'BLOCKED_MODEL_OR_SESSION_AS_PRINCIPAL'; return 33 ;;
+  esac
+  case "$assignment_generation" in
+    "$run_id"|"$agent_id") printf 'BLOCKED_ASSIGNMENT_GENERATION_COLLAPSED_TO_LEASE'; return 34 ;;
+  esac
+  local principal_binding_path assignment_binding_path bound_principal bound_assignment bound_generation
+  principal_binding_path="$(json_field "$raw" principal_binding_path)"
+  assignment_binding_path="$(json_field "$raw" assignment_binding_path)"
+  [ -n "$principal_binding_path" ] && [ -f "$principal_binding_path" ] || { printf 'BLOCKED_OWNER_PRINCIPAL_BINDING_UNVERIFIED'; return 35; }
+  [ -n "$assignment_binding_path" ] && [ -f "$assignment_binding_path" ] || { printf 'BLOCKED_OWNER_ASSIGNMENT_BINDING_UNVERIFIED'; return 36; }
+  bound_principal="$(json_field "$(cat "$principal_binding_path" 2>/dev/null || true)" principal_ref)"
+  [ -n "$bound_principal" ] || bound_principal="$(tr -d '[:space:]' < "$principal_binding_path" 2>/dev/null || true)"
+  [ -n "$bound_principal" ] && [ "$bound_principal" = "$principal_ref" ] || { printf 'BLOCKED_PRINCIPAL_BINDING_MISMATCH'; return 37; }
+  bound_assignment="$(json_field "$(cat "$assignment_binding_path" 2>/dev/null || true)" assignment_ref)"
+  bound_generation="$(json_field "$(cat "$assignment_binding_path" 2>/dev/null || true)" assignment_generation)"
+  [ -n "$bound_assignment" ] && [ "$bound_assignment" = "$assignment_ref" ] || { printf 'BLOCKED_ASSIGNMENT_BINDING_MISMATCH'; return 38; }
+  [ -n "$bound_generation" ] && [ "$bound_generation" = "$assignment_generation" ] || { printf 'BLOCKED_ASSIGNMENT_GENERATION_BINDING_MISMATCH'; return 39; }
+  # Stale assignment acceptance: owner pack/current generation must match when provided.
+  if [ -n "${XIIO_ASSIGNMENT_GENERATION:-}" ] && [ "${XIIO_ASSIGNMENT_GENERATION}" != UNKNOWN ] && [ "$assignment_generation" != "$XIIO_ASSIGNMENT_GENERATION" ]; then
+    printf 'BLOCKED_STALE_ASSIGNMENT_GENERATION'; return 40
+  fi
+  # Probe flags may detect bleed; they never mint principal/WA authority.
+  if [ -n "$expected_agent_id" ] && [ "$expected_agent_id" != UNKNOWN ] && [ "$agent_id" != "$expected_agent_id" ]; then printf 'BLOCKED_AGENT_ID_MISMATCH'; return 15; fi
+  if [ -n "$expected_principal_ref" ] && [ "$expected_principal_ref" != UNKNOWN ] && [ "$principal_ref" != "$expected_principal_ref" ]; then printf 'BLOCKED_PRINCIPAL_MISMATCH'; return 16; fi
+  if [ -n "$expected_assignment_ref" ] && [ "$expected_assignment_ref" != UNKNOWN ] && [ "$assignment_ref" != "$expected_assignment_ref" ]; then printf 'BLOCKED_ASSIGNMENT_MISMATCH'; return 17; fi
+  return_state="$(json_field "$raw" worker_return_state)"
+  apply_verdict="$(json_field "$raw" apply_return_verdict)"
+  reverse_state="$(json_field "$raw" affected_return_state)"
+  silent="$(json_field "$raw" silent_remainder)"
+  next_input="$(json_field "$raw" next_input_ref)"
+  wake="$(json_field "$raw" wake_ref)"
+  authority="$(json_field "$raw" wake_effect_authority)"
+  local return_path readback_path wake_path
+  return_path="$(json_field "$raw" owner_return_path)"
+  readback_path="$(json_field "$raw" reverse_readback_path)"
+  wake_path="$(json_field "$raw" wake_receipt_path)"
+  [ -n "$return_path" ] && [ -f "$return_path" ] || { printf 'BLOCKED_OWNER_RETURN_PATH_UNVERIFIED'; return 21; }
+  [ -n "$readback_path" ] && [ -f "$readback_path" ] || { printf 'BLOCKED_REVERSE_READBACK_PATH_UNVERIFIED'; return 22; }
+  [ -n "$wake_path" ] && [ -f "$wake_path" ] || { printf 'BLOCKED_WAKE_RECEIPT_PATH_UNVERIFIED'; return 23; }
+  local successor_state
+  successor_state="$(successor_validate "$receipt" 2>/dev/null || true)"
+  [ "$successor_state" = PASS_SUCCESSOR_MATERIALIZED ] || { printf '%s' "${successor_state:-BLOCKED_SUCCESSOR_MATERIALIZATION_UNVERIFIED}"; return 41; }
+  [ "$return_state" = "RETURN_LINEAGE_BOUND" ] || { printf 'BLOCKED_OWNER_WORKER_RETURN_NOT_BOUND'; return 24; }
+  case "$apply_verdict" in APPLY_RETURN_APPLIED_READBACK_VERIFIED|ALREADY_APPLIED_NO_OP) ;; *) printf 'BLOCKED_OWNER_APPLY_RETURN_UNVERIFIED'; return 25 ;; esac
+  [ "$reverse_state" = "CURRENT" ] || { printf 'BLOCKED_AFFECTED_REVERSE_READBACK_INCOMPLETE'; return 26; }
+  [ "$silent" = "0" ] || { printf 'BLOCKED_SILENT_REMAINDER'; return 27; }
+  [ -n "$next_input" ] || { printf 'BLOCKED_NEXT_INPUT_MISSING'; return 28; }
+  [ -n "$wake" ] || { printf 'BLOCKED_SUCCESSOR_WAKE_MISSING'; return 29; }
+  case "$authority" in ""|0|false|FALSE|NO_EFFECT) ;; *) printf 'BLOCKED_WAKE_CLAIMS_EFFECT_AUTHORITY'; return 30; esac
+  printf 'PASS_CONTINUATION_DRAINED'
+  return 0
+}
+
+run_once(){ local case_root="$1" query="$2" interval="${3:-900}" lifecycle_arg="${4-__USE_ENV__}" lifecycle_receipt; if [ "$lifecycle_arg" = __USE_ENV__ ]; then lifecycle_receipt="${XIIO_ROTFL_LIFECYCLE_RECEIPT:-}"; elif [ "$lifecycle_arg" = __NONE__ ]; then lifecycle_receipt=""; else lifecycle_receipt="$lifecycle_arg"; fi; local autorun_id textpack receipt latest_dir run_receipt xiio_run_id bundle_run_id run_state context_file prompt_file output_file gen_phase coherence started_at completed_at last_error lifecycle_state; [ -n "$case_root" ] || case_root="$ROOT"; [ -n "$query" ] || query="$DEFAULT_QUERY"; autorun_id="$(new_id)"; started_at="$(now_utc)"; write_heartbeat TEXTPACK_STARTED "$case_root" "$autorun_id" NONE "$interval"; receipt="$(bash "$TEXTPACK" "$case_root" 2>/dev/null || true)"; textpack="$(printf '%s' "$receipt" | sed -n 's/.*"output":"\([^"]*\)".*/\1/p' | head -n 1)"; if [ -z "$textpack" ]; then write_heartbeat FAILED "$case_root" "$autorun_id" TEXTPACK_FAILED "$interval"; printf '{"schema":"xiio.rotfl.autopilot/v1","state":"FAIL","reason":"TEXTPACK_FAILED","case_root":"%s","current_run_id":"%s","effect_authority":0}\n' "$(json_escape "$case_root")" "$(json_escape "$autorun_id")"; return 2; fi; latest_dir="$(dirname "$textpack")"; cat > "$CURRENT_RUN" <<JSON
+{"schema":"xiio.rotfl.current-run/v1","state":"TEXTPACK_COMPLETE","current_run_id":"$(json_escape "$autorun_id")","case_root":"$(json_escape "$case_root")","case_root_class":"$(json_escape "$(classify_case_root "$case_root")")","textpack":"$(json_escape "$textpack")","started_at":"$(json_escape "$started_at")","effect_authority":0}
+JSON
+write_heartbeat OLLAMA_GENERATION_STARTED "$case_root" "$autorun_id" NONE "$interval"; bash "$ROTFL" event add --class rotfl_autopilot --text "autopilot run_once case_root=$case_root textpack=$textpack current_run_id=$autorun_id" >/dev/null 2>&1 || true; if [ -n "$AIMAIL_TO" ] && [ -n "$AIMAIL_PROJECT" ] && [ -n "$AIMAIL_ROOT" ]; then bash "$ROTFL" ai-mail send --from rotfl-autopilot --to "$AIMAIL_TO" --project "$AIMAIL_PROJECT" --root "$AIMAIL_ROOT" --subject "ROTFL local pass started" --body "case_root=$case_root textpack=$textpack current_run_id=$autorun_id effect_authority=0" >/dev/null 2>&1 || true; fi; run_receipt="$(bash "$ROTFL" once --root "$latest_dir" --query "$query" 2>&1 || true)"; printf '%s\n' "$run_receipt"; xiio_run_id="$(json_field "$run_receipt" run_id)"; [ -n "$xiio_run_id" ] || xiio_run_id=UNKNOWN; run_state="$(json_field "$run_receipt" state)"; [ -n "$run_state" ] || run_state=UNKNOWN; context_file="$(json_field "$run_receipt" context_file)"; [ -n "$context_file" ] || context_file=NONE_BOUND_TO_BUNDLE; prompt_file="$(json_field "$run_receipt" prompt_file)"; [ -n "$prompt_file" ] || prompt_file=NONE_BOUND_TO_BUNDLE; output_file="$(json_field "$run_receipt" ollama_output_file)"; [ -n "$output_file" ] || output_file=NONE_BOUND_TO_BUNDLE; gen_phase=GENERATION_FAILED; last_error=GENERATION_FAILED; case "$run_state" in PASS_LOCAL_OLLAMA_RECEIPT|PASS) gen_phase=GENERATION_COMPLETE; last_error=NONE ;; TRUE_WAIT_OLLAMA_UNREACHABLE|TRUE_WAIT*) gen_phase=GENERATION_WAIT; last_error="$run_state" ;; FAIL*|UNKNOWN) gen_phase=GENERATION_FAILED; last_error="$run_state" ;; esac; bundle_run_id="$xiio_run_id"; [ "$bundle_run_id" != UNKNOWN ] || bundle_run_id="$autorun_id"; coherence="$(coherence_for "$gen_phase" "$xiio_run_id" "$context_file" "$prompt_file" "$output_file")"; completed_at="$(now_utc)"; printf '{"schema":"xiio.rotfl.run-bundle/v1","autorun_id":"%s","run_id":"%s","xiio_run_id":"%s","state":"%s","generation_phase":"%s","bundle_coherence":"%s","case_root":"%s","case_root_class":"%s","textpack":"%s","context_file":"%s","prompt_file":"%s","ollama_output_file":"%s","started_at":"%s","completed_at":"%s","effect_authority":0,"hard":"RUNNING != COMPLETED_RUN; OLLAMA_API_PASS != GENERATION_COMPLETE; stale latest_file fallback forbidden"}\n' "$(json_escape "$autorun_id")" "$(json_escape "$bundle_run_id")" "$(json_escape "$xiio_run_id")" "$(json_escape "$run_state")" "$(json_escape "$gen_phase")" "$(json_escape "$coherence")" "$(json_escape "$case_root")" "$(json_escape "$(classify_case_root "$case_root")")" "$(json_escape "$textpack")" "$(json_escape "$context_file")" "$(json_escape "$prompt_file")" "$(json_escape "$output_file")" "$(json_escape "$started_at")" "$(json_escape "$completed_at")" >> "$RUN_BUNDLE_LEDGER"; cat > "$CURRENT_RUN" <<JSON
+{"schema":"xiio.rotfl.current-run/v1","state":"AWAITING_LIFECYCLE_RETURN","current_run_id":"$(json_escape "$autorun_id")","last_bundle_run_id":"$(json_escape "$bundle_run_id")","generation_phase":"$(json_escape "$gen_phase")","bundle_coherence":"$(json_escape "$coherence")","case_root":"$(json_escape "$case_root")","case_root_class":"$(json_escape "$(classify_case_root "$case_root")")","effect_authority":0}
+JSON
+lifecycle_state="$(lifecycle_gate "$lifecycle_receipt" "$xiio_run_id" "${XIIO_AGENT_ID:-UNKNOWN}" "${XIIO_PRINCIPAL_REF:-UNKNOWN}" "${XIIO_ASSIGNMENT_REF:-UNKNOWN}" 2>/dev/null || true)"; [ -n "$lifecycle_state" ] || lifecycle_state=WAIT_CONTINUATION_RECEIPT_REQUIRED; if [ "$gen_phase" = GENERATION_FAILED ] || [ "$gen_phase" = GENERATION_WAIT ]; then write_heartbeat "$gen_phase" "$case_root" "$autorun_id" "$last_error" "$interval"; printf '{"schema":"xiio.rotfl.autopilot/v1","state":"WAIT","reason":"%s","generation_phase":"%s","run_id":"%s","effect_authority":0,"hard":"FAILED_RUN!=SLEEPING; WAIT!=FRESH_GENERATION"}\n' "$(json_escape "$last_error")" "$(json_escape "$gen_phase")" "$(json_escape "$xiio_run_id")"; return 21; fi; if [ "$gen_phase" = GENERATION_COMPLETE ] && [ "$lifecycle_state" != PASS_CONTINUATION_DRAINED ]; then write_heartbeat "$lifecycle_state" "$case_root" "$autorun_id" "$lifecycle_state" "$interval"; printf '{"schema":"xiio.rotfl.autopilot-yield-gate/v1","state":"WAIT","reason":"%s","run_id":"%s","effect_authority":0,"hard":"RESULT!=LOOP_EXIT; RETURN!=APPLY_RETURN; APPLY_RETURN!=REAP; NEXT_WAKE_REQUIRED_BEFORE_YIELD"}\n' "$(json_escape "$lifecycle_state")" "$(json_escape "$xiio_run_id")"; return 20; fi; write_heartbeat "$gen_phase" "$case_root" "$autorun_id" "$last_error" "$interval"; }
+loop_worker(){
+  local case_root="$1" interval="$2" query="$3" lifecycle_state once_rc pending_run successor_tmp claim_rc successor_case successor_query successor_wake successor_next successor_digest successor_run
+  [ -n "$case_root" ] || case_root="$ROOT"
+  [ -n "$interval" ] || interval=900
+  [ -n "$query" ] || query="$DEFAULT_QUERY"
+  export LOOP_STARTED_AT="$(now_utc)"
+  printf '{"schema":"xiio.rotfl.autopilot-loop/v4","state":"LOOP_STARTED","created_at":"%s","case_root":"%s","interval_seconds":%s,"effect_authority":0,"hard":"INITIAL_INPUT_RUN_ONCE; WAIT_BINDS_EXACT_RUN; PASS_CONSUMES_ONE_FROZEN_SUCCESSOR; WAKE_REPLAY_FORBIDDEN"}\n' "$LOOP_STARTED_AT" "$(json_escape "$case_root")" "$interval"
+  write_heartbeat LOOP_STARTED "$case_root" UNKNOWN NONE "$interval"
+  while true; do
+    pending_run="$(current_pending_run_id || true)"
+    if [ -z "$pending_run" ]; then
+      write_heartbeat EXECUTING_INITIAL_INPUT "$case_root" UNKNOWN NONE "$interval"
+      once_rc=0
+      run_once "$case_root" "$query" "$interval" __NONE__ || once_rc=$?
+      pending_run="$(current_pending_run_id || true)"
+      if [ -z "$pending_run" ]; then
+        write_heartbeat WAIT_INITIAL_RUN_RECOVERY "$case_root" UNKNOWN "RUN_ONCE_RC_$once_rc" "$interval"
+        sleep "$interval"
+      fi
+      continue
+    fi
+
+    if [ -z "${XIIO_ROTFL_LIFECYCLE_RECEIPT:-}" ]; then
+      write_heartbeat WAIT_OWNER_LIFECYCLE_RECEIPT "$case_root" "$pending_run" MISSING_OWNER_LIFECYCLE_RECEIPT "$interval"
+      sleep "$interval"
+      continue
+    fi
+
+    lifecycle_state="$(lifecycle_gate "$XIIO_ROTFL_LIFECYCLE_RECEIPT" "$pending_run" "${XIIO_AGENT_ID:-UNKNOWN}" "${XIIO_PRINCIPAL_REF:-UNKNOWN}" "${XIIO_ASSIGNMENT_REF:-UNKNOWN}" 2>/dev/null || true)"
+    [ -n "$lifecycle_state" ] || lifecycle_state=WAIT_CONTINUATION_RECEIPT_REQUIRED
+    if [ "$lifecycle_state" != PASS_CONTINUATION_DRAINED ]; then
+      write_heartbeat WAIT_CONTINUATION_RECHECK "$case_root" "$pending_run" "$lifecycle_state" "$interval"
+      sleep "$interval"
+      continue
+    fi
+
+    successor_tmp="$LEDGER_DIR/.successor-claim.$$"
+    rm -f "$successor_tmp"
+    claim_rc=0
+    successor_claim "$XIIO_ROTFL_LIFECYCLE_RECEIPT" > "$successor_tmp" || claim_rc=$?
+    if [ "$claim_rc" -ne 0 ]; then
+      rm -f "$successor_tmp"
+      write_heartbeat WAIT_SUCCESSOR_WAKE_ADVANCE "$case_root" "$pending_run" "SUCCESSOR_CLAIM_RC_$claim_rc" "$interval"
+      sleep "$interval"
+      continue
+    fi
+    mapfile -d '' -t successor < "$successor_tmp"
+    rm -f "$successor_tmp"
+    if [ "${#successor[@]}" -ne 5 ]; then
+      write_heartbeat WAIT_SUCCESSOR_WAKE_ADVANCE "$case_root" "$pending_run" SUCCESSOR_CLAIM_MALFORMED "$interval"
+      sleep "$interval"
+      continue
+    fi
+    successor_case="${successor[0]}"
+    successor_query="${successor[1]}"
+    successor_wake="${successor[2]}"
+    successor_next="${successor[3]}"
+    successor_digest="${successor[4]}"
+
+    write_heartbeat SUCCESSOR_WAKE_CLAIMED "$successor_case" "$pending_run" NONE "$interval"
+    once_rc=0
+    run_once "$successor_case" "$successor_query" "$interval" __NONE__ || once_rc=$?
+    successor_run="$(current_pending_run_id || true)"
+    if [ -z "$successor_run" ] || [ "$successor_run" = "$pending_run" ]; then
+      write_heartbeat WAIT_SUCCESSOR_RUN_RECOVERY "$successor_case" "$pending_run" "RUN_ONCE_RC_$once_rc" "$interval"
+      sleep "$interval"
+      continue
+    fi
+    successor_complete "$successor_wake" "$successor_next" "$successor_digest" "$successor_run" || {
+      write_heartbeat WAIT_SUCCESSOR_CLAIM_READBACK "$successor_case" "$successor_run" CLAIM_COMPLETION_FAILED "$interval"
+      sleep "$interval"
+      continue
+    }
+    case_root="$successor_case"
+    query="$successor_query"
+    write_heartbeat AWAITING_LIFECYCLE_RETURN "$case_root" "$successor_run" NONE "$interval"
+  done
+}
+status(){ local pid="" state=STOPPED; [ -f "$PIDFILE" ] && pid="$(cat "$PIDFILE" 2>/dev/null || true)"; [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && state=RUNNING; printf '{"schema":"xiio.rotfl.autopilot-status/v1","state":"%s","pid":"%s","pidfile":"%s","log":"%s","heartbeat":"%s","run_bundles":"%s","effect_authority":0}\n' "$state" "$(json_escape "$pid")" "$(json_escape "$PIDFILE")" "$(json_escape "$LOG")" "$(json_escape "$HEARTBEAT")" "$(json_escape "$RUN_BUNDLE_LEDGER")"; }
+start_loop(){ local case_root="$1" query="$2" interval="$3" oldpid; [ -n "$case_root" ] || case_root="$ROOT"; [ -n "$query" ] || query="$DEFAULT_QUERY"; [ -n "$interval" ] || interval=900; if [ -f "$PIDFILE" ]; then oldpid="$(cat "$PIDFILE" 2>/dev/null || true)"; [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null && { printf '{"schema":"xiio.rotfl.autopilot-start/v1","state":"ALREADY_RUNNING","pid":"%s","log":"%s","effect_authority":0}\n' "$(json_escape "$oldpid")" "$(json_escape "$LOG")"; return 0; }; fi; : > "$LOG"; nohup bash "$SCRIPT_DIR/xiio-rotfl-autopilot" __loop "$case_root" "$interval" "$query" >> "$LOG" 2>&1 & local pid=$!; printf '%s' "$pid" > "$PIDFILE"; printf '{"schema":"xiio.rotfl.autopilot-start/v4","state":"STARTED","pid":"%s","interval_seconds":%s,"case_root":"%s","log":"%s","heartbeat":"%s","run_bundles":"%s","effect_authority":0,"hard":"NOHUP local loop only; bash-invoked/noexec-safe; no external email/send/file/service authority"}\n' "$pid" "$interval" "$(json_escape "$case_root")" "$(json_escape "$LOG")" "$(json_escape "$HEARTBEAT")" "$(json_escape "$RUN_BUNDLE_LEDGER")"; }
+stop_loop(){ local pid=""; [ -f "$PIDFILE" ] && pid="$(cat "$PIDFILE" 2>/dev/null || true)"; if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; printf '{"schema":"xiio.rotfl.autopilot-stop/v1","state":"STOPPED","pid":"%s","effect_authority":0}\n' "$(json_escape "$pid")"; else printf '{"schema":"xiio.rotfl.autopilot-stop/v1","state":"NOT_RUNNING","effect_authority":0}\n'; fi; rm -f "$PIDFILE" 2>/dev/null || true; }
+receipt(){ bash "$ROTFL" receipt 2>/dev/null || printf '{"schema":"xiio.rotfl.autopilot-receipt/v1","state":"UNKNOWN","reason":"ROTFL_RECEIPT_FAILED","effect_authority":0}\n'; }
+cmd="${1:-help}"; shift || true
+case "$cmd" in gate) receipt_path="$(get_flag receipt "$@" || true)"; gate_run_id="$(get_flag run-id "$@" || true)"; gate_agent_id="$(get_flag agent-id "$@" || true)"; gate_principal_ref="$(get_flag principal-ref "$@" || true)"; gate_assignment_ref="$(get_flag assignment-ref "$@" || true)"; [ -n "$gate_run_id" ] || gate_run_id=UNKNOWN; [ -n "$gate_agent_id" ] || gate_agent_id=UNKNOWN; [ -n "$gate_principal_ref" ] || gate_principal_ref=UNKNOWN; [ -n "$gate_assignment_ref" ] || gate_assignment_ref=UNKNOWN; lifecycle_gate "$receipt_path" "$gate_run_id" "$gate_agent_id" "$gate_principal_ref" "$gate_assignment_ref"; gate_rc=$?; printf '\n'; exit "$gate_rc" ;; once) case_root="$(get_flag case-root "$@" || true)"; query="$(get_flag query "$@" || true)"; run_once "$case_root" "$query" 900 ;; start) case_root="$(get_flag case-root "$@" || true)"; query="$(get_flag query "$@" || true)"; interval="$(get_flag interval "$@" || true)"; start_loop "$case_root" "$query" "$interval" ;; __loop) loop_worker "${1:-}" "${2:-900}" "${3:-$DEFAULT_QUERY}" ;; stop) stop_loop ;; status) status ;; receipt) receipt ;; help|--help|-h) printf '{"schema":"xiio.rotfl.autopilot-help/v4","state":"PASS","effect_authority":0,"hard":"heartbeat; coherent run bundles; stale latest_file fallback forbidden; bash-invoked/noexec-safe"}\n' ;; *) printf '{"schema":"xiio.rotfl.autopilot-error/v1","state":"FAIL","reason":"UNKNOWN_COMMAND","command":"%s","effect_authority":0}\n' "$(json_escape "$cmd")"; exit 2 ;; esac
