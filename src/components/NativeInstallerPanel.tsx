@@ -95,7 +95,15 @@ export default function NativeInstallerPanel({active = true}: {active?: boolean}
       setCoreError(String(error instanceof Error ? error.message : error));
     } finally {busyRef.current = false; setBusy(false);}
   }
-  useEffect(() => {if (native) void run({action: 'inspect'}, false);}, []);
+  useEffect(() => {
+    if (!native || !active) return;
+    // Reconcile core receipts when Install becomes active. Both native probes
+    // share busyRef and must run in order, without restoring prior approvals.
+    void (async () => {
+      await run({action: 'inspect'}, false);
+      await coreRequest({action: 'bundle_inspect'});
+    })();
+  }, [active]);
   function edit() {setPlan(null); setObserved(false); setApproval(false); setRollbackApproval(false);}
   const status = installerStatus(plan, observed);
   const runtimeReady = reviewedRuntimeReady(plan);
