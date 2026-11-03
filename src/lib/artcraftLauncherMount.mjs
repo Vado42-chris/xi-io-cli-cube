@@ -38,7 +38,8 @@ export function mountArtcraftLauncher({canvas, loadModule}) {
       if (disposed || !canvas.isConnected) { release(); return {status: 'disposed'}; }
       if (typeof module?.mount_launcher !== 'function')
         throw new Error('ARTCRAFT_DONOR_EXPORT_UNBOUND');
-      handle = await module.mount_launcher(canvas);
+      try { handle = await module.mount_launcher(canvas); }
+      catch (error) { throw new Error('ARTCRAFT_RUNNER_START_FAILED', {cause: error}); }
       if (typeof handle?.destroy !== 'function' || typeof handle?.free !== 'function') {
         cleanupFailed = true;
         throw new Error('ARTCRAFT_DONOR_HANDLE_INVALID');

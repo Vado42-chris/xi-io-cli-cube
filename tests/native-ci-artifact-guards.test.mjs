@@ -25,6 +25,7 @@ const proofPaths=[
  'hex-gui-proof/original/operation-inspection.json',
  'hex-gui-proof/webkit-default/software-initialization.json',
  'hex-gui-proof/webkit-default/software-initialized.png',
+ 'hex-gui-proof/webkit-default/software-unverified.png',
  'hex-gui-proof/webkit-default/software-observer-exit.txt',
  'hex-gui-proof/webkit-default/window.png',
  'hex-gui-proof/webkit-default/window-visual.json',

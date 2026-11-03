@@ -29,10 +29,8 @@ class Software(base.Native):
             for node in nodes:
                 if not self.visible(node): continue
                 name = node.get_name() or ''
-                if name in {'ARTCRAFT_MODULE_LOADER_UNBOUND','ARTCRAFT_GENERATED_EXPORTS_UNBOUND','ARTCRAFT_DONOR_EXPORT_UNBOUND','ARTCRAFT_DONOR_HANDLE_INVALID','ARTCRAFT_CLEANUP_UNVERIFIED'}:
+                if name in {'ARTCRAFT_MODULE_LOADER_UNBOUND','ARTCRAFT_GENERATED_EXPORTS_UNBOUND','ARTCRAFT_DONOR_EXPORT_UNBOUND','ARTCRAFT_DONOR_HANDLE_INVALID','ARTCRAFT_CLEANUP_UNVERIFIED','ARTCRAFT_RUNNER_START_FAILED','ARTCRAFT_LOCAL_MODULE_IMPORT_FAILED','ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED','ARTCRAFT_LOCAL_MODULE_IMPORT_FAILED_WITH_LOCAL_POLICY_EVENT','ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED_WITH_LOCAL_FETCH_POLICY_EVENT','ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED_WITH_UNATTRIBUTED_COMPILE_POLICY_EVENT'}:
                     raise base.Unverified(name)
-                if 'WebAssembly' in name and ('Content Security Policy' in name or 'content security policy' in name):
-                    raise base.Unverified('ARTCRAFT_WASM_CSP_REJECTION_VISIBLE')
         base.require(len(matches) == 1, 'ARTCRAFT_INITIALIZATION_NOT_OBSERVED')
         return True
 
@@ -72,6 +70,9 @@ def main():
         code = 62
     if native is not None:
         receipt['last_stage'] = native.stage
+        if code != 0:
+            try: receipt['failure_screenshot_sha256'] = native.capture('software-unverified')
+            except Exception: receipt['failure_capture_verified'] = False
     if proof is not None:
         path = proof/'software-initialization.json'
         with path.open('x') as handle: json.dump(receipt,handle,sort_keys=True)

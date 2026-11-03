@@ -31,7 +31,7 @@ export default function ArtcraftLauncherBody({loadModule, lifecycle}: {loadModul
       } catch (error) {
         if (error instanceof Error && ['ARTCRAFT_CLEANUP_UNVERIFIED', 'ARTCRAFT_DONOR_HANDLE_INVALID'].includes(error.message))
           owner.cleanupFailure = error.message;
-        if (active) setStatus(error instanceof Error ? error.message : 'ARTCRAFT_MOUNT_FAILED');
+        if (active) setStatus(error instanceof Error && /^ARTCRAFT_[A-Z_]+$/.test(error.message) ? error.message : 'ARTCRAFT_MOUNT_FAILED');
       }
     });
     owner.pending = current;

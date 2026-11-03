@@ -30,6 +30,13 @@ class Proof(unittest.TestCase):
             with self.assertRaisesRegex(m.base.Unverified,'ARTCRAFT_INITIALIZATION_NOT_OBSERVED'):native.initialized()
         native.nodes=lambda:[Node('HEX software marketplace initialized')]
         self.assertTrue(native.initialized())
+    def test_local_policy_failure_stays_typed(self):
+        native=m.Software.__new__(m.Software)
+        class Node:
+            def get_name(self):return 'ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED_WITH_UNATTRIBUTED_COMPILE_POLICY_EVENT'
+        native.nodes=lambda:[Node()]
+        native.visible=lambda n:True
+        with self.assertRaisesRegex(m.base.Unverified,'ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED_WITH_UNATTRIBUTED_COMPILE_POLICY_EVENT'):native.initialized()
     def test_failure_receipt_does_not_upgrade_initialization(self):
         with tempfile.TemporaryDirectory() as d:
             args=['probe','123','456','a'*64,'b'*40,d,'/tmp/payload/usr/bin/xi-io-hex-dev']
@@ -42,11 +49,15 @@ class Proof(unittest.TestCase):
         class Native:
             stage='software-generated-module-initialization'
             def run(self):raise m.base.Unverified('ARTCRAFT_INITIALIZATION_NOT_OBSERVED')
+            def capture(self,name):
+                assert name == 'software-unverified'
+                return 'c'*64
         with tempfile.TemporaryDirectory() as d:
             args=['probe','123','456','a'*64,'b'*40,d,'/tmp/payload/usr/bin/xi-io-hex-dev']
             with patch.dict(m.os.environ,{'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted'}),patch.object(m.sys,'argv',args),patch.object(m,'Software',return_value=Native()):
                 self.assertEqual(m.main(),61)
             receipt=json.loads((Path(d)/'software-initialization.json').read_text())
             self.assertEqual(receipt['last_stage'],Native.stage);self.assertFalse(receipt['initialization_observed'])
+            self.assertEqual(receipt['failure_screenshot_sha256'],'c'*64)
 
 if __name__=='__main__':unittest.main()

@@ -78,6 +78,8 @@ test('actual tablet rail and product controls share selected views across the Sh
     assert.ok(launcher?.querySelector('canvas'), 'Software mounts the actual canvas consumer inside the existing ShadowRoot');
     assert.equal(launcher.querySelector('canvas').getRootNode(), shadow);
     assert.notEqual(launcher.dataset.artcraftMountStatus, 'mounted', 'fixture has no generated donor module and earns no WASM render credit');
+    for (let attempt=0; attempt<50 && launcher.dataset.artcraftMountStatus==='loading'; attempt++) await pause(10);
+    assert.equal(launcher.dataset.artcraftMountStatus, 'ARTCRAFT_LOCAL_MODULE_IMPORT_FAILED');
     assert.ok(launcher.querySelector('[role=alert]'), 'missing generated module is visible, not silently replaced');
     const componentPanel = panel();
     const ids = ['cli', 'editor', 'studio', 'web', 'switchboard', 'bins', 'ward'];

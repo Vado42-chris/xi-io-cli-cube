@@ -51,7 +51,7 @@ test('missing loader, export and startup failures refuse, without fake mounted r
  let lease=mountArtcraftLauncher({canvas:f.canvas,loadModule:async()=>({})});
  await assert.rejects(lease.ready,/EXPORT_UNBOUND/);
  lease=mountArtcraftLauncher({canvas:f.canvas,loadModule:async()=>({mount_launcher:async()=>{throw Error('GRAPHICS_FAILED');}})});
- await assert.rejects(lease.ready,/GRAPHICS_FAILED/);assert.deepEqual(f.calls,[]);f.dom.window.close();
+ await assert.rejects(lease.ready,error=>error.message==='ARTCRAFT_RUNNER_START_FAILED' && error.cause.message==='GRAPHICS_FAILED');assert.deepEqual(f.calls,[]);f.dom.window.close();
 });
 test('uncertain cleanup blocks canvas reuse and still attempts free',async()=>{
  const f=fixture();f.handle.destroy=()=>{f.calls.push('destroy');throw Error('cleanup');};
