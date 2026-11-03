@@ -38,10 +38,20 @@ class Diagnostic(unittest.TestCase):
         self.assertEqual(result['window_commands']['frontend_observations'], [row])
         self.assertFalse(result['renderer_load_verified'])
         self.assertTrue(result['window_commands']['frontend_observations_are_not_pixel_proof'])
+    def test_sanitized_csp_codes_are_accepted_without_blocked_urls(self):
+        row = self.frontend()
+        row['csp'] = [1, 2]  # connect-src, exact same-origin ArtCraft WASM
+        self.log.write_text('HEX_FRONTEND_DIAGNOSTIC ' + json.dumps(row) + '\\n')
+        result = self.snap()
+        self.assertEqual(result['window_commands']['frontend_observations'], [row])
+        unsafe = dict(row, blockedURI='https://secret.example/token')
+        self.assertIsNone(d.frontend_observation(unsafe))
+
     def test_frontend_rejects_secrets_wrong_types_and_out_of_range(self):
         mutations = []
         for key, value in [('message', 'SECRET'), ('sample', 3), ('sample', True),
                            ('errors', [256, 0, 0, 0, 0]), ('errors', [0]),
+                           ('csp', [8, 2]), ('csp', [0, 2]), ('csp', [1, 6]), ('csp', True),
                            ('nodes', [[1, 0, 0, 2]] * 4), ('nodes', [[1, 16385, 0, 0]] * 4),
                            ('nodes', [[0, 1, 0, 0]] * 4), ('shadow', 'SECRET')]:
             row = self.frontend(); row[key] = value; mutations.append(row)
