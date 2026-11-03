@@ -15,6 +15,7 @@ export const LOCAL_WORK_BINDING_SCHEMA = 'xiio.cli.local-work-binding/v1';
 
 export const REQUIRED_PACKET_FIELDS = Object.freeze([
   'packet_id',
+  'work_ref',
   'pinned_source',
   'workspace_root',
   'objective',
@@ -113,6 +114,7 @@ export function compileLocalWorkPacket(input = {}) {
   const packet = Object.freeze({
     schema: LOCAL_WORK_PACKET_SCHEMA,
     packet_id: clean(input.packet_id, 256),
+    work_ref: clean(input.work_ref, 256),
     pinned_source,
     workspace_root,
     objective: clean(input.objective, 4096),
@@ -141,6 +143,7 @@ export function compileLocalWorkPacket(input = {}) {
     ...packet,
     semantic_digest: digest({
       packet_id: packet.packet_id,
+      work_ref: packet.work_ref,
       pinned_source: packet.pinned_source,
       workspace_root: packet.workspace_root,
       objective: packet.objective,
