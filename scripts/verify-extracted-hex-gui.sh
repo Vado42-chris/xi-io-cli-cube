@@ -81,7 +81,7 @@ if [[ "${HEX_OBSERVE_SOFTWARE:-0}" == 1 ]]; then
   # Only the disposable session bus, not user accessibility settings.
   timeout --signal=KILL 5s gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null 2>&1 || true
 fi
-env -i NO_AT_BRIDGE=0 PATH="$PATH" LANG=C.UTF-8 HOME="$profile/home" \
+env -i PATH="$PATH" NO_AT_BRIDGE=0 LANG=C.UTF-8 HOME="$profile/home" \
   XDG_CONFIG_HOME="$profile/config" XDG_DATA_HOME="$profile/data" \
   XDG_STATE_HOME="$profile/state" XDG_CACHE_HOME="$profile/cache" \
   XDG_RUNTIME_DIR="$profile/runtime" TMPDIR="$profile/tmp" \
