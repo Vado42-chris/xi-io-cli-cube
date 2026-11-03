@@ -75,7 +75,7 @@ class ServerProfileTests(unittest.TestCase):
    result=server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
    self.assertEqual(result['state'],'INSTALLED_STARTED_READBACK_VERIFIED')
    self.assertTrue(self.active);self.assertTrue(receipt.exists())
-   self.assertTrue((self.home/'config/systemd/user/xiio-test.service').exists())
+   self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
    rb=server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
    self.assertEqual(rb['state'],'ROLLED_BACK_READBACK_REQUIRED')
    self.assertFalse(self.active)
