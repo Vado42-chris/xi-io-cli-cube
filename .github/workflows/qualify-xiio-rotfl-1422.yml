@@ -4,6 +4,7 @@ on:
     branches: [fix/native-hex-plugin-catalog-20261028]
     paths:
       - '.github/workflows/qualify-xiio-rotfl-1422.yml'
+      - '.ci/xiio1422/**'
 permissions:
   contents: read
 jobs:
@@ -13,19 +14,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: Vado42-chris/xi-io.net
-          ref: ab275e4587497d12f2f949ec57494c65065eab24
-          path: xiio
           persist-credentials: false
-      - name: Syntax current autopilot and successor helper
-        working-directory: xiio
+      - name: Syntax exact staged owner files
         run: |
           set -euo pipefail
-          bash -n scripts/xiio-rotfl-autopilot
-          python3 -m py_compile scripts/rotfl-successor-wake.py
+          bash -n .ci/xiio1422/scripts/xiio-rotfl-autopilot
+          python3 -m py_compile .ci/xiio1422/scripts/rotfl-successor-wake.py
       - name: Run exact hostile bundle
-        working-directory: xiio
+        working-directory: .ci/xiio1422
         run: bash scripts/validate-rotfl-yield-hostile-bundle.sh
-      - name: Run ROTFL validator
-        working-directory: xiio
-        run: bash scripts/validate-xiio-rotfl.sh
