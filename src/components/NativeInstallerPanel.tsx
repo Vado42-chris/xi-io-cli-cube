@@ -85,7 +85,16 @@ export default function NativeInstallerPanel() {
       setCoreError(String(error instanceof Error ? error.message : error));
     } finally {busyRef.current = false; setBusy(false);}
   }
-  useEffect(() => {if (native) void run({action: 'inspect'}, false);}, []);
+  useEffect(() => {
+    if (!native) return;
+    // Read back the installed core release on every native launch. The ordinary
+    // CLI inspection and core inspection share busyRef, so serialize them.
+    // A previous UI success is never used as evidence of current installation.
+    void (async () => {
+      await run({action: 'inspect'}, false);
+      await coreRequest({action: 'bundle_inspect'});
+    })();
+  }, []);
   function edit() {setPlan(null); setObserved(false); setApproval(false); setRollbackApproval(false);}
   const status = installerStatus(plan, observed);
   const runtimeReady = reviewedRuntimeReady(plan);
