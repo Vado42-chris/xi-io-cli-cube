@@ -23,6 +23,9 @@ const proofPaths=[
  'hex-gui-proof/original/window-visual.json',
  'hex-gui-proof/original/window-diagnostic.json',
  'hex-gui-proof/original/operation-inspection.json',
+ 'hex-gui-proof/webkit-default/software-initialization.json',
+ 'hex-gui-proof/webkit-default/software-initialized.png',
+ 'hex-gui-proof/webkit-default/software-observer-exit.txt',
  'hex-gui-proof/webkit-default/window.png',
  'hex-gui-proof/webkit-default/window-visual.json',
  'hex-gui-proof/webkit-default/window-diagnostic.json',
@@ -127,11 +130,14 @@ test('unknown rendering mode is rejected before accessing a payload or profile',
 test('actual comparison shell preserves both outcomes and refuses changed ELF/default failure',()=>{
  const observe=step(native,'Observe extracted package native window in isolated Xvfb');
  const section=observe.slice(observe.indexOf('          elf_sha=')).split('\n').map(line=>line.replace(/^          /,'')).join('\n');
- for(const [original,normal,mutate,expected] of [[85,0,false,0],[0,85,false,1],[0,0,true,1]]){
+ for(const [original,normal,mutate,software,verified,expected] of [[85,0,false,0,true,0],[0,85,false,0,true,1],[0,0,true,0,true,1],[85,0,false,61,false,1],[85,0,false,0,false,1]]){
   const dir=mkdtempSync(join(tmpdir(),'hex-mode-test-'));
   try {
    mkdirSync(join(dir,'bin'));mkdirSync(join(dir,'payload/usr/bin'),{recursive:true});mkdirSync(join(dir,'hex-gui-proof'));
    writeFileSync(join(dir,'payload/usr/bin/xi-io-hex-dev'),'SYNTHETIC_ELF_SENTINEL');
+   mkdirSync(join(dir,'hex-gui-proof/webkit-default'));
+   writeFileSync(join(dir,'hex-gui-proof/webkit-default/software-observer-exit.txt'),String(software));
+   writeFileSync(join(dir,'hex-gui-proof/webkit-default/software-initialization.json'),JSON.stringify({status:verified?'INITIALIZED':'UNVERIFIED',initialization_observed:verified,installed_package:false,installer_action_verified:false}));
    writeFileSync(join(dir,'bin/xvfb-run'),`#!/bin/bash
 mode=\"\${@: -3:1}\"
 printf '%s\\n' \"$mode\" >> \"$MODE_CALLS\"

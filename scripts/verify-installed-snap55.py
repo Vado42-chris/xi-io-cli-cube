@@ -45,6 +45,7 @@ def parse_result(text, negative=False):
     return {'state': next(iter(states)), 'R': None if negative else float(value), 'known': next(iter(known))}
 
 class Native:
+    expected_executable = '/usr/bin/xi-io-hex-dev'
     def __init__(self, pid, window, elf, source, proof):
         require(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted', 'DISPOSABLE_RUNNER_REQUIRED')
         require(SOURCE.fullmatch(source) and DIGEST.fullmatch(elf), 'SOURCE_IDENTITY_REQUIRED')
@@ -77,7 +78,7 @@ class Native:
         return subprocess.run(args, check=True, capture_output=True, text=True, timeout=min(left, 3)).stdout.strip()
 
     def guard(self, focused=False):
-        require(self.identity() == self.start and self.start[1] == '/usr/bin/xi-io-hex-dev', 'PROCESS_IDENTITY_CHANGED')
+        require(self.identity() == self.start and self.start[1] == self.expected_executable, 'PROCESS_IDENTITY_CHANGED')
         require(sha(Path('/proc', str(self.pid), 'exe').read_bytes()) == self.elf, 'ELF_IDENTITY_CHANGED')
         require(self.command(['xdotool', 'getwindowpid', self.window]) == str(self.pid), 'WINDOW_PID_CHANGED')
         require(self.command(['xdotool', 'getwindowname', self.window]) == 'XI-IO HEX', 'WINDOW_TITLE_CHANGED')

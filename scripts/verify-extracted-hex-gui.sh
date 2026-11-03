@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reuses PR23's Xvfb native-window observation, without installation or clicks.
+# Reuses PR23's Xvfb pixel observation; optional hosted Software proof is separate.
 # Run inside an isolated Xvfb/DBus session on the disposable build runner.
 set -Eeuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -76,7 +76,12 @@ fail() {
 # accelerated backing store. webkit-default tests its normal software-GL path;
 # env -i prevents inherited rendering/sandbox overrides from changing either mode.
 # No setting is changed in the shipped app or any installed user profile.
-env -i PATH="$PATH" LANG=C.UTF-8 HOME="$profile/home" \
+if [[ "${HEX_OBSERVE_SOFTWARE:-0}" == 1 ]]; then
+  [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted ]] || { echo DISPOSABLE_RUNNER_REQUIRED >&2; exit 78; }
+  # Only the disposable session bus, not user accessibility settings.
+  timeout --signal=KILL 5s gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null 2>&1 || true
+fi
+env -i NO_AT_BRIDGE=0 PATH="$PATH" LANG=C.UTF-8 HOME="$profile/home" \
   XDG_CONFIG_HOME="$profile/config" XDG_DATA_HOME="$profile/data" \
   XDG_STATE_HOME="$profile/state" XDG_CACHE_HOME="$profile/cache" \
   XDG_RUNTIME_DIR="$profile/runtime" TMPDIR="$profile/tmp" \
@@ -159,3 +164,13 @@ r={'schema':'xiio.hex.extracted-package-gui-smoke/v1','state':'EXTRACTED_PACKAGE
 (p/'run-manifest.json').write_text(json.dumps(r,indent=2)+'\n')
 PY
 echo EXTRACTED_PACKAGE_GUI_SMOKE_PASS_NOT_INSTALLED_OR_IPC_ACCEPTANCE
+
+# Keep the completed pixels receipt distinct from actual Software initialization.
+# Never replace a failed semantic result with the earlier nonblank-window result.
+if [[ "${HEX_OBSERVE_SOFTWARE:-0}" == 1 ]]; then
+  set +e
+  timeout --signal=KILL 110s python3 -I -B "$root/scripts/verify-extracted-artcraft.py" "$app_pid" "$window" "$(sha256sum "$exe" | cut -d' ' -f1)" "$GITHUB_SHA" "$proof" "$exe"
+  software_status=$?
+  set -e
+  printf '%s\n' "$software_status" > "$proof/software-observer-exit.txt"
+fi

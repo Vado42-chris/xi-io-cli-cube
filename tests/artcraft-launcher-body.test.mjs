@@ -24,6 +24,7 @@ test('compiled consumer StrictMode mounts once and disposes actual canvas lease'
  try {
   await act(async()=>f.root.render(React.createElement(React.StrictMode,null,React.createElement(Body,{loadModule}))));
   assert.equal(f.shadow.querySelector('section').dataset.artcraftMountStatus,'mounted');
+  assert.equal(f.shadow.querySelector('canvas').getAttribute('aria-label'),'HEX software marketplace initialized');
   assert.equal(f.shadow.querySelectorAll('canvas').length,1);assert.deepEqual(calls,['mount']);
  }finally{await f.close();}
  assert.deepEqual(calls,['mount','destroy','free']);
@@ -97,6 +98,7 @@ for (const cleanupFails of [false,true]) test(`host lifecycle survives Software 
   await act(async()=>f.root.render(React.createElement('div',null,'Install')));
   await act(async()=>f.root.render(React.createElement(Body,{loadModule,lifecycle})));
   assert.deepEqual(calls,['mount'],'a new component must wait for previous canvas cleanup');
+  assert.equal(f.shadow.querySelector('canvas').getAttribute('aria-label'),'HEX software marketplace');
   await act(async()=>pending.resolve({destroy(){calls.push('destroy1');if(cleanupFails)throw new Error('cleanup');},free(){calls.push('free1');}}));
   if(cleanupFails){
    assert.deepEqual(calls,['mount','destroy1','free1']);

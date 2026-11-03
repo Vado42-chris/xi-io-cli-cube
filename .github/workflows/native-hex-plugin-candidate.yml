@@ -15,6 +15,9 @@ on:
       - 'tests/artcraft-runtime-stage.test.mjs'
       - 'tools/artcraft-launcher/lifecycle.patch'
       - 'scripts/verify-extracted-hex-gui.sh'
+      - 'scripts/verify-extracted-artcraft.py'
+      - 'scripts/verify-installed-snap55.py'
+      - 'tests/extracted-artcraft.test.py'
       - 'scripts/journal-hex-gui-observation.py'
       - 'tests/gui-operation-receipt.test.py'
       - 'scripts/verify-hex-capture.py'
@@ -122,6 +125,8 @@ jobs:
           cargo install wasm-bindgen-cli --version 0.2.129 --locked
           bash scripts/qualify-artcraft-hosted-donor.sh "$GITHUB_WORKSPACE/.ci-donor/artcraft-launcher" "$GITHUB_WORKSPACE/tools/artcraft-launcher/lifecycle.patch" "$RUNNER_TEMP/hex-artcraft-hosted-donor"
           node --test tests/artcraft-runtime-stage.test.mjs
+          python3 -I -B tests/extracted-artcraft.test.py
+          python3 -I -B tests/installed-snap55.test.py
           node scripts/stage-artcraft-runtime.mjs
           echo DONOR_GENERATED_ASSETS_STAGED_NOT_NATIVE_MOUNT
       - name: Check TypeScript and source-owned frontend
@@ -136,7 +141,7 @@ jobs:
       - name: Install isolated native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11 at-spi2-core gir1.2-atspi-2.0 python3-gi
       - name: Fetch locked Tauri build CLI
         run: npm ci --prefix native/hex/carrier --no-audit --no-fund
       - name: Build exact source generation (no historical DEV9 binary)
@@ -209,7 +214,7 @@ jobs:
           set -e
           test "$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = "$elf_sha"
           set +e
-          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- python3 -I -B scripts/journal-hex-gui-observation.py "$payload" "$PWD/hex-gui-proof/webkit-default" webkit-default "$GITHUB_SHA" "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          HEX_OBSERVE_SOFTWARE=1 xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- python3 -I -B scripts/journal-hex-gui-observation.py "$payload" "$PWD/hex-gui-proof/webkit-default" webkit-default "$GITHUB_SHA" "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           default_status=$?
           set -e
           test "$(sha256sum "$payload/usr/bin/xi-io-hex-dev" | cut -d' ' -f1)" = "$elf_sha"
@@ -230,6 +235,16 @@ jobs:
           # No either-passed fallback: only the explicitly named default mode
           # qualifies this experiment. The original mode remains separately red.
           test "$default_status" -eq 0
+          # An earlier pixel PASS cannot replace this actual generated initialization.
+          test "$(cat hex-gui-proof/webkit-default/software-observer-exit.txt)" -eq 0
+          python3 -I -B - <<'PYINIT'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('hex-gui-proof/webkit-default/software-initialization.json').read_text())
+          assert r['status'] == 'INITIALIZED' and r['initialization_observed'] is True
+          assert r['installed_package'] is False and r['installer_action_verified'] is False
+          print('GENERATED_ARTCRAFT_INITIALIZED_NOT_PRODUCT_ACTION_ACCEPTANCE')
+          PYINIT
       - name: Preserve bounded native GUI observations without candidate binary
         if: always()
         uses: actions/upload-artifact@v4
@@ -242,6 +257,9 @@ jobs:
             hex-gui-proof/original/window-visual.json
             hex-gui-proof/original/window-diagnostic.json
             hex-gui-proof/original/operation-inspection.json
+            hex-gui-proof/webkit-default/software-initialization.json
+            hex-gui-proof/webkit-default/software-initialized.png
+            hex-gui-proof/webkit-default/software-observer-exit.txt
             hex-gui-proof/webkit-default/window.png
             hex-gui-proof/webkit-default/window-visual.json
             hex-gui-proof/webkit-default/window-diagnostic.json
