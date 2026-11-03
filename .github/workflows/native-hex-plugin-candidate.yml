@@ -296,3 +296,310 @@ jobs:
             hex-gui-proof/source-commit.txt
           if-no-files-found: error
           retention-days: 14
+
+  resident-aries-rebuild:
+    name: Aries resident Dql_NEe8 rebuild and Library readback
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/fix/native-hex-plugin-catalog-20261028' && contains(github.event.head_commit.message, 'ARIES_RESIDENT_HEX_REBUILD_20261103') }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 30
+    steps:
+      - name: Freeze exact resident tree and prove rebuild prerequisites
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="$(hostname -s | tr '[:upper:]' '[:lower:]')"
+          [[ "$host" == "aries" ]] || { echo "BLOCKED_EXPECTED_ARIES actual=$host"; exit 39; }
+
+          state="$HOME/.local/state/xi-io/receipts/hex-resident-rebuild-20261103"
+          mkdir -p "$state"
+          chmod 700 "$state"
+          printf '%s\n' 'PREFLIGHT' > "$state/state"
+
+          search_roots=("$HOME")
+          [[ -d "/media/$USER" ]] && search_roots+=("/media/$USER")
+          mapfile -t assets < <(find "${search_roots[@]}" -maxdepth 10 -type f -name 'index-Dql_NEe8.js' \
+            -not -path '*/node_modules/*' -not -path '*/target/*' -print 2>/dev/null | sort -u)
+          ((${#assets[@]} > 0)) || { echo "BLOCKED_DQL_STAGE_ASSET_NOT_FOUND"; exit 40; }
+
+          roots=()
+          for asset in "${assets[@]}"; do
+            d="$(dirname "$asset")"
+            root=""
+            for _ in $(seq 1 10); do
+              if [[ -f "$d/package.json" && -f "$d/scripts/native-package.mjs" && \
+                    -f "$d/src/components/ArtcraftLauncherBody.tsx" && \
+                    -f "$d/native/hex/carrier/src-tauri/Cargo.toml" ]]; then
+                root="$d"; break
+              fi
+              p="$(dirname "$d")"
+              [[ "$p" != "$d" ]] || break
+              d="$p"
+            done
+            [[ -n "$root" ]] || continue
+            grep -Fq 'data-artcraft-status-surface="visible"' "$root/src/components/ArtcraftLauncherBody.tsx" || continue
+            grep -Fq 'absolute inset-0' "$root/src/components/ArtcraftLauncherBody.tsx" || continue
+            grep -aFq 'artcraft-status-surface' "$asset" || continue
+            grep -RFlq 'ForgeAfterInstallLibrary' "$root/src" || continue
+            roots+=("$(realpath "$root")")
+          done
+          mapfile -t roots < <(printf '%s\n' "${roots[@]}" | sort -u)
+          [[ "${#roots[@]}" -eq 1 ]] || { printf 'BLOCKED_RESIDENT_TREE_CARDINALITY=%s\n' "${#roots[@]}"; printf '%s\n' "${roots[@]}"; exit 41; }
+          root="${roots[0]}"
+
+          cd "$root"
+          remote="$(git remote get-url origin)"
+          case "$remote" in *Vado42-chris/xi-io-cli-cube*) ;; *) echo "BLOCKED_RESIDENT_ORIGIN=$remote"; exit 42;; esac
+          head="$(git rev-parse HEAD)"
+          git status --porcelain=v1 > "$state/source-status.txt"
+          git ls-files -co --exclude-standard -z | sort -z | \
+            while IFS= read -r -d '' file; do
+              [[ -f "$file" && ! -L "$file" ]] || continue
+              sha256sum "$file"
+            done > "$state/source-manifest.sha256"
+          manifest_sha="$(sha256sum "$state/source-manifest.sha256" | awk '{print $1}')"
+
+          mapfile -t staged_assets < <(find "$root" -type f -name 'index-Dql_NEe8.js' \
+            -not -path '*/node_modules/*' -not -path '*/target/*' -print | sort -u)
+          ((${#staged_assets[@]} > 0)) || { echo "BLOCKED_DQL_ASSET_LEFT_SCOPE"; exit 43; }
+          : > "$state/staged-assets.sha256"
+          for asset in "${staged_assets[@]}"; do sha256sum "$asset" >> "$state/staged-assets.sha256"; done
+          staged_tuple_sha="$(sha256sum "$state/staged-assets.sha256" | awk '{print $1}')"
+
+          mapfile -t pids < <(pgrep -u "$(id -u)" -x xi-io-hex-dev || true)
+          [[ "${#pids[@]}" -eq 1 ]] || { echo "BLOCKED_LIVE_PID_CARDINALITY=${#pids[@]}"; exit 44; }
+          old_pid="${pids[0]}"
+          live_exe="$(readlink -f "/proc/$old_pid/exe")"
+          [[ -f "$live_exe" && -x "$live_exe" && -w "$live_exe" && -w "$(dirname "$live_exe")" ]] || {
+            echo "BLOCKED_LIVE_BINARY_NOT_USER_REPLACEABLE path=$live_exe"; exit 45;
+          }
+          grep -aFq 'index-Da9Z6odG.js' "$live_exe" || { echo "BLOCKED_EXPECTED_STALE_DA9_NOT_IN_LIVE_BINARY"; exit 46; }
+          ! grep -aFq 'index-Dql_NEe8.js' "$live_exe" || { echo "BLOCKED_LIVE_ALREADY_DQL"; exit 47; }
+          live_sha="$(sha256sum "$live_exe" | awk '{print $1}')"
+          cp --preserve=mode,timestamps "$live_exe" "$state/xi-io-hex-dev.pre-rebuild"
+          backup_sha="$(sha256sum "$state/xi-io-hex-dev.pre-rebuild" | awk '{print $1}')"
+          [[ "$backup_sha" == "$live_sha" ]] || { echo "BLOCKED_BACKUP_HASH_MISMATCH"; exit 48; }
+
+          tmp_avail="$(df -Pk /tmp | awk 'NR==2{print $4}')"
+          root_avail="$(df -Pk "$root" | awk 'NR==2{print $4}')"
+          mem_avail="$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)"
+          swap_free="$(awk '/^SwapFree:/{print $2}' /proc/meminfo)"
+          combined_kb=$((mem_avail + swap_free))
+          [[ "$tmp_avail" -ge 8000000 ]] || { echo "BLOCKED_TMP_CAPACITY_KB=$tmp_avail"; exit 49; }
+          [[ "$root_avail" -ge 2000000 ]] || { echo "BLOCKED_SOURCE_FS_CAPACITY_KB=$root_avail"; exit 50; }
+          [[ "$combined_kb" -ge 2000000 ]] || { echo "BLOCKED_MEMORY_SWAP_CAPACITY_KB=$combined_kb"; exit 51; }
+
+          user_env="$(systemctl --user show-environment 2>/dev/null || true)"
+          display_val="$(printf '%s\n' "$user_env" | sed -n 's/^DISPLAY=//p' | head -n1)"
+          wayland_val="$(printf '%s\n' "$user_env" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n1)"
+          dbus_val="$(printf '%s\n' "$user_env" | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p' | head -n1)"
+          xdg_runtime_val="$(printf '%s\n' "$user_env" | sed -n 's/^XDG_RUNTIME_DIR=//p' | head -n1)"
+          [[ -n "$display_val" || -n "$wayland_val" ]] || { echo "BLOCKED_GRAPHICAL_SESSION_ENV_MISSING"; exit 52; }
+          [[ -n "$dbus_val" ]] || { echo "BLOCKED_DBUS_SESSION_MISSING"; exit 53; }
+          [[ -n "$xdg_runtime_val" ]] || xdg_runtime_val="/run/user/$(id -u)"
+
+          {
+            echo "root=$root"
+            echo "head=$head"
+            echo "manifest_sha=$manifest_sha"
+            echo "staged_tuple_sha=$staged_tuple_sha"
+            echo "old_pid=$old_pid"
+            echo "live_exe=$live_exe"
+            echo "live_sha=$live_sha"
+            echo "backup_sha=$backup_sha"
+            echo "state=$state"
+            echo "display_val=$display_val"
+            echo "wayland_val=$wayland_val"
+            echo "dbus_val=$dbus_val"
+            echo "xdg_runtime_val=$xdg_runtime_val"
+          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' 'PREFLIGHT_PASS' > "$state/state"
+
+      - name: Build resident staged generation, replace binary, relaunch and read Library status
+        shell: bash
+        env:
+          ROOT: ${{ steps.preflight.outputs.root }}
+          RESIDENT_HEAD: ${{ steps.preflight.outputs.head }}
+          MANIFEST_SHA: ${{ steps.preflight.outputs.manifest_sha }}
+          STAGED_TUPLE_SHA: ${{ steps.preflight.outputs.staged_tuple_sha }}
+          OLD_PID: ${{ steps.preflight.outputs.old_pid }}
+          LIVE_EXE: ${{ steps.preflight.outputs.live_exe }}
+          LIVE_SHA: ${{ steps.preflight.outputs.live_sha }}
+          BACKUP_SHA: ${{ steps.preflight.outputs.backup_sha }}
+          STATE: ${{ steps.preflight.outputs.state }}
+          DISPLAY_VALUE: ${{ steps.preflight.outputs.display_val }}
+          WAYLAND_VALUE: ${{ steps.preflight.outputs.wayland_val }}
+          DBUS_VALUE: ${{ steps.preflight.outputs.dbus_val }}
+          XDG_RUNTIME_VALUE: ${{ steps.preflight.outputs.xdg_runtime_val }}
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          [[ "$(git rev-parse HEAD)" == "$RESIDENT_HEAD" ]] || { echo "BLOCKED_RESIDENT_HEAD_MOVED"; exit 60; }
+          current_manifest="$(
+            git ls-files -co --exclude-standard -z | sort -z | \
+              while IFS= read -r -d '' file; do
+                [[ -f "$file" && ! -L "$file" ]] || continue
+                sha256sum "$file"
+              done | sha256sum | awk '{print $1}'
+          )"
+          [[ "$current_manifest" == "$MANIFEST_SHA" ]] || { echo "BLOCKED_RESIDENT_TREE_MOVED"; exit 61; }
+
+          [[ -f native/hex/carrier/node_modules/@tauri-apps/cli/tauri.js ]] || \
+            npm ci --prefix native/hex/carrier --no-audit --no-fund
+          npm run native:stage
+          test -f native/hex/carrier/frontend/assets/index-Dql_NEe8.js
+          grep -aFq 'artcraft-status-surface' native/hex/carrier/frontend/assets/index-Dql_NEe8.js
+
+          target=/tmp/xiio-hex-carrier-target
+          rm -rf "$target"
+          mkdir -p "$target"
+          CARGO_TARGET_DIR="$target" \
+            node native/hex/carrier/node_modules/@tauri-apps/cli/tauri.js build --bundles deb -- --locked
+
+          built="$target/release/xi-io-hex-dev"
+          [[ -f "$built" && -x "$built" ]] || { echo "BLOCKED_BUILT_BINARY_MISSING"; exit 63; }
+          grep -aFq 'index-Dql_NEe8.js' "$built" || { echo "BLOCKED_BUILT_BINARY_NOT_DQL"; exit 64; }
+          built_sha="$(sha256sum "$built" | awk '{print $1}')"
+          [[ "$built_sha" != "$LIVE_SHA" ]] || { echo "BLOCKED_BUILD_DID_NOT_CHANGE_LIVE_GENERATION"; exit 65; }
+
+          mapfile -d '' old_argv < "/proc/$OLD_PID/cmdline"
+          ((${#old_argv[@]} >= 1)) || { echo "BLOCKED_LIVE_ARGV_MISSING"; exit 66; }
+          old_argv[0]="$LIVE_EXE"
+
+          mode="$(stat -c '%a' "$LIVE_EXE")"
+          next="${LIVE_EXE}.xiio-next-$$"
+          install -m "$mode" "$built" "$next"
+          mv -f "$next" "$LIVE_EXE"
+          installed_sha="$(sha256sum "$LIVE_EXE" | awk '{print $1}')"
+          [[ "$installed_sha" == "$built_sha" ]] || { echo "BLOCKED_INSTALLED_HASH_MISMATCH"; exit 67; }
+
+          kill -TERM "$OLD_PID"
+          for _ in $(seq 1 40); do kill -0 "$OLD_PID" 2>/dev/null || break; sleep 0.25; done
+          if kill -0 "$OLD_PID" 2>/dev/null; then
+            echo "ROLLBACK_OLD_PROCESS_DID_NOT_EXIT"
+            install -m "$mode" "$STATE/xi-io-hex-dev.pre-rebuild" "$LIVE_EXE"
+            [[ "$(sha256sum "$LIVE_EXE" | awk '{print $1}')" == "$BACKUP_SHA" ]]
+            exit 68
+          fi
+
+          log="$STATE/xi-io-hex-dev.rebuild.log"
+          DISPLAY="$DISPLAY_VALUE" WAYLAND_DISPLAY="$WAYLAND_VALUE" DBUS_SESSION_BUS_ADDRESS="$DBUS_VALUE" XDG_RUNTIME_DIR="$XDG_RUNTIME_VALUE" \
+            nohup "${old_argv[@]}" >"$log" 2>&1 &
+          new_pid=$!
+
+          window=""
+          for _ in $(seq 1 80); do
+            if kill -0 "$new_pid" 2>/dev/null; then
+              window="$(DISPLAY="$DISPLAY_VALUE" xdotool search --onlyvisible --pid "$new_pid" --name '^XI-IO HEX$' 2>/dev/null | head -n1 || true)"
+              [[ -n "$window" ]] && break
+            fi
+            sleep 0.25
+          done
+
+          if ! kill -0 "$new_pid" 2>/dev/null || [[ -z "$window" ]]; then
+            echo "ROLLBACK_NEW_RUNTIME_NOT_VISIBLE"
+            kill -TERM "$new_pid" 2>/dev/null || true
+            install -m "$mode" "$STATE/xi-io-hex-dev.pre-rebuild" "$LIVE_EXE"
+            [[ "$(sha256sum "$LIVE_EXE" | awk '{print $1}')" == "$BACKUP_SHA" ]]
+            DISPLAY="$DISPLAY_VALUE" WAYLAND_DISPLAY="$WAYLAND_VALUE" DBUS_SESSION_BUS_ADDRESS="$DBUS_VALUE" XDG_RUNTIME_DIR="$XDG_RUNTIME_VALUE" \
+              nohup "${old_argv[@]}" >>"$STATE/xi-io-hex-dev.rollback.log" 2>&1 &
+            exit 69
+          fi
+
+          proc_sha="$(sha256sum "/proc/$new_pid/exe" | awk '{print $1}')"
+          [[ "$proc_sha" == "$built_sha" ]] || { echo "BLOCKED_RUNNING_BINARY_HASH_MISMATCH"; exit 70; }
+
+          cat > "$RUNNER_TEMP/hex-library-readback.py" <<'PY'
+          import json,os,subprocess,sys,time
+          import gi
+          gi.require_version('Atspi','2.0')
+          from gi.repository import Atspi
+          pid=int(sys.argv[1]); window=sys.argv[2]; out=sys.argv[3]
+          Atspi.set_timeout(1000,1000); Atspi.init()
+          def nodes():
+              desk=Atspi.get_desktop(0)
+              apps=[desk.get_child_at_index(i) for i in range(desk.get_child_count())]
+              apps=[a for a in apps if a.get_process_id()==pid]
+              if len(apps)!=1: raise RuntimeError('ACCESSIBILITY_APPLICATION_UNVERIFIED')
+              q=[(apps[0],0)]; rows=[]
+              while q:
+                  n,d=q.pop(0)
+                  if len(rows)>=2048 or d>=40: raise RuntimeError('ACCESSIBILITY_TREE_BOUNDS')
+                  rows.append(n)
+                  c=n.get_child_count()
+                  if c<0 or c>512: raise RuntimeError('ACCESSIBILITY_CHILD_BOUNDS')
+                  q.extend((n.get_child_at_index(i),d+1) for i in range(c))
+              return rows
+          def visible(n):
+              st=n.get_state_set()
+              return st.contains(Atspi.StateType.VISIBLE) and st.contains(Atspi.StateType.SHOWING)
+          roles={Atspi.Role.PUSH_BUTTON,Atspi.Role.PAGE_TAB}
+          deadline=time.monotonic()+45
+          control=None
+          while time.monotonic()<deadline:
+              hits=[n for n in nodes() if n.get_name()=='Library' and n.get_role() in roles and visible(n)]
+              if len(hits)==1: control=hits[0]; break
+              time.sleep(.25)
+          if control is None: raise RuntimeError('LIBRARY_CONTROL_NOT_OBSERVED')
+          r=control.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
+          subprocess.run(['xdotool','windowfocus','--sync',window],check=True,timeout=3)
+          subprocess.run(['xdotool','mousemove',str(r.x+r.width//2),str(r.y+r.height//2)],check=True,timeout=3)
+          subprocess.run(['xdotool','click','1'],check=True,timeout=3)
+          exact={
+            'ArtCraft launcher initialized','HEX software marketplace initialized','loading',
+            'ARTCRAFT_MODULE_LOADER_UNBOUND','ARTCRAFT_GENERATED_EXPORTS_UNBOUND','ARTCRAFT_DONOR_EXPORT_UNBOUND',
+            'ARTCRAFT_DONOR_HANDLE_INVALID','ARTCRAFT_CLEANUP_UNVERIFIED','ARTCRAFT_RUNNER_START_FAILED',
+            'ARTCRAFT_LOCAL_MODULE_IMPORT_FAILED','ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED',
+            'ARTCRAFT_LOCAL_MODULE_IMPORT_FAILED_WITH_LOCAL_POLICY_EVENT',
+            'ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED_WITH_LOCAL_FETCH_POLICY_EVENT',
+            'ARTCRAFT_LOCAL_WASM_INITIALIZATION_FAILED_WITH_UNATTRIBUTED_COMPILE_POLICY_EVENT',
+          }
+          observed=[]
+          while time.monotonic()<deadline:
+              observed=sorted({(n.get_name() or '') for n in nodes() if visible(n) and ((n.get_name() or '') in exact or (n.get_name() or '').startswith('ARTCRAFT_'))})
+              if [x for x in observed if x!='loading']: break
+              time.sleep(.25)
+          receipt={
+            'schema':'xiio.hex.resident-library-readback/v1','route':'Library',
+            'library_control_observed':True,'status_candidates':observed,
+            'status':observed[-1] if observed else 'ARTCRAFT_STATUS_NOT_OBSERVED',
+            'effectiveDirective':None,'blockedURI':None,
+            'policy_event_detail_state':'UNAVAILABLE_CURRENT_DIAGNOSTIC','provider_effect':False,
+          }
+          with open(out,'x',encoding='utf-8') as fh:
+              json.dump(receipt,fh,indent=2,sort_keys=True); fh.write('\n'); fh.flush(); os.fsync(fh.fileno())
+          print(json.dumps(receipt,sort_keys=True))
+          if not observed: sys.exit(61)
+          PY
+
+          readback="$STATE/library-readback.json"
+          rm -f "$readback"
+          set +e
+          DISPLAY="$DISPLAY_VALUE" DBUS_SESSION_BUS_ADDRESS="$DBUS_VALUE" XDG_RUNTIME_DIR="$XDG_RUNTIME_VALUE" \
+            /usr/bin/python3 "$RUNNER_TEMP/hex-library-readback.py" "$new_pid" "$window" "$readback"
+          readback_rc=$?
+          set -e
+
+          python3 - "$STATE" "$ROOT" "$RESIDENT_HEAD" "$MANIFEST_SHA" "$STAGED_TUPLE_SHA" "$OLD_PID" "$LIVE_SHA" \
+            "$built_sha" "$installed_sha" "$new_pid" "$proc_sha" "$readback_rc" <<'PY'
+          import json,pathlib,sys
+          state=pathlib.Path(sys.argv[1])
+          readback=json.loads((state/'library-readback.json').read_text()) if (state/'library-readback.json').exists() else None
+          receipt={
+            'schema':'xiio.hex.resident-rebuild/v1','state':'READBACK_OBSERVED' if readback else 'READBACK_UNVERIFIED',
+            'source_root':sys.argv[2],'source_head':sys.argv[3],'source_manifest_sha256':sys.argv[4],
+            'staged_asset_tuple_sha256':sys.argv[5],'old_pid':int(sys.argv[6]),'old_binary_sha256':sys.argv[7],
+            'built_binary_sha256':sys.argv[8],'installed_binary_sha256':sys.argv[9],
+            'new_pid':int(sys.argv[10]),'running_binary_sha256':sys.argv[11],'library_readback_exit':int(sys.argv[12]),
+            'library_readback':readback,'csp_policy_changed':False,'return_fp_touched':False,'pr_209_touched':False,
+            'conversation_0231_touched':False,'desktop_commander_used':False,
+          }
+          p=state/'RESULT.hex.resident-rebuild.20261103.json'
+          p.write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          assert json.loads(p.read_text())==receipt
+          print(json.dumps(receipt,sort_keys=True))
+          PY
+
+          printf '%s\n' 'REBUILD_READBACK_COMPLETE' > "$STATE/state"
+          echo "HEX_RESIDENT_REBUILD=COMPLETE built_sha=$built_sha running_sha=$proc_sha readback_rc=$readback_rc"
+          test "$readback_rc" -eq 0
