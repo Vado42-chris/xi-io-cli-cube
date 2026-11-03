@@ -72,4 +72,35 @@ class PermissionProfileTests(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'PERMISSION_PROFILE_REVOKED'):
    mod.require_capability(p,'install_files')
 
+
+ def test_effect_authorization_requires_ward_and_currentness(self):
+  profile=mod.compile_profile({
+   'profile_id':'managed-review','capabilities':['install_files','receive_central_updates','apply_hotpatches'],
+   'service_scopes':['inbox'],'update_policy':'review_each','central_updates':True,
+   'remote_access':False,'revoked':False})
+  d=mod.authorize_central_request(profile,{'request_id':'req:3','kind':'hotpatch','service_id':'inbox',
+   'severity':'security','target_generation':'g4','signed':True,'rollback_available':True,'requires_restart':True})
+  auth={'ward_admission':True,'ward_admission_ref':'ward:1','work_ref':'work:1',
+   'assignment_ref':'assignment:1','attempt_ref':'attempt:1','generation_ref':'g:1',
+   'currentness_ref':'current:1','effect_authorization_ref':'effect:1',
+   'permission_digest':profile['permission_digest']}
+  with self.assertRaisesRegex(ValueError,'EXPLICIT_HOTPATCH_APPROVAL_REQUIRED'):
+   mod.require_effect_authorization(d,auth,False)
+  a=mod.require_effect_authorization(d,auth,True)
+  self.assertTrue(a['authorized'])
+  bad={**auth,'work_ref':''}
+  with self.assertRaisesRegex(ValueError,'EFFECT_AUTHORIZATION_REF_REQUIRED'):
+   mod.require_effect_authorization(d,bad,True)
+
+ def test_auto_security_still_requires_ward_receipt(self):
+  profile=mod.compile_profile({
+   'profile_id':'managed-auto','capabilities':['install_files','receive_central_updates','apply_hotpatches'],
+   'service_scopes':['inbox'],'update_policy':'auto_security','central_updates':True,
+   'remote_access':False,'revoked':False})
+  d=mod.authorize_central_request(profile,{'request_id':'req:4','kind':'hotpatch','service_id':'inbox',
+   'severity':'security','target_generation':'g5','signed':True,'rollback_available':True,'requires_restart':True})
+  self.assertTrue(d['auto_eligible'])
+  with self.assertRaisesRegex(ValueError,'EFFECT_AUTHORIZATION_REQUIRED'):
+   mod.require_effect_authorization(d,None,False)
+
 if __name__=='__main__':unittest.main()
