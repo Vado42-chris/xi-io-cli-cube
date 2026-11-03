@@ -39,12 +39,14 @@ fn window_trace(window:&WebviewWindow, action:&str, direction:Option<&str>, stag
     let size=window.outer_size().ok().map(|p|json!({"width":p.width,"height":p.height}));
     eprintln!("HEX_NATIVE_WINDOW {}",json!({"time_ms":ms,"action":action,"direction":direction,"stage":stage,"command_result":result,"maximized":window.is_maximized().ok(),"fullscreen":window.is_fullscreen().ok(),"position":position,"size":size,"geometry_is_observation_not_drag_success":true}));
 }
-// Fixed numeric/boolean observation, not DOM content or execution authority.
+// Fixed numeric/boolean observation, including sanitized CSP classes.
+// No DOM content, blocked URLs, source paths or execution authority.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 struct FrontendDiagnostic {
     sample: u8,
     errors: [u8; 5],
+    csp: [u8; 2],
     nodes: [[u16; 4]; 4],
     root_children: bool,
     document_visible: bool,
@@ -53,7 +55,9 @@ struct FrontendDiagnostic {
 }
 impl FrontendDiagnostic {
     fn valid(&self) -> bool {
-        self.sample < 3 && self.nodes.iter().all(|n|
+        self.sample < 3 && self.csp[0] <= 7 && self.csp[1] <= 5
+            && (self.csp[0] != 0 || self.csp[1] == 0)
+            && self.nodes.iter().all(|n|
             n[0] <= 1 && n[1] <= 16384 && n[2] <= 16384 && n[3] <= 1
             && (n[0] == 1 || n[1..].iter().all(|v| *v == 0)))
     }
