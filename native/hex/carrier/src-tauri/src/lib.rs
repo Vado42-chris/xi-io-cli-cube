@@ -46,6 +46,8 @@ fn window_trace(window:&WebviewWindow, action:&str, direction:Option<&str>, stag
 struct FrontendDiagnostic {
     sample: u8,
     errors: [u8; 5],
+    // Older installed frontend samples do not carry CSP detail.
+    #[serde(default)]
     csp: [u8; 2],
     nodes: [[u16; 4]; 4],
     root_children: bool,
@@ -187,7 +189,15 @@ mod tests {
         let value = json!({"sample":0,"errors":[0,0,0,0,0],"nodes":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],
             "root_children":false,"document_visible":true,"raf":false,"shadow":false});
         let read = |v:Value| serde_json::from_value::<FrontendDiagnostic>(v);
+        // Legacy samples remain readable with no inferred CSP finding.
+        assert_eq!(read(value.clone()).unwrap().csp, [0, 0]);
         assert!(read(value.clone()).unwrap().valid());
+        let mut valid_csp = value.clone(); valid_csp["csp"] = json!([1, 2]);
+        assert!(read(valid_csp).unwrap().valid());
+        let mut invalid_csp = value.clone(); invalid_csp["csp"] = json!([1, 6]);
+        assert!(!read(invalid_csp).unwrap().valid());
+        let mut inconsistent_csp = value.clone(); inconsistent_csp["csp"] = json!([0, 2]);
+        assert!(!read(inconsistent_csp).unwrap().valid());
         let mut bad=value.clone(); bad["message"]=json!("not allowed"); assert!(read(bad).is_err());
         let mut bad=value.clone(); bad["sample"]=json!(3); assert!(!read(bad).unwrap().valid());
         let mut bad=value.clone(); bad["errors"][0]=json!(256); assert!(read(bad).is_err());
