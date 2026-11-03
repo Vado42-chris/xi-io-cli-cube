@@ -8,7 +8,7 @@ user-service activation and independent local readback.
 No sudo. No system units. No arbitrary shell. No central authority.
 """
 from __future__ import annotations
-import hashlib, json, os, re, urllib.request, urllib.error
+import hashlib, json, os, re, urllib.request, urllib.error, urllib.parse
 from pathlib import Path
 from xiio_installer.manifest import load_manifest, verify_payload
 from xiio_installer.transaction import plan_install, apply_install, rollback
