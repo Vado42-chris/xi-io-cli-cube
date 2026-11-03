@@ -46,7 +46,7 @@ successor_validate(){
   wake_ref="$(json_field "$raw" wake_ref)"
   next_ref="$(json_field "$raw" next_input_ref)"
   python3 "$SUCCESSOR_HELPER" validate \
-    --wake-path "$wake_path" --wake-ref "$wake_ref" --next-ref "$next_ref" --next-dir "$NEXT_INPUT_DIR"
+    --wake-path "$wake_path" --wake-ref "$wake_ref" --next-ref "$next_ref" --next-dir "$NEXT_INPUT_DIR" 2>&1
 }
 
 successor_claim(){
