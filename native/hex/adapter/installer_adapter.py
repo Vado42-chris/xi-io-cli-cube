@@ -11,6 +11,7 @@ sys.path.insert(0, str(HERE))
 import connection_profile
 import install_preflight
 import local_step_actions
+import permission_profile
 from xiio_installer.observability import OperationJournal, inspect_operation
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
@@ -338,7 +339,7 @@ def handle_repair(req,base,p):
 
 def handle(req):
     demand(isinstance(req,dict),'REQUEST_OBJECT_REQUIRED')
-    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
+    allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components','permission_profile'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
     act=req.get('action');demand(act in allowed and set(req)<=allowed[act],'REQUEST_FIELDS_INVALID')
     base=root();lock=base/'native-adapter.lock'
     fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
@@ -363,7 +364,9 @@ def handle(req):
                 demand((prefix/'current').is_file() and (prefix/'versions').is_dir(),'DESTINATION_NOT_EXISTING_CLI')
                 previous=file_bytes(prefix/'current').decode().strip()
             n=node_identity(req['node']);pack=payload();ident=uuid.uuid4().hex
-            p={'plan_id':ident,'prefix':str(prefix),'node':n,'components':['cli'],'payload':pack,'destination_before':before,'previous_current':previous,'payload_files':len(pack['manifest']['files']),'payload_bytes':sum(x['size'] for x in pack['manifest']['files'].values()),'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'changes':['Install exact CLI generation','Create/retain pinned Node launcher in selected prefix/bin','Commit existing CLI current/previous pointers'],'limitations':['No service startup','No remote connection','No first-install uninstall; rollback is existing CLI previous-generation swap']}
+            permissions=permission_profile.compile_profile(req.get('permission_profile'))
+            permission_profile.require_capability(permissions,'install_files')
+            p={'plan_id':ident,'prefix':str(prefix),'node':n,'components':['cli'],'payload':pack,'permission_profile':permissions,'permission_digest':permissions['permission_digest'],'destination_before':before,'previous_current':previous,'payload_files':len(pack['manifest']['files']),'payload_bytes':sum(x['size'] for x in pack['manifest']['files'].values()),'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'changes':['Install exact CLI generation','Create/retain pinned Node launcher in selected prefix/bin','Commit existing CLI current/previous pointers'],'limitations':['No service startup in this source generation','No remote connection unless separately granted and implemented','No first-install uninstall; rollback is existing CLI previous-generation swap']}
             p['preflight']=observed_preflight()
             p['connection_prerequisites']=p['preflight']['connection_prerequisites']
             p['connection']=connection_profile.prepare(base,p,SOURCE/'connection')
@@ -395,6 +398,8 @@ def handle(req):
             cr=connection_profile.readback(base,p,SOURCE/'connection',op['events'][-1]['details'].get('connection_receipt_sha256'),view['phase']=='ROLLED_BACK')
             return {**view,'readback':rb,'connection_readback':cr,'connection_state':'CONFIGURATION_REQUIRED','connected':False,'observation_current':True}
         demand(req.get('approved') is True and req.get('approval_digest')==p['approval_digest'],'EXACT_APPROVAL_REQUIRED')
+        permissions=permission_profile.require_capability(p.get('permission_profile',{}),'install_files')
+        demand(permissions['permission_digest']==p.get('permission_digest'),'PERMISSION_DIGEST_CHANGED')
         demand(not view['do_not_retry'],'UNCERTAIN_OUTCOME_DO_NOT_RETRY')
         verify_node(p)
         demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
