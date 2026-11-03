@@ -6,7 +6,7 @@ import {availabilityFrom, availableSelection, canPrepareComponents, canRollbackP
 
 type Plan = {plan_id: string; phase: string; prefix?: string; components?: string[]; approval_digest?: string; payload_files?: number; payload_bytes?: number; created_at?: string; [key: string]: any};
 type PermissionProfile = {schema:'xiio.hex.permission-profile/v1';profile_id:string;capabilities:string[];service_scopes:string[];update_policy:'off'|'notify'|'review_each'|'auto_security';central_updates:boolean;remote_access:boolean;revoked:boolean};
-type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]; permission_profile: PermissionProfile} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true};
+type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]; permission_profile: PermissionProfile} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true} | {action:'server_prepare';plan_id:string;package_root:string} | {action:'server_apply';plan_id:string;package_root:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'server_rollback';plan_id:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'permission_replace';plan_id:string;current_digest:string;new_profile:PermissionProfile;approved:true};
 
 /** Local native controls within the accepted Cube design, not another launcher. */
 export default function NativeInstallerPanel() {
@@ -23,6 +23,12 @@ export default function NativeInstallerPanel() {
   const [allowCentralUpdates, setAllowCentralUpdates] = useState(false);
   const [allowHotpatches, setAllowHotpatches] = useState(false);
   const [autoSecurityHotpatch, setAutoSecurityHotpatch] = useState(false);
+  const [serverPackageRoot, setServerPackageRoot] = useState('');
+  const [serverPlan, setServerPlan] = useState<any>(null);
+  const [serverPlanDigest, setServerPlanDigest] = useState('');
+  const [serverResult, setServerResult] = useState<any>(null);
+  const [serverApproval, setServerApproval] = useState(false);
+  const [serverRollbackApproval, setServerRollbackApproval] = useState(false);
   const [availability, setAvailability] = useState(() => availabilityFrom(null));
   const [history, setHistory] = useState<Plan[]>([]);
   const [preflight, setPreflight] = useState<any>(null);
@@ -32,6 +38,15 @@ export default function NativeInstallerPanel() {
       if (selected !== null) { edit(); setPrefix(selected); }
     } catch (error) { setError(String(error instanceof Error ? error.message : error)); }
   }
+  async function chooseServerPackageFolder() {
+    try {
+      const selected = await selectNativeDirectory('server-package');
+      if (selected !== null) {
+        setServerPackageRoot(selected); setServerPlan(null); setServerPlanDigest('');
+        setServerResult(null); setServerApproval(false); setServerRollbackApproval(false);
+      }
+    } catch (error) { setError(String(error instanceof Error ? error.message : error)); }
+  }
   const [plan, setPlan] = useState<Plan | null>(null);
   const [observed, setObserved] = useState(false);
   const [unknown, setUnknown] = useState(false);
@@ -39,6 +54,24 @@ export default function NativeInstallerPanel() {
   const [rollbackApproval, setRollbackApproval] = useState(false);
   const invoke = (command: string, args: object) => (globalThis as any).__TAURI__.core.invoke(command, args);
   const client = createInstallerClient(native ? invoke : undefined);
+
+  async function runServer(request: Request) {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true); setError('');
+    try {
+      const result = await client(request);
+      if (request.action === 'server_prepare') {
+        setServerPlan(result); setServerPlanDigest(result.server_plan_digest || '');
+        setServerResult(null); setServerApproval(false); setServerRollbackApproval(false);
+      } else {
+        setServerResult(result);
+        if (request.action === 'server_rollback') { setServerPlan(null); setServerPlanDigest(''); }
+      }
+      return result;
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally { busyRef.current = false; setBusy(false); }
+  }
 
   async function run(request: Request, select = true) {
     if (busyRef.current) return;
@@ -78,6 +111,8 @@ export default function NativeInstallerPanel() {
   const canApply = plan?.phase === 'PREPARED_NOT_INSTALLED' && !unknown && runtimeReady;
   const canRepair = plan?.phase === 'PREPARED_REPAIR_NOT_APPLIED' && !unknown;
   const canRollback = canRollbackPlan(plan, unknown);
+  const serviceGrant = Boolean(plan?.permission_profile?.capabilities?.includes('configure_services') && plan?.permission_profile?.capabilities?.includes('start_services'));
+  const serverInstalled = serverResult?.state === 'INSTALLED_STARTED_READBACK_VERIFIED';
   const permissionProfile: PermissionProfile = {
     schema:'xiio.hex.permission-profile/v1',
     profile_id: allowCentralUpdates ? (autoSecurityHotpatch ? 'managed-security-auto' : 'managed-review') : 'local-standard',
@@ -145,10 +180,25 @@ export default function NativeInstallerPanel() {
         {(unknown || !['PREPARED_NOT_INSTALLED', 'PREPARED_REPAIR_NOT_APPLIED'].includes(plan.phase)) && <button className={button} disabled={busy} onClick={() => void run({action: 'readback', plan_id: plan.plan_id})}>Check actual state</button>}
         {plan.phase === 'INSTALLED_READBACK_VERIFIED' && !canRollback && !unknown && <p className="text-xs text-workspace-muted">Rollback is unavailable for this plan. The CLI requires a previous installed generation; this is not an uninstall operation.</p>}
         {canRollback && <><label className="block text-sm text-workspace-text"><input type="checkbox" checked={rollbackApproval} disabled={busy} onChange={e => setRollbackApproval(e.target.checked)} /> I have stopped services using these files. Restore the previous CLI generation using the existing CLI rollback and saved evidence. Unrelated data is retained; rollback does not stop processes.</label><button className={button} disabled={busy || !rollbackApproval} onClick={() => void run({action: 'rollback', plan_id: plan.plan_id, approval_digest: plan.approval_digest!, approved: true})}>Roll back this plan</button></>}
+        {plan.phase === 'INSTALLED_READBACK_VERIFIED' && serviceGrant && !unknown && <div className="space-y-3 border-t border-workspace-border-strong pt-4">
+          <h4 className="font-bold text-workspace-text">Server profile</h4>
+          <p className="text-xs text-workspace-muted">A server package is hash-qualified before effect. Only declared systemd --user units inside the granted service scope may be installed or started. No sudo or system service mutation.</p>
+          <div className="flex flex-wrap gap-2 items-end">
+            <label className="text-xs text-workspace-text flex-1 min-w-[260px]">Server package folder<input aria-label="Server package folder" value={serverPackageRoot} readOnly className="mt-1 w-full rounded bg-workspace-surface border border-workspace-border-strong p-2 font-mono" /></label>
+            <button type="button" className={button} disabled={busy} onClick={() => void chooseServerPackageFolder()}>Choose server package</button>
+            <button type="button" className={button} disabled={busy || !serverPackageRoot} onClick={() => void runServer({action:'server_prepare',plan_id:plan.plan_id,package_root:serverPackageRoot})}>Review server install & startup</button>
+          </div>
+          {serverPlan && <details className="hex-installer-disclosure text-xs" open>
+            <summary>Reviewed server package plan</summary>
+            <pre className="hex-detail-scroll text-workspace-muted" tabIndex={0} role="region" aria-label="Reviewed server package plan">{JSON.stringify(serverPlan, null, 2)}</pre>
+          </details>}
+          {serverPlan && !serverInstalled && <><label className="block text-sm text-workspace-text"><input type="checkbox" checked={serverApproval} disabled={busy} onChange={e => setServerApproval(e.target.checked)} /> I approve this exact server package, user-service unit set and local startup. Required probes must pass or HEX rolls the package back.</label><button className={button} disabled={busy || !serverApproval || !serverPlanDigest} onClick={() => void runServer({action:'server_apply',plan_id:plan.plan_id,package_root:serverPackageRoot,server_plan:serverPlan,server_plan_digest:serverPlanDigest,approved:true})}>Install and start reviewed server profile</button></>}
+          {serverInstalled && <><p role="status" className="text-sm text-workspace-success">Server package installed, services started and required local probes read back.</p><details className="hex-installer-disclosure text-xs"><summary>Server effect receipt</summary><pre className="hex-detail-scroll text-workspace-muted">{JSON.stringify(serverResult, null, 2)}</pre></details><label className="block text-sm text-workspace-text"><input type="checkbox" checked={serverRollbackApproval} disabled={busy} onChange={e => setServerRollbackApproval(e.target.checked)} /> Stop these user services and roll back only this server package.</label><button className={button} disabled={busy || !serverRollbackApproval || !serverPlanDigest} onClick={() => void runServer({action:'server_rollback',plan_id:plan.plan_id,server_plan:serverPlan,server_plan_digest:serverPlanDigest,approved:true})}>Roll back server package</button></>}
+        </div>}
       </div>}
       {busy && <p role="status" className="text-sm text-workspace-focus">Working on the real local request. Please keep HEX open; duplicate actions are disabled.</p>}
       {error && <p role="alert" className="text-sm text-workspace-danger whitespace-pre-wrap break-all">{error}{unknown ? ' Check actual state or reopen saved history before continuing.' : ''}</p>}
-      <p className="text-xs text-workspace-muted">File installation is not service startup, protected-file admission, OAuth enrollment or a connected remote server. Unavailable components are not installed. CLI installation alone is not a complete HEX product installation; ibal and Studio are not included in this payload.</p>
+      <p className="text-xs text-workspace-muted">Core file installation and server-profile installation are separate verified phases. A qualified server package may install and start granted XI-IO user services with local probe readback. Remote access, provider OAuth and system-level services remain separate permissions and are never implied by installation.</p>
     </>}
   </section>;
 }
