@@ -122,7 +122,21 @@ mod tests {
         let gate=Arc::new(Mutex::new(()));
         // Large legal request: a child that does not read can fill a pipe. The
         // timer/tracker must stay independent from the blocked writer.
-        let req=InstallerRequest::Prepare{prefix:format!("/{}","x".repeat(4090)),node:format!("/{}","y".repeat(4090)),components:vec!["cli".into()]};
+        let req=InstallerRequest::Prepare{
+            prefix:format!("/{}","x".repeat(4090)),
+            node:format!("/{}","y".repeat(4090)),
+            components:vec!["cli".into()],
+            permission_profile:serde_json::json!({
+                "schema":"xiio.hex.permission-profile/v1",
+                "profile_id":"local-standard",
+                "capabilities":["install_files"],
+                "service_scopes":[],
+                "update_policy":"notify",
+                "central_updates":false,
+                "remote_access":false,
+                "revoked":false
+            })
+        };
         let start=Instant::now();
         let response=execute_deadline(req,script,root.clone(),gate.clone(),Duration::from_millis(20));
         assert_eq!(response["result"]["do_not_retry"],true);
