@@ -157,3 +157,39 @@ def replace_grant(base,plan_id,current_digest,new_profile,approved):
  if current['permission_digest']!=current_digest: raise ValueError('PERMISSION_CURRENTNESS_CHANGED')
  new=compile_profile(new_profile)
  return save_grant(base,plan_id,new)
+
+
+def require_effect_authorization(decision,authorization,approved=False):
+ """Join provider proposal to local XI-IO authority. Refs are receipts, not secrets."""
+ if not isinstance(decision,dict) or decision.get('schema')!='xiio.hex.central-update-decision/v1':
+  raise ValueError('CENTRAL_DECISION_INVALID')
+ if decision.get('allowed_by_profile') is not True or decision.get('effect_authorized') is not False:
+  raise ValueError('CENTRAL_DECISION_NOT_ADMISSIBLE')
+ if not isinstance(authorization,dict):
+  raise ValueError('EFFECT_AUTHORIZATION_REQUIRED')
+ allowed={'ward_admission','ward_admission_ref','work_ref','assignment_ref','attempt_ref',
+          'generation_ref','currentness_ref','effect_authorization_ref','permission_digest'}
+ if set(authorization)-allowed:
+  raise ValueError('EFFECT_AUTHORIZATION_FIELDS_INVALID')
+ required=['ward_admission_ref','work_ref','assignment_ref','attempt_ref','generation_ref',
+           'currentness_ref','effect_authorization_ref','permission_digest']
+ for key in required:
+  value=authorization.get(key)
+  if not isinstance(value,str) or not value.strip():
+   raise ValueError('EFFECT_AUTHORIZATION_REF_REQUIRED:'+key)
+ if authorization.get('ward_admission') is not True:
+  raise ValueError('WARD_ADMISSION_REQUIRED')
+ if authorization['permission_digest']!=decision.get('permission_digest'):
+  raise ValueError('EFFECT_PERMISSION_DIGEST_MISMATCH')
+ if decision.get('approval_required') is True and approved is not True:
+  raise ValueError('EXPLICIT_HOTPATCH_APPROVAL_REQUIRED')
+ return {
+  'schema':'xiio.hex.effect-authorization/v1',
+  **authorization,
+  'central_request_id':decision.get('request_id'),
+  'service_id':decision.get('service_id'),
+  'kind':decision.get('kind'),
+  'authorized':True,
+  'hard':['CENTRAL_REQUEST!=WARD_AUTHORITY','PROFILE_ALLOW!=EFFECT_AUTHORITY',
+          'WARD_RECEIPT_REQUIRED','CURRENTNESS_RECEIPT_REQUIRED'],
+ }
