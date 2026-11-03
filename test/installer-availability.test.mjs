@@ -33,5 +33,5 @@ test('accepted panel adopts availability without replacement UI', () => {
  assert.ok(src.includes('canPrepareComponents(components, availability)'));
  assert.ok(src.includes("disabled={name === 'cli' || !availability[name].available}"));
  assert.ok(src.includes('canRollbackPlan(plan, unknown)'));
- assert.ok(src.includes('CLI installation alone is not a complete HEX product installation'));
+ assert.ok(src.includes('Core file installation and server-profile installation are separate verified phases'));
 });
