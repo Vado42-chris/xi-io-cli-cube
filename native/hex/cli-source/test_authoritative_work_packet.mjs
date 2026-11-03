@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import {compileLocalWorkPacket,compileAuthoritativeWorkPacket} from '../src/sdk/local-work-packet.mjs';
+import {compileLocalWorkPacket,compileAuthoritativeWorkPacket} from './src/sdk/local-work-packet.mjs';
 
 const local=compileLocalWorkPacket({
  packet_id:'packet:fixture:1',
