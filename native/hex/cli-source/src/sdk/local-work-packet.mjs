@@ -133,6 +133,15 @@ export function compileLocalWorkPacket(input = {}) {
     checkpoint_return_destination: path.resolve(workspace_root, clean(input.checkpoint_return_destination, 1024)),
     next_step_policy: policy,
     accepted: true,
+    // Preserve the exact worker/packet join emitted by Ibal #236. These fields
+    // are identity/provenance only; their presence grants no effect authority.
+    work_uuid: clean(input.work_uuid, 256),
+    assignment_ref: clean(input.assignment_ref, 256),
+    attempt_ref: clean(input.attempt_ref, 256),
+    source_generation: clean(input.source_generation, 512),
+    operation_ref: clean(input.operation_ref, 512),
+    return_ref: clean(input.return_ref ?? input.return_target_ref, 1024),
+    project_id: clean(input.project_id, 512),
     accepted_at: clean(input.accepted_at, 64) || new Date().toISOString(),
     effect_authority: false,
     semantic_digest: null,
@@ -151,6 +160,13 @@ export function compileLocalWorkPacket(input = {}) {
       expected_result: packet.expected_result,
       checkpoint_return_destination: packet.checkpoint_return_destination,
       next_step_policy: packet.next_step_policy,
+      work_uuid: packet.work_uuid,
+      assignment_ref: packet.assignment_ref,
+      attempt_ref: packet.attempt_ref,
+      source_generation: packet.source_generation,
+      operation_ref: packet.operation_ref,
+      return_ref: packet.return_ref,
+      project_id: packet.project_id,
     }),
   };
   return Object.freeze(withDigest);
