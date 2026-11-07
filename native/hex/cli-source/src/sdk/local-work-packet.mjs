@@ -369,7 +369,19 @@ export function acceptPacket(input, {workspaceRoot, force = false} = {}) {
   if (fs.existsSync(dest) && !force) {
     const existing = loadAcceptedPacket(root);
     if (existing.state === 'PASS' && existing.packet.packet_id === packet.packet_id) {
-      return {state: 'PASS', reason: 'ALREADY_ACCEPTED', packet: existing.packet, path: dest, duplicate: true};
+      if (existing.packet.semantic_digest !== packet.semantic_digest) {
+        return {
+          state: 'BLOCKED',
+          reason: 'PACKET_IDEMPOTENCY_CONFLICT',
+          packet: existing.packet,
+          path: dest,
+          duplicate: false,
+          expected_digest: existing.packet.semantic_digest,
+          observed_digest: packet.semantic_digest,
+          effect_authority: false,
+        };
+      }
+      return {state: 'PASS', reason: 'ALREADY_ACCEPTED', packet: existing.packet, path: dest, duplicate: true, effect_authority: false};
     }
     if (existing.state === 'PASS') {
       const prior = reconcileInterruptedEffect({packet: existing.packet});
