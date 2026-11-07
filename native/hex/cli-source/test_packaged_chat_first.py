@@ -11,8 +11,10 @@ assert manifest["source_sha"]==SOURCE
 assert manifest["files"]==EXPECTED
 for rel,meta in EXPECTED.items():
     data=(ROOT/rel).read_bytes()
-    assert len(data)==meta["size"], rel
-    assert hashlib.sha256(data).hexdigest()==meta["sha256"], rel
+    actual_size=len(data)
+    actual_sha=hashlib.sha256(data).hexdigest()
+    assert actual_size==meta["size"], f"{rel}: size expected={meta['size']} actual={actual_size} sha256={actual_sha}"
+    assert actual_sha==meta["sha256"], f"{rel}: sha256 expected={meta['sha256']} actual={actual_sha} size={actual_size}"
 source=json.loads((ROOT/"SOURCE.json").read_text())
 current=source["current_packaged_payload"]
 assert current["repository"]=="Vado42-chris/xi-io-cli"

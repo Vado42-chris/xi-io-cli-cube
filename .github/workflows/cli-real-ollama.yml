@@ -27,6 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 native/hex/cli-source/test_packaged_chat_first.py
+          node --test native/hex/cli-source/test_local_work_packet_worker_fields.mjs
           # The custody test above checks the exact source pin and every file digest.
           node --check native/hex/cli-source/src/xiio.mjs
 
