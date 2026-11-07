@@ -103,3 +103,17 @@ test('legacy packet without worker identity retains legacy semantic digest',()=>
     assert.equal(packet.source_generation,null);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('partial worker identity is refused rather than persisted ambiguously',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'xiio-packet-partial-'));
+  try{
+    const input=fixture(root);
+    delete input.return_ref;
+    assert.throws(
+      ()=>compileLocalWorkPacket(input),
+      error=>error?.code==='LOCAL_WORK_PACKET_WORKER_IDENTITY_INCOMPLETE'
+        && error.missing.includes('return_ref'),
+    );
+    assert.equal(fs.existsSync(path.join(root,'.xiio','accepted-work-packet.json')),false);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
