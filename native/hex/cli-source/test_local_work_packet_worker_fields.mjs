@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {
   compileLocalWorkPacket,
   acceptPacket,
@@ -96,7 +97,6 @@ test('legacy packet without worker identity retains legacy semantic digest',()=>
       checkpoint_return_destination:packet.checkpoint_return_destination,
       next_step_policy:packet.next_step_policy,
     };
-    const crypto=await import('node:crypto');
     const legacyDigest=crypto.createHash('sha256').update(JSON.stringify(legacyInput)).digest('hex');
     assert.equal(packet.semantic_digest,legacyDigest);
     assert.equal(packet.work_uuid,null);
