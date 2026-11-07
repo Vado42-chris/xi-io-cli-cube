@@ -27,8 +27,8 @@
       "size": 15812
     },
     "src/sdk/local-work-packet.mjs": {
-      "sha256": "d31c00065d021bb25e26e5296531b30c15e2e821556fdb95ff5be3ba2edb881d",
-      "size": 36876
+      "sha256": "f195722e1c651416f50c08c1a5ab44ca2ca0e8edd39863d886dd6920d89016e7",
+      "size": 37030
     },
     "src/sdk/qualified-command-executor.mjs": {
       "sha256": "ba2f3365695e02966e5814697c437a0d68f078e1649267183451b54ecc3ca848",
