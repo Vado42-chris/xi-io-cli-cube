@@ -76,3 +76,30 @@ test('return_target_ref compatibility is normalized to canonical return_ref',()=
     assert.equal(Object.hasOwn(packet,'return_target_ref'),false);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('legacy packet without worker identity retains legacy semantic digest',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'xiio-packet-legacy-'));
+  try{
+    const input=fixture(root);
+    for(const key of ['work_uuid','assignment_ref','attempt_ref','source_generation','operation_ref','return_ref','project_id']) delete input[key];
+    const packet=compileLocalWorkPacket(input);
+    const legacyInput={
+      packet_id:packet.packet_id,
+      pinned_source:packet.pinned_source,
+      workspace_root:packet.workspace_root,
+      objective:packet.objective,
+      dependencies:packet.dependencies,
+      allowed_scope:packet.allowed_scope,
+      acceptance_command:packet.acceptance_command,
+      admitted_step:packet.admitted_step,
+      expected_result:packet.expected_result,
+      checkpoint_return_destination:packet.checkpoint_return_destination,
+      next_step_policy:packet.next_step_policy,
+    };
+    const crypto=await import('node:crypto');
+    const legacyDigest=crypto.createHash('sha256').update(JSON.stringify(legacyInput)).digest('hex');
+    assert.equal(packet.semantic_digest,legacyDigest);
+    assert.equal(packet.work_uuid,null);
+    assert.equal(packet.source_generation,null);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
