@@ -117,3 +117,36 @@ test('partial worker identity is refused rather than persisted ambiguously',()=>
     assert.equal(fs.existsSync(path.join(root,'.xiio','accepted-work-packet.json')),false);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('same packet id with changed worker identity is an idempotency conflict',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'xiio-packet-idempotency-'));
+  try{
+    const first=fixture(root);
+    const accepted=acceptPacket(first,{workspaceRoot:root});
+    assert.equal(accepted.state,'PASS');
+    const changed={...first,source_generation:'generation:changed'};
+    const replay=acceptPacket(changed,{workspaceRoot:root});
+    assert.equal(replay.state,'BLOCKED');
+    assert.equal(replay.reason,'PACKET_IDEMPOTENCY_CONFLICT');
+    assert.notEqual(replay.expected_digest,replay.observed_digest);
+    const loaded=loadAcceptedPacket(root);
+    assert.equal(loaded.state,'PASS');
+    assert.equal(loaded.packet.source_generation,first.source_generation);
+    assert.equal(loaded.packet.semantic_digest,accepted.packet.semantic_digest);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('exact same packet id and semantic digest replays without rewriting',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'xiio-packet-exact-replay-'));
+  try{
+    const input=fixture(root);
+    input.accepted_at='2026-11-07T14:00:00.000Z';
+    const first=acceptPacket(input,{workspaceRoot:root});
+    const second=acceptPacket(input,{workspaceRoot:root});
+    assert.equal(first.state,'PASS');
+    assert.equal(second.state,'PASS');
+    assert.equal(second.reason,'ALREADY_ACCEPTED');
+    assert.equal(second.duplicate,true);
+    assert.equal(second.packet.semantic_digest,first.packet.semantic_digest);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
