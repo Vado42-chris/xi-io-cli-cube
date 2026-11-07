@@ -146,6 +146,17 @@ export function compileLocalWorkPacket(input = {}) {
     effect_authority: false,
     semantic_digest: null,
   });
+  const workerIdentity = Object.fromEntries(
+    [
+      ['work_uuid', packet.work_uuid],
+      ['assignment_ref', packet.assignment_ref],
+      ['attempt_ref', packet.attempt_ref],
+      ['source_generation', packet.source_generation],
+      ['operation_ref', packet.operation_ref],
+      ['return_ref', packet.return_ref],
+      ['project_id', packet.project_id],
+    ].filter(([, value]) => value !== null),
+  );
   const withDigest = {
     ...packet,
     semantic_digest: digest({
@@ -160,13 +171,7 @@ export function compileLocalWorkPacket(input = {}) {
       expected_result: packet.expected_result,
       checkpoint_return_destination: packet.checkpoint_return_destination,
       next_step_policy: packet.next_step_policy,
-      work_uuid: packet.work_uuid,
-      assignment_ref: packet.assignment_ref,
-      attempt_ref: packet.attempt_ref,
-      source_generation: packet.source_generation,
-      operation_ref: packet.operation_ref,
-      return_ref: packet.return_ref,
-      project_id: packet.project_id,
+      ...workerIdentity,
     }),
   };
   return Object.freeze(withDigest);
