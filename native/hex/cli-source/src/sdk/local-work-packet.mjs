@@ -146,17 +146,29 @@ export function compileLocalWorkPacket(input = {}) {
     effect_authority: false,
     semantic_digest: null,
   });
-  const workerIdentity = Object.fromEntries(
-    [
-      ['work_uuid', packet.work_uuid],
-      ['assignment_ref', packet.assignment_ref],
-      ['attempt_ref', packet.attempt_ref],
-      ['source_generation', packet.source_generation],
-      ['operation_ref', packet.operation_ref],
-      ['return_ref', packet.return_ref],
-      ['project_id', packet.project_id],
-    ].filter(([, value]) => value !== null),
-  );
+  const workerIdentityEntries = [
+    ['work_uuid', packet.work_uuid],
+    ['assignment_ref', packet.assignment_ref],
+    ['attempt_ref', packet.attempt_ref],
+    ['source_generation', packet.source_generation],
+    ['operation_ref', packet.operation_ref],
+    ['return_ref', packet.return_ref],
+    ['project_id', packet.project_id],
+  ];
+  const workerIdentityPresent = workerIdentityEntries.filter(([, value]) => value !== null);
+  // Legacy packets may have no worker identity at all. Once any worker join is
+  // present, require the complete identity set so the canonical accepted row
+  // cannot become a partially authoritative-looking packet.
+  if (workerIdentityPresent.length > 0 && workerIdentityPresent.length !== workerIdentityEntries.length) {
+    const missingWorkerIdentity = workerIdentityEntries
+      .filter(([, value]) => value === null)
+      .map(([key]) => key);
+    const error = new Error('LOCAL_WORK_PACKET_WORKER_IDENTITY_INCOMPLETE:' + missingWorkerIdentity.join(','));
+    error.code = 'LOCAL_WORK_PACKET_WORKER_IDENTITY_INCOMPLETE';
+    error.missing = missingWorkerIdentity;
+    throw error;
+  }
+  const workerIdentity = Object.fromEntries(workerIdentityPresent);
   const withDigest = {
     ...packet,
     semantic_digest: digest({
