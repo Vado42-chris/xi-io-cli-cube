@@ -172,14 +172,18 @@ fn native_plugin_open_provider(window:WebviewWindow,provider:String)->Result<Val
 // Product Open is not a URL navigation. The existing native release/registry
 // consumer must first supply an installed-generation and window identity
 // readback. Until that qualified port is bound, refuse without changing windows.
-#[tauri::command]
-fn native_product_open(window:WebviewWindow, product_id:String)->Result<Value,String>{
-    local_caller(&window)?;
+fn native_product_open_policy(product_id:&str)->Result<(), &'static str>{
     if product_id.is_empty() || product_id.len()>128 ||
        !product_id.bytes().all(|b|b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b)) ||
        product_id.contains("..") {
-        return Err("PRODUCT_IDENTITY_INVALID".into());
+        return Err("PRODUCT_IDENTITY_INVALID");
     }
+    Err("NATIVE_PRODUCT_OPEN_REGISTRY_UNBOUND")
+}
+#[tauri::command]
+fn native_product_open(window:WebviewWindow, product_id:String)->Result<Value,String>{
+    local_caller(&window)?;
+    native_product_open_policy(&product_id).map_err(str::to_owned)?;
     Err("NATIVE_PRODUCT_OPEN_REGISTRY_UNBOUND".into())
 }
 
@@ -217,6 +221,17 @@ mod tests {
         let mut bad=value.clone(); bad["errors"][0]=json!(256); assert!(read(bad).is_err());
         let mut bad=value.clone(); bad["nodes"][0]=json!([1,16385,1,1]); assert!(!read(bad).unwrap().valid());
         let mut bad=value.clone(); bad["nodes"][0]=json!([0,1,1,1]); assert!(!read(bad).unwrap().valid());
+    }
+    #[test] fn product_open_never_guesses_a_host_or_research_repo() {
+        for id in ["sam_law","inbox","hex","publisher"] {
+            assert_eq!(
+                native_product_open_policy(id).unwrap_err(),
+                "NATIVE_PRODUCT_OPEN_REGISTRY_UNBOUND"
+            );
+        }
+        for id in ["", "../sam_law", "SAM_LAW", "sam/law", "a..b"] {
+            assert_eq!(native_product_open_policy(id).unwrap_err(), "PRODUCT_IDENTITY_INVALID");
+        }
     }
     #[test] fn exact_local_origins_only() {
         for value in ["tauri://localhost/index.html", "http://tauri.localhost/index.html"] {
