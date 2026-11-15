@@ -102,10 +102,10 @@ class BundleTests(unittest.TestCase):
 
     def test_product_profile_installs_only_selected_root_and_transitive_dependencies(self):
         f = self.fixture()
-        f.child("bins").child("ward", depends_on=("bins",)).child(
-            "sam-law", depends_on=("ward",)
+        f.child("bins", fixture=False).child("ward", fixture=False, depends_on=("bins",)).child(
+            "sam-law", fixture=False, depends_on=("ward",)
         )
-        lock, digest = f.lock(profile_mode="product", product_root_role="sam-law")
+        lock, digest = f.lock(fixture=False, profile_mode="product", product_root_role="sam-law")
         profile = load_bundle_profile(lock)
         self.assertEqual(profile["profile_mode"], "product")
         self.assertEqual(profile["product_root_role"], "sam-law")
