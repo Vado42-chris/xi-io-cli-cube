@@ -11,7 +11,7 @@ const base=()=>({
   verified_at_ms:Date.now(),expires_at_ms:Date.now()+60000
 });
 test('verified server-returned identity and capability tuple is retained',()=>{
-  const value=acceptProductSession(base());
+  const value=acceptProductSession(base(),{productId:'hex',artifactSha256:'a'.repeat(64)});
   assert.equal(value.product_id,'hex');
   assert.deepEqual(value.capabilities,['product:read']);
   assert.ok(Object.isFrozen(value));
@@ -20,6 +20,7 @@ for (const [label,change] of [
   ['missing product session',v=>{v.state='UNVERIFIED'}],
   ['Cloudflare-only access',v=>{v.ward_authorized=false}],
   ['stale grant',v=>{v.capability_current=false}],
+  ['missing grant currentness',v=>{delete v.capability_current}],
   ['wrong product',v=>{v.product_id='inbox'}],
   ['no principal',v=>{v.principal_ref=''}],
   ['missing capability',v=>{v.capabilities=[]}],
@@ -41,4 +42,31 @@ test('rejects cross-origin session endpoint without fetching',async()=>{
     await assert.rejects(readProductSession({endpoint:'https://other.example.test/session',fetcher:async()=>{calls++}}),/ENDPOINT_UNTRUSTED/);
     assert.equal(calls,0);
   } finally { if(prior)Object.defineProperty(globalThis,'location',prior);else delete globalThis.location; }
+});
+
+test('unbound expected artifact cannot create authenticated local product',()=>{
+  assert.throws(()=>acceptProductSession(base()),/EXPECTATION_UNBOUND/);
+  assert.throws(()=>acceptProductSession(base(),{productId:'hex'}),/EXPECTATION_UNBOUND/);
+});
+test('same-origin readback checks exact expected generation and scoped capability',async()=>{
+  const prior=Object.getOwnPropertyDescriptor(globalThis,'location');
+  Object.defineProperty(globalThis,'location',{configurable:true,value:{href:'https://tenant.example.test/',origin:'https://tenant.example.test'}});
+  let called=false;
+  try {
+    const actual=await readProductSession({
+      endpoint:'/api/product/session',expected:{productId:'hex',artifactSha256:'a'.repeat(64)},
+      fetcher:async(url,options)=>{
+        called=true;
+        assert.equal(url,'https://tenant.example.test/api/product/session');
+        assert.equal(options.credentials,'include');
+        assert.equal(options.cache,'no-store');
+        return {status:200,headers:{get:(name)=>name==='content-type'?'application/json':'0'},json:async()=>base()};
+      }
+    });
+    assert.equal(called,true);
+    assert.equal(actual.product_id,'hex');
+  }finally{
+    if(prior)Object.defineProperty(globalThis,'location',prior);
+    else delete globalThis.location;
+  }
 });
