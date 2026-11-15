@@ -169,10 +169,24 @@ fn native_plugin_open_provider(window:WebviewWindow,provider:String)->Result<Val
         "authenticated":false,"plugin_attached":false}))
 }
 
+// Product Open is not a URL navigation. The existing native release/registry
+// consumer must first supply an installed-generation and window identity
+// readback. Until that qualified port is bound, refuse without changing windows.
+#[tauri::command]
+fn native_product_open(window:WebviewWindow, product_id:String)->Result<Value,String>{
+    local_caller(&window)?;
+    if product_id.is_empty() || product_id.len()>128 ||
+       !product_id.bytes().all(|b|b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b)) ||
+       product_id.contains("..") {
+        return Err("PRODUCT_IDENTITY_INVALID".into());
+    }
+    Err("NATIVE_PRODUCT_OPEN_REGISTRY_UNBOUND".into())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){
     tauri::Builder::default().manage(Arc::new(Mutex::new(())) as transport::Gate)
-        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,native_plugin_inspect,native_plugin_onboarding_current,native_plugin_open_provider,chooser::native_select_directory])
+        .invoke_handler(tauri::generate_handler![installer_request,native_product_window,native_product_open,native_plugin_inspect,native_plugin_onboarding_current,native_plugin_open_provider,chooser::native_select_directory])
         .setup(|app|{
             WebviewWindowBuilder::new(app,"hex",WebviewUrl::App("index.html".into()))
                 .title("XI-IO HEX").inner_size(1440.,900.).min_inner_size(720.,480.)
