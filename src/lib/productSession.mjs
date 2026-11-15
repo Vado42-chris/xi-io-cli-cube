@@ -61,5 +61,8 @@ export async function readProductSession({fetcher,endpoint,expected,signal}={}) 
   if(!Number.isSafeInteger(length) || length>16384)
     throw new Error('XIIO_PRODUCT_SESSION_READBACK_SIZE_INVALID');
   const readback=await response.json();
+  // The game and HEX share the receiving-server rule: an authorization-code
+  // callback result alone cannot mint product/session capability. A fresh,
+  // separately read-back current Ward grant is mandatory.
   return acceptProductSession(readback,expected);
 }
