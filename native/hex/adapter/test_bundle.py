@@ -70,12 +70,16 @@ class BundleFixture:
         })
         return self
 
-    def lock(self, *, fixture=True):
-        raw = json.dumps({
+    def lock(self, *, fixture=True, profile_mode="suite", product_root_role=None):
+        profile = {
             "schema_version": "xiio-installer-bundle-profile-v1",
             "profile_id": "core-test", "fixture": fixture,
             "products": self.rows,
-        }, sort_keys=True).encode()
+        }
+        if profile_mode == "product":
+            profile["profile_mode"] = "product"
+            profile["product_root_role"] = product_root_role
+        raw = json.dumps(profile, sort_keys=True).encode()
         path = self.root / "bundle.lock.json"
         path.write_bytes(raw)
         return path, sha(raw)
@@ -94,6 +98,53 @@ class BundleTests(unittest.TestCase):
         td = tempfile.TemporaryDirectory(prefix="xiio-bundle-fixture-")
         self.addCleanup(td.cleanup)
         return BundleFixture(Path(td.name))
+
+
+    def test_product_profile_installs_only_selected_root_and_transitive_dependencies(self):
+        f = self.fixture()
+        f.child("bins").child("ward", depends_on=("bins",)).child(
+            "sam-law", depends_on=("ward",)
+        ).child("unrelated")
+        lock, digest = f.lock(profile_mode="product", product_root_role="sam-law")
+        profile = load_bundle_profile(lock)
+        self.assertEqual(profile["profile_mode"], "product")
+        self.assertEqual(profile["product_root_role"], "sam-law")
+        self.assertEqual(profile["ordered_roles"], ("bins", "ward", "sam-law"))
+        self.assertEqual(set(profile["products"]), {"bins", "ward", "sam-law"})
+        self.assertNotIn("unrelated", profile["products"])
+        fetched = []
+        def fetch(url, output, limit):
+            fetched.append(url)
+            f.fetch(url, output, limit)
+        result = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=fetch)
+        self.assertEqual(result["receipt_count"], 3)
+        self.assertEqual(len(fetched), 3)
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/unrelated/unrelated.bin").exists())
+
+    def test_product_profile_refuses_extra_unrelated_role_instead_of_silently_installing_it(self):
+        f = self.fixture()
+        f.child("dependency").child("selected", depends_on=("dependency",)).child("unrelated")
+        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_PRODUCT_PROFILE_NOT_EXACT_DEPENDENCY_CLOSURE"):
+            load_bundle_profile(lock)
+
+    def test_product_profile_requires_existing_selected_root(self):
+        f = self.fixture()
+        f.child("dependency")
+        lock, _ = f.lock(profile_mode="product", product_root_role="missing")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_PRODUCT_ROOT_NOT_IN_PROFILE"):
+            load_bundle_profile(lock)
+
+    def test_product_profile_detects_transitive_missing_dependency_and_cycle(self):
+        f = self.fixture()
+        f.child("dependency", depends_on=("missing",)).child("selected", depends_on=("dependency",))
+        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_DEPENDENCY_NOT_IN_PROFILE"):
+            load_bundle_profile(lock)
+        f.rows[0]["depends_on"] = ["selected"]
+        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_DEPENDENCY_CYCLE"):
+            load_bundle_profile(lock)
 
     def test_two_children_install_in_dependency_order_and_manual_rollback(self):
         f = self.fixture()
