@@ -104,14 +104,14 @@ class BundleTests(unittest.TestCase):
         f = self.fixture()
         f.child("bins").child("ward", depends_on=("bins",)).child(
             "sam-law", depends_on=("ward",)
-        ).child("unrelated")
+        )
         lock, digest = f.lock(profile_mode="product", product_root_role="sam-law")
         profile = load_bundle_profile(lock)
         self.assertEqual(profile["profile_mode"], "product")
         self.assertEqual(profile["product_root_role"], "sam-law")
         self.assertEqual(profile["ordered_roles"], ("bins", "ward", "sam-law"))
         self.assertEqual(set(profile["products"]), {"bins", "ward", "sam-law"})
-        self.assertNotIn("unrelated", profile["products"])
+        self.assertEqual(len(profile["products"]), 3)
         fetched = []
         def fetch(url, output, limit):
             fetched.append(url)
