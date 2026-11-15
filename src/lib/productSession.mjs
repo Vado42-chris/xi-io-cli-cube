@@ -4,10 +4,13 @@
 // workspace membership and the requested product's Ward capabilities.
 const REF=/^[a-z][a-z0-9._:-]{2,127}$/;
 const HASH=/^[a-f0-9]{64}$/;
-export function acceptProductSession(readback, expected={productId:'hex'}) {
+export function acceptProductSession(readback, expected={}) {
+  if(typeof expected.productId!=='string' || !REF.test(expected.productId) ||
+     !HASH.test(expected.artifactSha256||''))
+    throw new Error('XIIO_PRODUCT_SESSION_EXPECTATION_UNBOUND');
   if (!readback || readback.schema!=='xiio.product-session-readback/v1' ||
       readback.state!=='AUTHENTICATED' || readback.authenticated!==true ||
-      readback.ward_authorized!==true || readback.capability_current===false ||
+      readback.ward_authorized!==true || readback.capability_current!==true ||
       readback.product_id!==expected.productId)
     throw new Error('XIIO_PRODUCT_SESSION_UNVERIFIED');
   for (const key of ['principal_ref','workspace_ref','session_ref','grant_ref','product_id']) {
@@ -15,7 +18,7 @@ export function acceptProductSession(readback, expected={productId:'hex'}) {
       throw new Error('XIIO_PRODUCT_SESSION_IDENTITY_UNBOUND');
   }
   if (!HASH.test(readback.artifact_sha256||'') ||
-      (expected.artifactSha256 && readback.artifact_sha256!==expected.artifactSha256))
+      readback.artifact_sha256!==expected.artifactSha256)
     throw new Error('XIIO_PRODUCT_SESSION_ARTIFACT_MISMATCH');
   if (!Array.isArray(readback.capabilities) || !readback.capabilities.length ||
       readback.capabilities.some(cap=>typeof cap!=='string'||!REF.test(cap)))
@@ -54,6 +57,9 @@ export async function readProductSession({fetcher,endpoint,expected,signal}={}) 
   if(!response || response.status!==200 ||
      !String(response.headers?.get('content-type')||'').includes('application/json'))
     throw new Error('XIIO_PRODUCT_SESSION_READBACK_UNAVAILABLE');
+  const length=Number(response.headers?.get('content-length')||0);
+  if(!Number.isSafeInteger(length) || length>16384)
+    throw new Error('XIIO_PRODUCT_SESSION_READBACK_SIZE_INVALID');
   const readback=await response.json();
   return acceptProductSession(readback,expected);
 }
