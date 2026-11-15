@@ -134,8 +134,18 @@ def load_bundle_profile(lock: Path, *,
         raise BundleError("BUNDLE_LOCK_JSON_INVALID") from exc
     _require(isinstance(profile, dict) and profile.get("schema_version") == SCHEMA,
              "BUNDLE_LOCK_SCHEMA_INVALID")
-    _require(set(profile) == {"schema_version", "profile_id", "fixture", "products"},
-             "BUNDLE_LOCK_FIELDS_INVALID")
+    base_fields = {"schema_version", "profile_id", "fixture", "products"}
+    profile_mode = profile.get("profile_mode", "suite")
+    _require(profile_mode in ("suite", "product"), "BUNDLE_PROFILE_MODE_INVALID")
+    if profile_mode == "suite":
+        _require(set(profile) == base_fields, "BUNDLE_LOCK_FIELDS_INVALID")
+        product_root_role = None
+    else:
+        _require(set(profile) == base_fields | {"profile_mode", "product_root_role"},
+                 "BUNDLE_LOCK_FIELDS_INVALID")
+        product_root_role = profile.get("product_root_role")
+        _require(isinstance(product_root_role, str) and SAFE_ID.fullmatch(product_root_role),
+                 "BUNDLE_PRODUCT_ROOT_INVALID")
     profile_id = profile["profile_id"]
     _require(isinstance(profile_id, str) and SAFE_ID.fullmatch(profile_id),
              "BUNDLE_PROFILE_ID_INVALID")
@@ -194,9 +204,12 @@ def load_bundle_profile(lock: Path, *,
             _require(key not in destinations, "BUNDLE_DESTINATION_COLLISION")
             destinations.add(key)
         products[role] = (manifest, dict(urls), tuple(deps))
-    if not fixture:
-        _require(set(products) == BASELINE_ROLES,
-                 "BUNDLE_BASELINE_REQUIRED_PRODUCT_MISSING")
+    if profile_mode == "suite":
+        if not fixture:
+            _require(set(products) == BASELINE_ROLES,
+                     "BUNDLE_BASELINE_REQUIRED_PRODUCT_MISSING")
+    else:
+        _require(product_root_role in products, "BUNDLE_PRODUCT_ROOT_NOT_IN_PROFILE")
     ordered = []
     temporary = set()
     permanent = set()
@@ -213,10 +226,16 @@ def load_bundle_profile(lock: Path, *,
         permanent.add(role)
         ordered.append(role)
 
-    for role in sorted(products):
-        visit(role)
+    if profile_mode == "suite":
+        for role in sorted(products):
+            visit(role)
+    else:
+        visit(product_root_role)
+        _require(permanent == set(products),
+                 "BUNDLE_PRODUCT_PROFILE_NOT_EXACT_DEPENDENCY_CLOSURE")
     return {
         "profile_id": profile_id, "fixture": fixture,
+        "profile_mode": profile_mode, "product_root_role": product_root_role,
         "lock_sha256": _sha(raw), "ordered_roles": tuple(ordered),
         "products": products, "release_source_observed": True,
         "runtime_authority": False
