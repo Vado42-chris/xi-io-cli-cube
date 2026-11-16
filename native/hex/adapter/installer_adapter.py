@@ -14,6 +14,7 @@ import local_step_actions
 import permission_profile
 import service_profile
 import server_profile
+from xiio_installer.discovery import xdg_roots
 from xiio_installer.observability import OperationJournal, inspect_operation
 from xiio_installer.transaction import (TransactionError, plan_install,
     qualify_precommand_install_plans)
@@ -487,8 +488,9 @@ def handle(req):
         filesystem_qualification = None
         if act == 'apply':
             prefix = Path(p['prefix'])
-            roots = connection_profile.roots(p)
-            conn_plan = plan_install(connection_manifest, connection_payload, roots)
+            installer_env = connection_profile.roots(p)
+            conn_plan = plan_install(connection_manifest, connection_payload, installer_env)
+            roots = xdg_roots(installer_env)
             cli_targets = {
                 prefix: {0o600, 0o644},
                 prefix / 'versions': {0o600, 0o644, 0o755},
