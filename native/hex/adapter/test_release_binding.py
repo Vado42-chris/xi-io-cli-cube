@@ -48,10 +48,17 @@ class ReleaseBindingTests(unittest.TestCase):
    "adopter_current":True,"effect_authority":False,"installed":False}
   reads=[]
   def reader(**coords): reads.append(coords); return binding
-  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED"}) as install:
+  env={"XDG_STATE_HOME":str(lock.parent/"state"),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}) as install:
    out=install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",
-      read_release_distribution=reader,fetch=lambda *_:None)
-   self.assertEqual(out["state"],"INSTALLED")
+      read_release_distribution=reader,env=env,fetch=lambda *_:None)
+   self.assertEqual(out["state"],"INSTALLED_BYTES_VERIFIED")
+   receipt=json.loads(Path(out["release_distribution_receipt"]).read_text())
+   self.assertEqual(receipt["release_generation"],"g1")
+   self.assertEqual(receipt["product_ref"],"product-demo")
+   self.assertEqual(receipt["consumer_ref"],"consumer:hex")
+   self.assertEqual(receipt["approved_lock_sha256"],r["approved_lock_sha256"])
+   self.assertTrue(receipt["readback_verified"])
    self.assertEqual(reads,[{"product_ref":"product-demo","consumer_ref":"consumer:hex"}])
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
 
