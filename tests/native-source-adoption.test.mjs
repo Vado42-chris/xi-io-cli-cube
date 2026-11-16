@@ -141,3 +141,22 @@ test('recursive Cubes share governed Sphere relationships and only runtime inter
  assert.ok(boundary.hard.includes('DIRECTORY_EDGE!=RUNNING_NODE'));
  assert.ok(boundary.hard.includes('BINS_CUSTODY!=SPHERE_RELATIONSHIP'));
 });
+
+test('Cube Black Box and Sphere connection state meet only through governed Glass Box projections',()=>{
+ const b=json('native/hex/SOURCE-ADOPTION.json').architecture_boundaries;
+ assert.equal(b.cube_native_model.black_box.acceptance,'CUBE_BLACK_BOX_CAPABILITY_PACKAGE');
+ assert.match(b.cube_native_model.black_box.rule,/scripts, skills, regression and acceptance tests/);
+ assert.match(b.cube_native_model.black_box.rule,/never customer credentials or implicit effect authority/);
+ assert.equal(b.sphere_native_model.customer_connections.acceptance,'SPHERE_CUSTOMER_CONNECTION_GRAPH');
+ assert.match(b.sphere_native_model.customer_connections.rule,/billing\/provisioning relationship and BINS resource references/);
+ assert.equal(b.relationship_graph.glass_box.hard.includes('CAPABILITY_VISIBLE!=PROVIDER_CONNECTED'),true);
+ assert.equal(b.relationship_graph.glass_box.hard.includes('PROVIDER_CONNECTED!=EFFECT_AUTHORIZED'),true);
+ assert.equal(b.relationship_graph.global_admin_projection.acceptance,'GLOBAL_ADMIN_WIDGET_CONSUMPTION_REQUIRED');
+ assert.match(b.relationship_graph.global_admin_projection.rule,/projected as reusable widgets\/surfaces into every applicable product Cube/);
+ assert.ok(b.relationship_graph.global_admin_projection.requirements.includes('billing consent and spending limits precede paid effects'));
+ assert.ok(b.hard.includes('BLACK_BOX_CAPABILITY!=SPHERE_SECRET'));
+ assert.ok(b.hard.includes('AGENT_ASSIGNMENT_REF!=ACTIVE_WORKER_AUTHORITY'));
+ assert.ok(b.hard.includes('GLOBAL_ADMIN_WIDGET!=PRODUCT_FORK'));
+ assert.ok(b.hard.includes('CONNECTED_ACCOUNT!=EFFECT_AUTHORITY'));
+ assert.ok(b.cube_native_model.recursive_composition.examples.includes('XI-IO Studio -> Desktop -> WordPress plugin Cube'));
+});
