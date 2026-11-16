@@ -13,6 +13,8 @@ from .diagnostics import diagnostic_bundle, evidence_status
 from .observability import OperationJournal, inspect_operation, list_operations
 from .redaction import redact_text
 from .transaction import apply_install, plan_install, rollback
+from .runtime_profile import load_runtime_profile, qualify_update_request
+from .runtime_activation import activate_runtime_profile, revoke_runtime_consent
 
 
 def _refs_from_items(items: list[Any]) -> list[dict[str, Any]]:
@@ -49,6 +51,9 @@ def _expected_action(cmd: str) -> str:
         "apply": "apply an explicitly approved installation transaction",
         "rollback": "rollback an explicitly approved installation transaction",
         "diagnostic-bundle": "export a redacted diagnostic bundle to an explicitly approved external path",
+        "activate-runtime": "activate explicitly opted-in runtime services and persist consent/readback",
+        "revoke-runtime-consent": "revoke future managed-update consent without silently stopping services",
+        "qualify-update": "qualify a central update request against local consent without executing it",
     }.get(cmd, cmd)
 
 
@@ -147,6 +152,21 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("evidence-status")
     ip = sub.add_parser("inspect-operation")
     ip.add_argument("target_operation_id")
+    ar = sub.add_parser("activate-runtime")
+    ar.add_argument("runtime_profile", type=Path)
+    ar.add_argument("consent_receipt", type=Path)
+    ar.add_argument("activation_receipt", type=Path)
+    ar.add_argument("--grant", action="append", default=[])
+    ar.add_argument("--update-policy", choices=["MANUAL","SECURITY_AUTO","MANAGED"])
+    ar.add_argument("--principal-ref", default="local-user")
+    ar.add_argument("--approve", action="store_true", help="required for runtime activation")
+    rr = sub.add_parser("revoke-runtime-consent")
+    rr.add_argument("consent_receipt", type=Path)
+    rr.add_argument("--approve", action="store_true", help="required for consent revocation")
+    qu = sub.add_parser("qualify-update")
+    qu.add_argument("runtime_profile", type=Path)
+    qu.add_argument("consent_receipt", type=Path)
+    qu.add_argument("update_request", type=Path)
     db = sub.add_parser("diagnostic-bundle")
     db.add_argument("source_operation_id")
     db.add_argument("--output", type=Path)
@@ -183,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 70
 
-    approval_required = args.cmd in {"apply", "rollback"} or (
+    approval_required = args.cmd in {"apply", "rollback", "activate-runtime", "revoke-runtime-consent"} or (
         args.cmd == "diagnostic-bundle" and args.output is not None
     )
     if approval_required and not args.approve:
@@ -299,6 +319,64 @@ def main(argv: list[str] | None = None) -> int:
             result = {"rolled_back": True, "receipt": redact_text(str(args.receipt))}
             print(json.dumps(result, indent=2))
             return 0
+        if args.cmd == "activate-runtime":
+            profile = load_runtime_profile(args.runtime_profile)
+            result = activate_runtime_profile(
+                profile,
+                grants=args.grant,
+                update_policy=args.update_policy,
+                consent_receipt_path=args.consent_receipt,
+                activation_receipt_path=args.activation_receipt,
+                principal_ref=args.principal_ref,
+            )
+            finalized = _finish_terminal_or_report_unknown(
+                journal,
+                "passed",
+                "runtime profile activated with local consent and service readback",
+                expected_action=expected,
+                execution_result="succeeded",
+                do_not_retry_before_reconcile=True,
+                rollback_eligible=True,
+                details={"kernel_version": __version__, "consent_ref": result.get("consent_ref")},
+            )
+            if not finalized:
+                return 70
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.cmd == "revoke-runtime-consent":
+            result = revoke_runtime_consent(args.consent_receipt)
+            finalized = _finish_terminal_or_report_unknown(
+                journal,
+                "passed",
+                "runtime managed-update consent revoked",
+                expected_action=expected,
+                execution_result="succeeded",
+                do_not_retry_before_reconcile=True,
+                rollback_eligible=False,
+                details={"kernel_version": __version__},
+            )
+            if not finalized:
+                return 70
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.cmd == "qualify-update":
+            profile = load_runtime_profile(args.runtime_profile)
+            consent = json.loads(args.consent_receipt.read_text(encoding="utf-8"))
+            request = json.loads(args.update_request.read_text(encoding="utf-8"))
+            result = qualify_update_request(profile, consent, request)
+            finalized = _finish_terminal_or_report_unknown(
+                journal,
+                "passed" if result.get("state") != "DENIED" else "blocked",
+                "central update request qualified against local consent; no effect attempted",
+                expected_action=expected,
+                execution_result="not_attempted",
+                rollback_eligible=False,
+                details={"kernel_version": __version__, "update_state": result.get("state")},
+            )
+            if not finalized:
+                return 70
+            print(json.dumps(result, indent=2))
+            return 0
         if args.cmd == "diagnostic-bundle" and args.output is not None:
             result = diagnostic_bundle(
                 args.source_operation_id,
@@ -330,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
                 expected_action=expected,
                 exit_code=1,
                 failure_category=exc.__class__.__name__,
-                rollback_eligible=args.cmd in {"apply", "rollback"},
+                rollback_eligible=args.cmd in {"apply", "rollback", "activate-runtime"},
                 recommended_next_action=f"inspect-operation {journal.operation_id}; export diagnostic bundle before retry",
                 details={"kernel_version": __version__},
             )

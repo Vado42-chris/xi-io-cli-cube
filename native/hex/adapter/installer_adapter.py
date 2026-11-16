@@ -3,7 +3,7 @@
 Kernel OperationJournal owns outcomes. Plan JSON is immutable approval metadata,
 not another installation ledger. No service control, network or credential use.
 """
-import sys, os, json, hashlib, stat, subprocess, tempfile, uuid, datetime, fcntl
+import sys, os, json, hashlib, stat, subprocess, tempfile, uuid, datetime, fcntl, platform
 from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / 'kernel'))
@@ -14,7 +14,10 @@ import local_step_actions
 import permission_profile
 import service_profile
 import server_profile
+from xiio_installer.discovery import xdg_roots
 from xiio_installer.observability import OperationJournal, inspect_operation
+from xiio_installer.transaction import (TransactionError, plan_install,
+    qualify_precommand_install_plans)
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
 class Refused(Exception): pass
@@ -465,9 +468,8 @@ def handle(req):
             permissions=permission_profile.require_capability(p.get('permission_profile',{}),'install_files')
             demand(permissions['permission_digest']==p.get('permission_digest'),'PERMISSION_DIGEST_CHANGED')
         demand(not view['do_not_retry'],'UNCERTAIN_OUTCOME_DO_NOT_RETRY')
-        verify_node(p)
-        demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
-        connection_profile.validate(base,p,SOURCE/'connection',act=='apply')
+        connection_manifest,connection_payload,connection_receipt = connection_profile.validate(
+            base,p,SOURCE/'connection',act=='apply')
         if act=='apply':
             demand(view['phase']=='PREPARED_NOT_INSTALLED','DUPLICATE_APPLY_REFUSED')
             demand(tree(Path(p['prefix']))==p['destination_before'],'DESTINATION_CHANGED_SINCE_REVIEW')
@@ -478,8 +480,37 @@ def handle(req):
             installed(p,expected_generation=aop['events'][-1]['details'].get('generation'))
             demand(file_bytes(Path(p['prefix'])/'previous').decode().strip()==p['previous_current'],'ROLLBACK_TARGET_CHANGED')
             connection_profile.readback(base,p,SOURCE/'connection',aop['events'][-1]['details'].get('connection_receipt_sha256'))
+        # The connection payload was previously installed BEFORE the separate
+        # CLI command was launched. Both destinations must pass one shared
+        # Installer precommand gate before either effect is allowed.
+        filesystem_qualification = None
+        if act == 'apply':
+            prefix = Path(p['prefix'])
+            installer_env = connection_profile.roots(p)
+            conn_plan = plan_install(connection_manifest, connection_payload, installer_env)
+            roots = xdg_roots(installer_env)
+            cli_targets = {
+                prefix: {0o600, 0o644},
+                prefix / 'versions': {0o600, 0o644, 0o755},
+                prefix / 'bin': {0o600, 0o755},
+                base / 'operations': {0o600},
+            }
+            try:
+                filesystem_qualification = qualify_precommand_install_plans(
+                    [(conn_plan, roots, connection_receipt)],
+                    machine_profile={'os':platform.system(),
+                                     'architecture':platform.machine(),
+                                     'family':'linux'},
+                    additional_targets=cli_targets,
+                )
+            except (TransactionError, OSError) as exc:
+                raise Refused('INSTALLER_PRECOMMAND_FILESYSTEM_UNQUALIFIED') from exc
+        # Do not run even the selected Node version command before the
+        # actual connection and CLI target filesystems are qualified.
+        verify_node(p)
+        demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
         journal=OperationJournal('native-cli-installer',act,operation_id=p['plan_id']+'-'+act,correlation_id=p['plan_id'],root=base)
-        journal.start('Apply exact reviewed CLI generation' if act=='apply' else 'Restore previous CLI generation',details={'approval_digest':p['approval_digest']})
+        journal.start('Apply exact reviewed CLI generation' if act=='apply' else 'Restore previous CLI generation',details={'approval_digest':p['approval_digest'],'filesystem_precommand_state':filesystem_qualification['state'] if filesystem_qualification else 'NOT_APPLICABLE_ROLLBACK'})
         connection_receipt=None
         try:
             if act=='apply':

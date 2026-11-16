@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import json
 import os
+import platform
 import re
 import stat
 import tempfile
@@ -20,10 +21,10 @@ from urllib.parse import urlsplit
 
 from xiio_installer.discovery import xdg_roots
 from xiio_installer.manifest import load_manifest, sha256_file, verify_payload
-from xiio_installer.transaction import apply_install, plan_install, rollback
+from xiio_installer.transaction import (TransactionError, apply_install, plan_install,
+    qualify_precommand_install_plans, qualify_precommand_manifests, rollback)
 
 SCHEMA = "xiio-installer-bundle-profile-v1"
-BASELINE_ROLES = frozenset(("cli", "ibal", "switchboard", "bins", "ward", "inbox"))
 SAFE_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MAX_LOCK_BYTES = 131072
@@ -134,8 +135,18 @@ def load_bundle_profile(lock: Path, *,
         raise BundleError("BUNDLE_LOCK_JSON_INVALID") from exc
     _require(isinstance(profile, dict) and profile.get("schema_version") == SCHEMA,
              "BUNDLE_LOCK_SCHEMA_INVALID")
-    _require(set(profile) == {"schema_version", "profile_id", "fixture", "products"},
-             "BUNDLE_LOCK_FIELDS_INVALID")
+    base_fields = {"schema_version", "profile_id", "fixture", "products"}
+    profile_mode = profile.get("profile_mode", "suite")
+    _require(profile_mode in ("suite", "product"), "BUNDLE_PROFILE_MODE_INVALID")
+    if profile_mode == "suite":
+        _require(set(profile) == base_fields, "BUNDLE_LOCK_FIELDS_INVALID")
+        product_root_role = None
+    else:
+        _require(set(profile) == base_fields | {"profile_mode", "product_root_role"},
+                 "BUNDLE_LOCK_FIELDS_INVALID")
+        product_root_role = profile.get("product_root_role")
+        _require(isinstance(product_root_role, str) and SAFE_ID.fullmatch(product_root_role),
+                 "BUNDLE_PRODUCT_ROOT_INVALID")
     profile_id = profile["profile_id"]
     _require(isinstance(profile_id, str) and SAFE_ID.fullmatch(profile_id),
              "BUNDLE_PROFILE_ID_INVALID")
@@ -145,6 +156,7 @@ def load_bundle_profile(lock: Path, *,
     _require(isinstance(rows, list) and 0 < len(rows) <= 32,
              "BUNDLE_PRODUCT_COUNT_INVALID")
     products = {}
+    product_ids = set()
     destinations = set()
     for row in rows:
         _require(isinstance(row, dict) and set(row) ==
@@ -157,6 +169,10 @@ def load_bundle_profile(lock: Path, *,
         product_id = row["product_id"]
         _require(isinstance(product_id, str) and 0 < len(product_id) <= 128,
                  "BUNDLE_PRODUCT_ID_INVALID")
+        # Role aliases cannot cause the same registered product to be selected
+        # and installed as two independently receipted bundle children.
+        _require(product_id not in product_ids, "BUNDLE_DUPLICATE_PRODUCT_ID")
+        product_ids.add(product_id)
         manifest_path = _safe_rel(row["manifest"], "BUNDLE_MANIFEST_PATH_INVALID")
         claimed_sha = row["manifest_sha256"]
         _require(isinstance(claimed_sha, str) and SHA256.fullmatch(claimed_sha),
@@ -194,9 +210,10 @@ def load_bundle_profile(lock: Path, *,
             _require(key not in destinations, "BUNDLE_DESTINATION_COLLISION")
             destinations.add(key)
         products[role] = (manifest, dict(urls), tuple(deps))
-    if not fixture:
-        _require(set(products) == BASELINE_ROLES,
-                 "BUNDLE_BASELINE_REQUIRED_PRODUCT_MISSING")
+    # Suite membership comes from the verified product lock and registered
+    # product relationships, never from this installer's donor product list.
+    if profile_mode == "product":
+        _require(product_root_role in products, "BUNDLE_PRODUCT_ROOT_NOT_IN_PROFILE")
     ordered = []
     temporary = set()
     permanent = set()
@@ -213,10 +230,16 @@ def load_bundle_profile(lock: Path, *,
         permanent.add(role)
         ordered.append(role)
 
-    for role in sorted(products):
-        visit(role)
+    if profile_mode == "suite":
+        for role in sorted(products):
+            visit(role)
+    else:
+        visit(product_root_role)
+        _require(permanent == set(products),
+                 "BUNDLE_PRODUCT_PROFILE_NOT_EXACT_DEPENDENCY_CLOSURE")
     return {
         "profile_id": profile_id, "fixture": fixture,
+        "profile_mode": profile_mode, "product_root_role": product_root_role,
         "lock_sha256": _sha(raw), "ordered_roles": tuple(ordered),
         "products": products, "release_source_observed": True,
         "runtime_authority": False
@@ -303,6 +326,32 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
     roots = xdg_roots(env)
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
+    observed_machine = {
+        "os": platform.system(), "architecture": platform.machine(), "family": "linux"
+    }
+    receipts = {}
+    for role in profile["ordered_roles"]:
+        manifest = profile["products"][role][0]
+        receipts[role] = state_root / (role + "-" + manifest.version.replace("/", "-")
+                                       + "-" + approved_lock_sha256[:12] + ".receipt.json")
+    # Preserve existing trusted-state-root refusal before probing. No state
+    # directories or payload are created during this read-only custody check.
+    for component in (state_root, *state_root.parents):
+        if component.is_symlink() or (component.exists() and not component.is_dir()):
+            raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED")
+    # Verify destination filesystems BEFORE staging/download/installation.
+    # Only disposable probe files may be written and they must be cleaned.
+    try:
+        filesystem = qualify_precommand_manifests(
+            [(profile["products"][role][0], receipts[role])
+             for role in profile["ordered_roles"]],
+            roots, machine_profile=observed_machine,
+            additional_targets={state_root: {0o600}},
+        )
+    except TransactionError as exc:
+        raise BundleError("BUNDLE_FILESYSTEM_UNQUALIFIED") from exc
+    except OSError as exc:
+        raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
 
     state_fd = _secure_ensure_state_root(state_root)
     lock_fd = None
@@ -355,15 +404,25 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
                      == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
 
+            plans = []
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
-                plan_install(manifest, staged[role], env)
+                plans.append((plan_install(manifest, staged[role], env), roots,
+                              receipts[role]))
+            # A new destination/profile after download cannot bypass the
+            # Installer's current pre-command qualification.
+            try:
+                qualify_precommand_install_plans(
+                    plans, machine_profile=observed_machine,
+                    additional_targets={state_root: {0o600}},
+                )
+            except (TransactionError, OSError) as exc:
+                raise BundleError("BUNDLE_FILESYSTEM_CHANGED_BEFORE_APPLY") from exc
             applied = []
             try:
                 for role in profile["ordered_roles"]:
                     manifest = profile["products"][role][0]
-                    receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
-                                            + "-" + approved_lock_sha256[:12] + ".receipt.json")
+                    receipt = receipts[role]
                     _require(not receipt.exists() and not receipt.is_symlink(),
                              "BUNDLE_RECEIPT_ALREADY_EXISTS")
                     apply_install(manifest, staged[role], receipt, env)
@@ -388,6 +447,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 "lock_sha256": approved_lock_sha256,
                 "roles": list(profile["ordered_roles"]),
                 "receipt_count": len(applied),
+                "filesystem_precommand_state": filesystem["state"],
                 "runtime_qualified": False, "authority_granted": False,
                 "device_connected": False, "child_services_started": False
             }

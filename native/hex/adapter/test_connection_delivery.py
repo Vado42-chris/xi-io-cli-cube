@@ -3,6 +3,7 @@ No credentials, ports implementation, device enrollment, service or network supp
 The existing PR15 fixture supplies prior six-file generations; no parallel installer.
 """
 import hashlib,json,os,shutil,subprocess,tempfile,unittest
+from unittest.mock import patch
 from pathlib import Path
 from test_launcher_repair import Fixture,NODE
 HERE=Path(__file__).resolve().parent
@@ -58,6 +59,39 @@ class ConnectionDelivery(unittest.TestCase):
  def test_missing_current_module_refuses_without_destination_effect(self):
   bundle=self.home/'isolated-bundle';shutil.copytree(HERE,bundle/'adapter',ignore=shutil.ignore_patterns('__pycache__'));shutil.copytree(SOURCE,bundle/'cli-source');self.adapter=bundle/'adapter/installer_adapter.py'
   (bundle/'cli-source/src/local-ops.mjs').unlink();r=self.call({'action':'prepare','prefix':str(self.prefix),'node':NODE,'components':['cli']});self.assertFalse(r['ok']);self.assertFalse(self.prefix.exists())
+ def test_precommand_refusal_blocks_connection_component_and_node_installer(self):
+  p=self.prepare()
+  import installer_adapter as native
+  from xiio_installer.transaction import TransactionError
+  request={'action':'apply','plan_id':p['plan_id'],'approval_digest':p['approval_digest'],'approved':True}
+  with patch.dict(os.environ,self.env,clear=True):
+   with patch.object(native,'qualify_precommand_install_plans',
+                     side_effect=TransactionError('NTFS reported 0664 instead of 0755')) as qualification:
+    with patch.object(native.connection_profile,'apply') as connection_effect:
+     with patch.object(native,'run') as node_command:
+      with self.assertRaisesRegex(native.Refused,'INSTALLER_PRECOMMAND_FILESYSTEM_UNQUALIFIED'):
+       native.handle(request)
+      qualification.assert_called_once()
+      connection_effect.assert_not_called()
+      node_command.assert_not_called()
+  self.assertFalse(self.prefix.exists())
+  self.assertFalse((self.home/'state/xi-io/installer/operations'/
+                   (p['plan_id']+'-apply.jsonl')).exists())
+
+ def test_unknown_machine_family_cannot_install_even_with_local_approval(self):
+  p=self.prepare()
+  import installer_adapter as native
+  request={'action':'apply','plan_id':p['plan_id'],'approval_digest':p['approval_digest'],'approved':True}
+  with patch.dict(os.environ,self.env,clear=True):
+   with patch.object(native.platform,'system',return_value='Unknown'):
+    with patch.object(native.connection_profile,'apply') as connection_effect:
+     with patch.object(native,'run') as node_command:
+      with self.assertRaisesRegex(native.Refused,'INSTALLER_PRECOMMAND_FILESYSTEM_UNQUALIFIED'):
+       native.handle(request)
+      connection_effect.assert_not_called()
+      node_command.assert_not_called()
+  self.assertFalse(self.prefix.exists())
+
  def test_old_repair_verifier_remains_exact_and_separate_from_current_payload(self):
   m=json.loads((SOURCE/'launcher-repair.SOURCE.json').read_text());self.assertEqual(m['verification_resource']['path'],'launcher-repair.runtime-integrity.mjs');self.assertEqual(sha(SOURCE/m['verification_resource']['path']),'de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912')
   self.assertNotEqual(sha(SOURCE/'src/runtime-integrity.mjs'),m['verification_resource']['sha256'])

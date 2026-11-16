@@ -70,12 +70,16 @@ class BundleFixture:
         })
         return self
 
-    def lock(self, *, fixture=True):
-        raw = json.dumps({
+    def lock(self, *, fixture=True, profile_mode="suite", product_root_role=None):
+        profile = {
             "schema_version": "xiio-installer-bundle-profile-v1",
             "profile_id": "core-test", "fixture": fixture,
             "products": self.rows,
-        }, sort_keys=True).encode()
+        }
+        if profile_mode == "product":
+            profile["profile_mode"] = "product"
+            profile["product_root_role"] = product_root_role
+        raw = json.dumps(profile, sort_keys=True).encode()
         path = self.root / "bundle.lock.json"
         path.write_bytes(raw)
         return path, sha(raw)
@@ -94,6 +98,94 @@ class BundleTests(unittest.TestCase):
         td = tempfile.TemporaryDirectory(prefix="xiio-bundle-fixture-")
         self.addCleanup(td.cleanup)
         return BundleFixture(Path(td.name))
+
+
+    def test_product_profile_installs_only_selected_root_and_transitive_dependencies(self):
+        f = self.fixture()
+        f.child("bins", fixture=False).child("ward", fixture=False, depends_on=("bins",)).child(
+            "sam-law", fixture=False, depends_on=("ward",)
+        )
+        lock, digest = f.lock(fixture=False, profile_mode="product", product_root_role="sam-law")
+        profile = load_bundle_profile(lock)
+        self.assertEqual(profile["profile_mode"], "product")
+        self.assertEqual(profile["product_root_role"], "sam-law")
+        self.assertEqual(profile["ordered_roles"], ("bins", "ward", "sam-law"))
+        self.assertEqual(set(profile["products"]), {"bins", "ward", "sam-law"})
+        self.assertEqual(len(profile["products"]), 3)
+        fetched = []
+        def fetch(url, output, limit):
+            fetched.append(url)
+            f.fetch(url, output, limit)
+        result = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=fetch)
+        self.assertEqual(result["receipt_count"], 3)
+        self.assertEqual(len(fetched), 3)
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/unrelated/unrelated.bin").exists())
+
+    def test_precommand_noexec_before_download_and_first_product_effect(self):
+        f = self.fixture()
+        f.child("cli")
+        manifest_path = f.root / "cli.manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["payload"][0]["mode"] = "0755"
+        raw = json.dumps(manifest, sort_keys=True).encode()
+        manifest_path.write_bytes(raw)
+        f.rows[0]["manifest_sha256"] = sha(raw)
+        lock, digest = f.lock()
+        fetched = []
+        def not_fetched(*args):
+            fetched.append(args)
+            raise AssertionError("DOWNLOAD_WAS_ALLOWED_BEFORE_FILESYSTEM_PROOF")
+        with patch("xiio_installer.transaction.subprocess.run",
+                   side_effect=PermissionError("NTFS/noexec EACCES")) as launch:
+            with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
+                install_bundle(lock, approved_lock_sha256=digest,
+                               env=f.env, fetch=not_fetched)
+            launch.assert_called()
+        self.assertEqual(fetched, [])
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        self.assertFalse(state_root.exists())
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
+        self.assertEqual(list(f.root.rglob(".xiio-fs-probe-*")), [])
+
+    def test_precommand_must_cover_every_child_before_download(self):
+        f = self.fixture()
+        f.child("cli").child("bins", depends_on=("cli",))
+        lock, digest = f.lock()
+        checked = []
+        def bounded_probe(manifests, roots, **kwargs):
+            checked.extend((item[0].product_id, item[1]) for item in manifests)
+            raise ValueError("UNQUALIFIED_SECOND_CHILD")
+        with patch("child_bundle.qualify_precommand_manifests",
+                   side_effect=bounded_probe):
+            with self.assertRaises(ValueError):
+                install_bundle(lock, approved_lock_sha256=digest,
+                               env=f.env, fetch=lambda *_: self.fail("download before preflight"))
+        self.assertEqual([item[0] for item in checked], ["xi-io-cli", "xi-io-bins"])
+
+    def test_product_profile_refuses_extra_unrelated_role_instead_of_silently_installing_it(self):
+        f = self.fixture()
+        f.child("dependency").child("selected", depends_on=("dependency",)).child("unrelated")
+        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_PRODUCT_PROFILE_NOT_EXACT_DEPENDENCY_CLOSURE"):
+            load_bundle_profile(lock)
+
+    def test_product_profile_requires_existing_selected_root(self):
+        f = self.fixture()
+        f.child("dependency")
+        lock, _ = f.lock(profile_mode="product", product_root_role="missing")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_PRODUCT_ROOT_NOT_IN_PROFILE"):
+            load_bundle_profile(lock)
+
+    def test_product_profile_detects_transitive_missing_dependency_and_cycle(self):
+        f = self.fixture()
+        f.child("dependency", depends_on=("missing",)).child("selected", depends_on=("dependency",))
+        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_DEPENDENCY_NOT_IN_PROFILE"):
+            load_bundle_profile(lock)
+        f.rows[0]["depends_on"] = ["selected"]
+        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_DEPENDENCY_CYCLE"):
+            load_bundle_profile(lock)
 
     def test_two_children_install_in_dependency_order_and_manual_rollback(self):
         f = self.fixture()
@@ -152,12 +244,45 @@ class BundleTests(unittest.TestCase):
         with self.assertRaisesRegex(BundleError, "BUNDLE_DEPENDENCY_NOT_IN_PROFILE"):
             load_bundle_profile(lock)
 
-    def test_nonfixture_baseline_refuses_missing_products(self):
+    def test_nonfixture_suite_uses_verified_lock_not_donor_product_roster(self):
         f = self.fixture()
-        f.child("cli", fixture=False)
-        lock, _ = f.lock(fixture=False)
-        with self.assertRaisesRegex(BundleError, "BUNDLE_BASELINE_REQUIRED_PRODUCT_MISSING"):
+        f.child("desktop-shell", fixture=False)
+        f.child("specialist-tool", fixture=False, depends_on=("desktop-shell",))
+        lock, digest = f.lock(fixture=False)
+        profile = load_bundle_profile(lock)
+        self.assertEqual(profile["profile_mode"], "suite")
+        self.assertEqual(profile["ordered_roles"], ("desktop-shell", "specialist-tool"))
+        result = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(result["receipt_count"], 2)
+        self.assertEqual(result["state"], "INSTALLED_BYTES_VERIFIED")
+        self.assertFalse(result["runtime_qualified"])
+        self.assertFalse(result["authority_granted"])
+
+    def test_duplicate_product_identity_across_distinct_roles_is_refused_before_download(self):
+        f = self.fixture()
+        f.child("alpha", fixture=False)
+        f.child("beta", fixture=False, depends_on=("alpha",))
+        # The second manifest, digest and destination are individually valid.
+        # Aliased roles still cannot install the same product twice.
+        second = f.root / "beta.manifest.json"
+        manifest = json.loads(second.read_text())
+        manifest["product_id"] = "xi-io-alpha"
+        raw = json.dumps(manifest, sort_keys=True).encode()
+        second.write_bytes(raw)
+        f.rows[1]["product_id"] = "xi-io-alpha"
+        f.rows[1]["manifest_sha256"] = sha(raw)
+        lock, digest = f.lock(fixture=False)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_DUPLICATE_PRODUCT_ID"):
             load_bundle_profile(lock)
+        attempted = []
+        def fetch(*args):
+            attempted.append(args)
+            raise AssertionError("FETCH_WITH_DUPLICATE_PRODUCT_ID")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_DUPLICATE_PRODUCT_ID"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=fetch)
+        self.assertEqual(attempted, [])
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/alpha/alpha.bin").exists())
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/beta/beta.bin").exists())
 
     def test_duplicate_destinations_rejected(self):
         f = self.fixture()
@@ -369,6 +494,53 @@ class BundleTests(unittest.TestCase):
         finally:
             done.put("RELEASE")
             p1.join(timeout=5)
+
+
+    def test_shared_installer_source_blob_is_exact_not_a_second_kernel(self):
+        source = (HERE / "kernel/xiio_installer/transaction.py").read_bytes()
+        blob = hashlib.sha1(b"blob " + str(len(source)).encode() + b"\0" + source).hexdigest()
+        self.assertEqual(blob, "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2")
+
+    def test_qualify_entire_bundle_before_first_download_or_install(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        fetched = []
+        def attempted_fetch(url, output, limit):
+            fetched.append(url)
+            raise AssertionError("FETCH_BEFORE_FILESYSTEM_QUALIFICATION")
+        from xiio_installer.transaction import TransactionError
+        with patch("child_bundle.qualify_precommand_manifests",
+                   side_effect=TransactionError("mock unsupported filesystem")):
+            with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                               fetch=attempted_fetch)
+        self.assertEqual(fetched, [])
+        self.assertFalse((Path(f.env["XDG_STATE_HOME"]) /
+                          "xi-io/installer/bundles/core-test").exists())
+
+    def test_ntfs_0664_refused_before_fetch_and_every_child_effect(self):
+        f = self.fixture()
+        f.child("cli")
+        manifest_path = f.root / "cli.manifest.json"
+        data = json.loads(manifest_path.read_text())
+        data["payload"][0]["mode"] = "0755"
+        manifest_path.write_text(json.dumps(data, sort_keys=True))
+        f.rows[-1]["manifest_sha256"] = sha(manifest_path.read_bytes())
+        lock, digest = f.lock()
+        from xiio_installer import transaction as tx
+        chmod = os.chmod
+        fetched = []
+        def ntfs_chmod(file, mode, *args, **kwargs):
+            return chmod(file, 0o664 if mode == 0o755 else mode, *args, **kwargs)
+        with patch.object(tx.os, "chmod", side_effect=ntfs_chmod):
+            with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                               fetch=lambda url, output, limit: fetched.append(url))
+        self.assertEqual(fetched, [])
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli").exists())
+        self.assertFalse((Path(f.env["XDG_STATE_HOME"]) /
+                          "xi-io/installer/bundles/core-test").exists())
 
 
 def _concurrency_worker(lock, digest, env, barrier, done):
