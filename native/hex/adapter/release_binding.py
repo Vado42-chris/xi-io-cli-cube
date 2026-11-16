@@ -55,3 +55,45 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
     _require(expected_product_ref in product_ids, "BUNDLE_RELEASE_PRODUCT_NOT_IN_LOCK")
     return install_bundle(Path(lock), approved_lock_sha256=approved, env=env,
                           allowed_hosts=allowed, fetch=fetch)
+
+
+DISTRIBUTION_SCHEMA = "xiio.release-distribution-lock/v1"
+
+
+def install_from_distribution_reader(lock: Path, *, product_ref: str, consumer_ref: str,
+                                     read_release_distribution,
+                                     env: dict[str, str] | None = None, fetch=None):
+    """Consume the framework #315 D2/D3 output through a host-owned current reader."""
+    _require(isinstance(product_ref, str) and bool(product_ref),
+             "BUNDLE_RELEASE_PRODUCT_REF_REQUIRED")
+    _require(isinstance(consumer_ref, str) and bool(consumer_ref),
+             "BUNDLE_RELEASE_CONSUMER_REF_REQUIRED")
+    _require(callable(read_release_distribution),
+             "BUNDLE_RELEASE_DISTRIBUTION_READER_UNBOUND")
+    binding = read_release_distribution(product_ref=product_ref, consumer_ref=consumer_ref)
+    _require(isinstance(binding, dict) and binding.get("schema") == DISTRIBUTION_SCHEMA,
+             "BUNDLE_RELEASE_DISTRIBUTION_INVALID")
+    _require(binding.get("product_ref") == product_ref,
+             "BUNDLE_RELEASE_PRODUCT_MISMATCH")
+    _require(binding.get("consumer_ref") == consumer_ref,
+             "BUNDLE_RELEASE_CONSUMER_MISMATCH")
+    _require(binding.get("lifecycle") == "DISTRIBUTABLE"
+             and binding.get("adopter_current") is True
+             and binding.get("effect_authority") is False
+             and binding.get("installed") is False,
+             "BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT")
+    approved = binding.get("approved_lock_sha256")
+    _require(isinstance(approved, str) and len(approved) == 64
+             and all(c in "0123456789abcdef" for c in approved),
+             "BUNDLE_RELEASE_LOCK_DIGEST_INVALID")
+    observed = hashlib.sha256(Path(lock).read_bytes()).hexdigest()
+    _require(observed == approved, "BUNDLE_RELEASE_LOCK_DIGEST_MISMATCH")
+    hosts = binding.get("provider_hosts")
+    _require(isinstance(hosts, (list, tuple)) and bool(hosts),
+             "BUNDLE_RELEASE_HOST_BINDING_MISMATCH")
+    allowed = frozenset(hosts)
+    profile = load_bundle_profile(Path(lock), allowed_hosts=allowed)
+    product_ids = {manifest.product_id for manifest, _urls, _deps in profile["products"].values()}
+    _require(product_ref in product_ids, "BUNDLE_RELEASE_PRODUCT_NOT_IN_LOCK")
+    return install_bundle(Path(lock), approved_lock_sha256=approved, env=env,
+                          allowed_hosts=allowed, fetch=fetch)
