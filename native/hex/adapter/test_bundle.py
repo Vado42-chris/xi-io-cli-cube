@@ -450,7 +450,7 @@ class BundleTests(unittest.TestCase):
         # NTFS/FUSE/noexec may report the expected mode while refusing launch.
         # Inject the real executable-probe failure without touching host mounts.
         f = self.fixture()
-        f.child("cli", bytes_=b"#!/bin/sh\\nexit 0\\n", mode="0755")
+        f.child("cli", bytes_=b"#!/bin/sh\nexit 0\n", mode="0755")
         lock, digest = f.lock()
         with patch("xiio_installer.transaction.subprocess.run",
                    side_effect=PermissionError(13, "noexec target")):
