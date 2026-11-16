@@ -12,9 +12,27 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "kernel"))
 
-from child_bundle import (BundleError, load_bundle_profile,
-                                   install_bundle)
+from child_bundle import (
+    BundleError,
+    _safe_url,
+    load_bundle_profile as _load_bundle_profile,
+    install_bundle as _install_bundle,
+)
 from xiio_installer.transaction import rollback
+
+# Local synthetic release source only. Production must pass the actual
+# approved provider hosts explicitly from its installed release authority.
+FIXTURE_RELEASE_HOSTS = frozenset({"github.com"})
+
+
+def load_bundle_profile(lock, **kwargs):
+    kwargs.setdefault("allowed_hosts", FIXTURE_RELEASE_HOSTS)
+    return _load_bundle_profile(lock, **kwargs)
+
+
+def install_bundle(lock, **kwargs):
+    kwargs.setdefault("allowed_hosts", FIXTURE_RELEASE_HOSTS)
+    return _install_bundle(lock, **kwargs)
 
 
 def sha(value):
@@ -99,6 +117,60 @@ class BundleTests(unittest.TestCase):
         self.addCleanup(td.cleanup)
         return BundleFixture(Path(td.name))
 
+
+    def test_missing_release_provider_refuses_before_fetch_or_target_write(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        with self.assertRaisesRegex(BundleError, "BUNDLE_RELEASE_PROVIDER_UNBOUND"):
+            _load_bundle_profile(lock)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_RELEASE_PROVIDER_UNBOUND"):
+            _install_bundle(lock, approved_lock_sha256=digest,
+                            env=f.env, fetch=lambda *_: self.fail("fetch without provider binding"))
+        self.assertFalse((Path(f.env["XDG_STATE_HOME"]) / "xi-io").exists())
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io").exists())
+
+    def test_explicit_non_github_release_source_uses_same_white_label_installer(self):
+        f = self.fixture()
+        f.child("cli", fixture=False)
+        old = f.rows[0]["payload_urls"]["cli.bin"]
+        data = f.payloads.pop(old)
+        host = "packages.example.org"
+        url = f"https://{host}/releases/cli.bin"
+        f.payloads[url] = data
+        f.rows[0]["payload_urls"]["cli.bin"] = url
+        lock, digest = f.lock(fixture=False)
+        hosts = frozenset({host})
+        self.assertEqual(load_bundle_profile(lock, allowed_hosts=hosts)["profile_mode"], "suite")
+        result = install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                                allowed_hosts=hosts, fetch=f.fetch)
+        self.assertEqual(result["state"], "INSTALLED_BYTES_VERIFIED")
+        self.assertEqual(result["receipt_count"], 1)
+        self.assertFalse(result["runtime_qualified"])
+        self.assertFalse(result["authority_granted"])
+
+    def test_release_hosts_reject_wildcards_private_local_and_malformed(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, _ = f.lock()
+        for hosts in (frozenset(), {"github.com"}, frozenset({"*.example.org"}),
+                      frozenset({"127.0.0.1"}), frozenset({"localhost.local"}),
+                      frozenset({"EXAMPLE.ORG"}), frozenset({"one..example.org"})):
+            with self.subTest(hosts=hosts):
+                with self.assertRaisesRegex(
+                    BundleError, "BUNDLE_RELEASE_PROVIDER_(?:UNBOUND|HOST_INVALID)"
+                ):
+                    _load_bundle_profile(lock, allowed_hosts=hosts)
+
+    def test_redirect_uses_explicit_release_hosts_not_github_domains(self):
+        hosts = frozenset({"releases.example.org", "files.example.org"})
+        signed_redirect = "https://files.example.org/assets/object?sig=opaque"
+        self.assertEqual(_safe_url(signed_redirect, hosts, redirect=True), signed_redirect)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_URL_NOT_APPROVED"):
+            _safe_url(signed_redirect, hosts)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_URL_NOT_APPROVED"):
+            _safe_url("https://objects.githubusercontent.com/object?sig=opaque",
+                      hosts, redirect=True)
 
     def test_product_profile_installs_only_selected_root_and_transitive_dependencies(self):
         f = self.fixture()
