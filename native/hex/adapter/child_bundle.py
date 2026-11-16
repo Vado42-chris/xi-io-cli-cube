@@ -332,9 +332,13 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
         manifest = profile["products"][role][0]
         receipts[role] = state_root / (role + "-" + manifest.version.replace("/", "-")
                                        + "-" + approved_lock_sha256[:12] + ".receipt.json")
-    # Verify the actual destination filesystems BEFORE staging and any
-    # download, payload installation, executable command or connection effect.
-    # The only side effects here are disposable probe files cleaned by Installer.
+    # Preserve existing trusted-state-root refusal before probing. No state
+    # directories or payload are created during this read-only custody check.
+    for component in (state_root, *state_root.parents):
+        if component.is_symlink() or (component.exists() and not component.is_dir()):
+            raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED")
+    # Verify destination filesystems BEFORE staging/download/installation.
+    # Only disposable probe files may be written and they must be cleaned.
     try:
         filesystem = qualify_precommand_manifests(
             [(profile["products"][role][0], receipts[role])
@@ -342,8 +346,10 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             roots, machine_profile=observed_machine,
             additional_targets={state_root: {0o600}},
         )
-    except (TransactionError, OSError) as exc:
+    except TransactionError as exc:
         raise BundleError("BUNDLE_FILESYSTEM_UNQUALIFIED") from exc
+    except OSError as exc:
+        raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
 
     state_fd = _secure_ensure_state_root(state_root)
     lock_fd = None
