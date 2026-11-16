@@ -51,5 +51,45 @@
     "remote independently returned operation"
   ],
   "historical_source_archive_not_build_input": true,
-  "inherited_donor_portability_debt": "Exact pinned CLI/connection source retains historical Aries/Loki profile names, help text and device aliases. Native packaging does not use these strings as portable defaults, installation targets or authority. Any donor cleanup belongs upstream and requires repinning/requalification, not silent local source edits."
+  "inherited_donor_portability_debt": "Exact pinned CLI/connection source retains historical Aries/Loki profile names, help text and device aliases. Native packaging does not use these strings as portable defaults, installation targets or authority. Any donor cleanup belongs upstream and requires repinning/requalification, not silent local source edits.",
+  "architecture_boundaries": {
+    "cube_native_model": {
+      "meaning": "Reusable XI-IO project/product structure and native mathematical representation; not an OS package or customer host layout",
+      "authority_refs": [
+        "Vado42-chris/xi-io.net#151",
+        "Vado42-chris/xi-io.net#1281"
+      ],
+      "acceptance": "NATIVE_MATHEMATICAL_ACCEPTANCE_UNVERIFIED"
+    },
+    "sphere_native_model": {
+      "meaning": "User/customer-specific persistent data and native mathematical representation; survives payload replacement and is never embedded as donor-machine literals",
+      "authority_refs": [
+        "Vado42-chris/xi-io.net#151"
+      ],
+      "acceptance": "NATIVE_MATHEMATICAL_ACCEPTANCE_UNVERIFIED"
+    },
+    "payload_delivery": {
+      "meaning": "Built, immutable platform delivery artifact selected and installed by HEX; packaging is separate from Cube/Sphere mathematical serialization",
+      "supported_adapter_families": [
+        "flatpak",
+        "appimage",
+        "deb",
+        "oci",
+        "qcow2",
+        "platform-native"
+      ],
+      "acceptance": "ADAPTER_FAMILIES_REQUIRE_INDIVIDUAL_QUALIFICATION"
+    },
+    "node_runtime": {
+      "meaning": "Qualified running materialization of an admitted Cube plus authorized Sphere on a real target; installed bytes alone do not create a Node",
+      "acceptance": "REAL_NODE_READBACK_REQUIRED"
+    },
+    "hard": [
+      "CUBE_NATIVE_FORMAT!=PAYLOAD_PACKAGE",
+      "SPHERE_DATA!=PAYLOAD_FILES",
+      "PAYLOAD_INSTALLED!=NODE_QUALIFIED",
+      "HOST_PROFILE!=PRODUCT_CUBE",
+      "PACKAGE_FORMAT!=HALLBERGMATHS_SERIALIZATION"
+    ]
+  }
 }
