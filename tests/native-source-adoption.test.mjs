@@ -58,6 +58,15 @@ test('packaging provenance adds no runtime schema, registry or authority',()=>{
  assert.match(provenance.inherited_donor_portability_debt,/historical Aries\/Loki/);
  assert.match(provenance.inherited_donor_portability_debt,/requires repinning\/requalification/);
 });
+test('HEX preserves recursive Cube and shared Sphere graph boundaries',()=>{
+ const a=json('native/hex/SOURCE-ADOPTION.json').architecture_boundaries;
+ assert.equal(a.relationship_graph.framework_candidate_ref,'Vado42-chris/xi-io.net#1481');
+ for(const hard of ['CUBE_GRAPH!=DIRECTORY_TREE','SPHERE_RELATIONSHIP_MANY_TO_MANY','NODE_MATERIALIZES_INTERACTION_NOT_USER_IDENTITY'])assert.ok(a.hard.includes(hard));
+ for(const hard of ['CUBE_DOES_NOT_OWN_SPHERE','NESTED_CUBE_MAY_BIND_SAME_SPHERE_AS_ANCESTOR','ONE_SPHERE_MAY_BIND_MANY_CUBES','NODE_IDENTITY!=INSTALL_PATH'])assert.ok(a.relationship_graph.hard.includes(hard));
+ assert.ok(a.relationship_graph.examples.some(x=>x.includes('veilrift:ttrpg:dnd')));
+ assert.ok(a.relationship_graph.examples.some(x=>x.includes('cube:studio')));
+});
+
 test('launcher-only repair consumes exact qualified PR15 without changing packaged install transport',()=>{
  const base='native/hex/cli-source/';const m=json(base+'launcher-repair.SOURCE.json');
  assert.equal(m.ref,'0f2b444abbe8f7a99c5f4520b1222c568eba6dd1');assert.equal(m.modifications,false);
