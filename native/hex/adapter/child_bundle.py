@@ -25,7 +25,6 @@ from xiio_installer.transaction import (TransactionError, apply_install, plan_in
     qualify_precommand_install_plans, qualify_precommand_manifests, rollback)
 
 SCHEMA = "xiio-installer-bundle-profile-v1"
-BASELINE_ROLES = frozenset(("cli", "ibal", "switchboard", "bins", "ward", "inbox"))
 SAFE_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MAX_LOCK_BYTES = 131072
@@ -206,11 +205,9 @@ def load_bundle_profile(lock: Path, *,
             _require(key not in destinations, "BUNDLE_DESTINATION_COLLISION")
             destinations.add(key)
         products[role] = (manifest, dict(urls), tuple(deps))
-    if profile_mode == "suite":
-        if not fixture:
-            _require(set(products) == BASELINE_ROLES,
-                     "BUNDLE_BASELINE_REQUIRED_PRODUCT_MISSING")
-    else:
+    # Suite membership comes from the verified product lock and registered
+    # product relationships, never from this installer's donor product list.
+    if profile_mode == "product":
         _require(product_root_role in products, "BUNDLE_PRODUCT_ROOT_NOT_IN_PROFILE")
     ordered = []
     temporary = set()
