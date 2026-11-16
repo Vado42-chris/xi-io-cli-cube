@@ -1,5 +1,6 @@
-import json,os,tempfile,unittest
+import json,os,tempfile,unittest,sys
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 from xiio_installer.runtime_profile import load_runtime_profile
 from xiio_installer.runtime_binding import load_runtime_binding_profile,materialize_runtime_bindings,RuntimeBindingError
 G="a"*40
