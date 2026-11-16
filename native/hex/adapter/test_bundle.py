@@ -118,6 +118,7 @@ class BundleFixture:
 
 
 
+class BundleTests(unittest.TestCase):
     def test_registered_bundle_reopens_release_binding_before_fetch(self):
         f = self.fixture()
         f.child("cli", fixture=False)
@@ -160,7 +161,6 @@ class BundleFixture:
                     env=f.env,fetch=lambda *args:fetched.append(args))
         self.assertEqual(fetched,[])
 
-class BundleTests(unittest.TestCase):
     def fixture(self):
         td = tempfile.TemporaryDirectory(prefix="xiio-bundle-fixture-")
         self.addCleanup(td.cleanup)
