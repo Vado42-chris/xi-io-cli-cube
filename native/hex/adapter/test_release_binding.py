@@ -1,6 +1,9 @@
 import hashlib,json,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
+import sys
+HERE=Path(__file__).resolve().parent
+sys.path.insert(0,str(HERE/'kernel'))
 from native.hex.adapter.release_binding import install_from_release_binding,install_from_distribution_reader
 from native.hex.adapter.child_bundle import BundleError
 
