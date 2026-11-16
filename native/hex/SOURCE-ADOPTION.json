@@ -160,7 +160,10 @@
       "AGENT_ASSIGNMENT_REF!=ACTIVE_WORKER_AUTHORITY",
       "GLOBAL_ADMIN_WIDGET!=PRODUCT_FORK",
       "METERING_AVAILABLE!=BILLING_CONSENT",
-      "CONNECTED_ACCOUNT!=EFFECT_AUTHORITY"
+      "CONNECTED_ACCOUNT!=EFFECT_AUTHORITY",
+      "BLACK_BOX_CUBE_LOCAL!=GLASS_BOX_SEAM",
+      "SPHERE_CONNECTION_STATE!=CUBE_SOURCE",
+      "GLOBAL_ADMIN_PROJECTED!=GLOBAL_ADMIN_COPIED"
     ],
     "relationship_graph": {
       "framework_candidate_ref": "Vado42-chris/xi-io.net#1481",
@@ -206,6 +209,24 @@
         ],
         "acceptance": "GLOBAL_ADMIN_WIDGET_CONSUMPTION_REQUIRED"
       }
+    },
+    "cube_sphere_seam": {
+      "framework_candidate_ref": "Vado42-chris/xi-io.net#1481",
+      "black_box_custody": "CUBE",
+      "sphere_connection_custody": "SPHERE_VIA_BINS",
+      "glass_box_custody": "NODE_SEAM_PROJECTION",
+      "global_admin": "SHARED_SERVICE_PROJECTED_TO_APPLICABLE_NODES",
+      "hard": [
+        "BLACK_BOX!=CUSTOMER_SECRET_STORE",
+        "BLACK_BOX!=LIVE_WORKER_ASSIGNMENT",
+        "SPHERE_CONNECTION!=CUBE_DEFAULT",
+        "BINS_RESOURCE_REF!=RAW_SECRET",
+        "GLASS_BOX!=SECOND_TRUTH_STORE",
+        "VISIBLE_CAPABILITY!=CONNECTED_PROVIDER",
+        "CONNECTED_PROVIDER!=AUTHORIZED_EFFECT",
+        "ADMIN_WIDGET!=COPIED_ADMIN_DATABASE",
+        "METERED_EVENT!=INVOICE_WITHOUT_VERIFIED_RATE_AND_USAGE"
+      ]
     }
   }
 }
