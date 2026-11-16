@@ -156,6 +156,7 @@ def load_bundle_profile(lock: Path, *,
     _require(isinstance(rows, list) and 0 < len(rows) <= 32,
              "BUNDLE_PRODUCT_COUNT_INVALID")
     products = {}
+    product_ids = set()
     destinations = set()
     for row in rows:
         _require(isinstance(row, dict) and set(row) ==
@@ -168,6 +169,10 @@ def load_bundle_profile(lock: Path, *,
         product_id = row["product_id"]
         _require(isinstance(product_id, str) and 0 < len(product_id) <= 128,
                  "BUNDLE_PRODUCT_ID_INVALID")
+        # Role aliases cannot cause the same registered product to be selected
+        # and installed as two independently receipted bundle children.
+        _require(product_id not in product_ids, "BUNDLE_DUPLICATE_PRODUCT_ID")
+        product_ids.add(product_id)
         manifest_path = _safe_rel(row["manifest"], "BUNDLE_MANIFEST_PATH_INVALID")
         claimed_sha = row["manifest_sha256"]
         _require(isinstance(claimed_sha, str) and SHA256.fullmatch(claimed_sha),
