@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import shutil
 import stat
@@ -172,21 +173,12 @@ def _probe_filesystem(parent: Path, modes: set[int]) -> None:
             raise TransactionError("filesystem preflight: rename/readback failed")
 
 
-def _preflight_filesystems(plan: list[PlanItem], roots: dict[str, Path], receipt_parent: Path, backup_root: Path) -> None:
-    """Qualify actual target parents before payload or backup contents are written.
+def _preflight_explicit_targets(targets: dict[Path, set[int]]) -> None:
+    """The existing destination-local, disposable mode/exec/rename probe.
 
-    Missing directories are temporary preparation, tracked and removed on both
-    success and failure. Existing directories are never chmodded. Probes are
-    placed in the explicit destination/receipt locations, not a different /tmp
-    filesystem or a nearest ancestor outside the chosen scope.
+    One implementation is used both before command dispatch and inside the
+    installer transaction; probing is an observation, never effect authority.
     """
-    targets: dict[Path, set[int]] = {receipt_parent: {0o600}, backup_root: {0o600}}
-    for item in plan:
-        if item.action != "noop_same_hash":
-            parent = _dest_path(item.destination_scope, item.destination, roots).parent
-            targets.setdefault(parent, set()).add(item.expected_mode)
-        if item.action == "backup_replace" and item.existing_mode is not None:
-            targets[backup_root].add(item.existing_mode)
     created: list[Path] = []
     try:
         for parent, modes in targets.items():
@@ -208,6 +200,147 @@ def _preflight_filesystems(plan: list[PlanItem], roots: dict[str, Path], receipt
         # A cleanup failure is surfaced, never silently reported as clean.
         for directory in reversed(created):
             directory.rmdir()
+
+
+def qualify_precommand_targets(
+    targets: dict[Path, set[int]],
+    *,
+    machine_profile: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Refuse unsupported filesystems before invoking an external installer.
+
+    A local observed machine profile is sufficient, account login is not
+    required. The caller must bind every destination it will write, including
+    executable launchers, receipts and backup areas. No command is generated.
+    """
+    if not isinstance(machine_profile, dict) or (
+        machine_profile.get("os") != platform.system()
+        or machine_profile.get("architecture") != platform.machine()
+        or machine_profile.get("family") != "linux"
+    ):
+        raise TransactionError("filesystem preflight: current machine profile required")
+    if not isinstance(targets, dict) or not targets:
+        raise TransactionError("filesystem preflight: explicit targets required")
+    qualified: dict[Path, set[int]] = {}
+    for location, modes in targets.items():
+        if not isinstance(location, Path) or not location.is_absolute():
+            raise TransactionError("filesystem preflight: absolute target required")
+        if location == Path("/") or any(p.is_symlink() for p in (location, *location.parents)):
+            raise TransactionError("filesystem preflight: untrusted target directory")
+        if not isinstance(modes, set) or not modes or any(
+            not isinstance(mode, int) or isinstance(mode, bool) or not 0 < mode <= 0o777
+            for mode in modes
+        ):
+            raise TransactionError("filesystem preflight: required modes unknown")
+        qualified[location] = set(modes)
+    _preflight_explicit_targets(qualified)
+    return {
+        "schema": "xiio.installer.precommand-filesystem-qualification/v1",
+        "state": "QUALIFIED_FOR_BOUNDED_LOCAL_APPLY",
+        "machine_family": "linux",
+        "checked_target_count": len(qualified),
+        "required_modes": sorted({mode for modes in qualified.values() for mode in modes}),
+        "command_generated": False,
+        "account_login_required": False,
+        "effect_authority": False,
+    }
+
+
+def qualify_precommand_manifests(
+    manifests: list[tuple[ProductManifest, Path]],
+    roots: dict[str, Path],
+    *,
+    machine_profile: dict[str, str] | None,
+    additional_targets: dict[Path, set[int]] | None = None,
+) -> dict[str, Any]:
+    """Prequalify *every* destination before even downloading child payloads.
+
+    Reads only manifest identities/modes from the already verified lock. The
+    caller rechecks payload and exact transaction plan after staging.
+    """
+    if not isinstance(manifests, list) or not manifests:
+        raise TransactionError("filesystem preflight: bounded manifests required")
+    targets: dict[Path, set[int]] = {}
+    for manifest, receipt in manifests:
+        if not isinstance(receipt, Path) or not receipt.is_absolute() or not hasattr(manifest, "entries"):
+            raise TransactionError("filesystem preflight: manifest or receipt target unknown")
+        backup = receipt.parent / (receipt.stem + ".rollback")
+        targets.setdefault(receipt.parent, set()).add(0o600)
+        targets.setdefault(backup, set()).add(0o600)
+        for entry in manifest.entries:
+            parent = _dest_path(entry.destination_scope, entry.destination, roots).parent
+            targets.setdefault(parent, set()).add(entry.mode)
+    if additional_targets is not None:
+        if not isinstance(additional_targets, dict):
+            raise TransactionError("filesystem preflight: additional targets invalid")
+        for location, modes in additional_targets.items():
+            if not isinstance(modes, set):
+                raise TransactionError("filesystem preflight: additional modes invalid")
+            targets.setdefault(location, set()).update(modes)
+    return qualify_precommand_targets(targets, machine_profile=machine_profile)
+
+
+def qualify_precommand_install_plans(
+    plans: list[tuple[list[PlanItem], dict[str, Path], Path]],
+    *,
+    machine_profile: dict[str, str] | None,
+    additional_targets: dict[Path, set[int]] | None = None,
+) -> dict[str, Any]:
+    """Qualify all installer and external-launcher destinations before any apply.
+
+    Bundles must call once for all children before applying the first child.
+    Every parent must come from a validated Installer plan or explicit approved
+    launcher destination, never inferred from the current working directory.
+    """
+    if not isinstance(plans, list) or not plans:
+        raise TransactionError("filesystem preflight: install plans required")
+    targets: dict[Path, set[int]] = {}
+    for plan, roots, receipt in plans:
+        if not isinstance(plan, list) or not isinstance(roots, dict) or not isinstance(receipt, Path):
+            raise TransactionError("filesystem preflight: install plan invalid")
+        if not receipt.is_absolute():
+            raise TransactionError("filesystem preflight: receipt target unbound")
+        backup = receipt.parent / (receipt.stem + ".rollback")
+        targets.setdefault(receipt.parent, set()).add(0o600)
+        targets.setdefault(backup, set()).add(0o600)
+        for item in plan:
+            if not isinstance(item, PlanItem):
+                raise TransactionError("filesystem preflight: unknown install plan item")
+            # Even an unchanged executable can be on NTFS/noexec: do not
+            # certify a pre-command bundle that skips its target filesystem.
+            if item.action != "noop_same_hash" or item.expected_mode & 0o111:
+                parent = _dest_path(item.destination_scope, item.destination, roots).parent
+                targets.setdefault(parent, set()).add(item.expected_mode)
+            if item.action == "backup_replace" and item.existing_mode is not None:
+                targets[backup].add(item.existing_mode)
+    if additional_targets is not None:
+        if not isinstance(additional_targets, dict):
+            raise TransactionError("filesystem preflight: additional targets invalid")
+        for location, modes in additional_targets.items():
+            if not isinstance(modes, set):
+                raise TransactionError("filesystem preflight: additional modes invalid")
+            targets.setdefault(location, set()).update(modes)
+    return qualify_precommand_targets(targets, machine_profile=machine_profile)
+
+
+def _preflight_filesystems(plan: list[PlanItem], roots: dict[str, Path], receipt_parent: Path, backup_root: Path) -> None:
+    """Qualify actual target parents before payload or backup contents are written.
+
+    Missing directories are temporary preparation, tracked and removed on both
+    success and failure. Existing directories are never chmodded. Probes are
+    placed in the explicit destination/receipt locations, not a different /tmp
+    filesystem or a nearest ancestor outside the chosen scope.
+    """
+    targets: dict[Path, set[int]] = {receipt_parent: {0o600}, backup_root: {0o600}}
+    for item in plan:
+        # An existing byte-identical executable may still sit on NTFS/noexec.
+        # No-op installation does not imply that the installed binary can run.
+        if item.action != "noop_same_hash" or item.expected_mode & 0o111:
+            parent = _dest_path(item.destination_scope, item.destination, roots).parent
+            targets.setdefault(parent, set()).add(item.expected_mode)
+        if item.action == "backup_replace" and item.existing_mode is not None:
+            targets[backup_root].add(item.existing_mode)
+    _preflight_explicit_targets(targets)
 
 
 def apply_install(
