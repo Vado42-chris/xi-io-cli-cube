@@ -2,7 +2,8 @@
 import hashlib
 import io
 from email.message import Message
-from urllib.request import Request
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, Request
 import json
 import multiprocessing as mp
 import os
@@ -258,10 +259,26 @@ class BundleTests(unittest.TestCase):
                         request.timeout = 1
                         headers = Message()
                         headers[header] = target
-                        result = getattr(handler, "http_error_" + str(status))(
-                            request, io.BytesIO(b""), status, "Redirect", headers)
-                        self.assertEqual(result, "TEST_ONLY_RESPONSE")
-                        self.assertEqual(calls, [(expected, {"timeout": 1})])
+                        # Preserve the installed stdlib's redirect semantics.
+                        # Python 3.10 rejects 308; newer runtimes support it.
+                        # This is an asserted refusal, not a skipped case.
+                        baseline_request = Request("https://github.com/releases/original.bin")
+                        try:
+                            HTTPRedirectHandler().redirect_request(
+                                baseline_request, None, status, "Redirect", headers, expected)
+                        except HTTPError as error:
+                            self.assertEqual(status, 308)
+                            self.assertEqual(error.code, status)
+                            with self.assertRaises(HTTPError) as raised:
+                                getattr(handler, "http_error_" + str(status))(
+                                    request, io.BytesIO(b""), status, "Redirect", headers)
+                            self.assertEqual(raised.exception.code, status)
+                            self.assertEqual(calls, [])
+                        else:
+                            result = getattr(handler, "http_error_" + str(status))(
+                                request, io.BytesIO(b""), status, "Redirect", headers)
+                            self.assertEqual(result, "TEST_ONLY_RESPONSE")
+                            self.assertEqual(calls, [(expected, {"timeout": 1})])
 
     def test_product_profile_installs_only_selected_root_and_transitive_dependencies(self):
         f = self.fixture()
