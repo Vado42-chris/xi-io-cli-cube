@@ -18,9 +18,11 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from xiio_installer.discovery import xdg_roots
+from xiio_installer.discovery import xdg_roots, discover_host
 from xiio_installer.manifest import load_manifest, sha256_file, verify_payload
-from xiio_installer.transaction import apply_install, plan_install, rollback, _preflight_filesystems
+from xiio_installer.transaction import (apply_install, plan_install, rollback,
+                                        qualify_precommand_manifests,
+                                        qualify_precommand_install_plans)
 
 SCHEMA = "xiio-installer-bundle-profile-v1"
 BASELINE_ROLES = frozenset(("cli", "ibal", "switchboard", "bins", "ward", "inbox"))
@@ -322,6 +324,22 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
     roots = xdg_roots(env)
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
+    observed = discover_host(env)
+    machine_profile = {
+        "os": observed["os"],
+        "architecture": observed["architecture"],
+        "family": observed["platform"]["family"],
+    }
+    # Fail before creating bundle state, fetching a child, or applying any
+    # installed file. The canonical Installer owns both machine and filesystem
+    # qualification; the manifest and approved digest are already sealed.
+    manifests = [
+        (profile["products"][role][0],
+         state_root / (role + "-" + profile["products"][role][0].version.replace("/", "-")
+                       + "-" + approved_lock_sha256[:12] + ".receipt.json"))
+        for role in profile["ordered_roles"]
+    ]
+    qualify_precommand_manifests(manifests, roots, machine_profile=machine_profile)
 
     state_fd = _secure_ensure_state_root(state_root)
     lock_fd = None
@@ -374,22 +392,16 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
                      == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
 
-            # Every destination, including later connection components, must be
-            # qualified before the first product receives installed payload bytes.
-            # This consumes the vendored canonical Installer filesystem probe,
-            # not a parallel HEX machine/filesystem policy.
-            plans = {}
-            for role in profile["ordered_roles"]:
+            # After exact payload acquisition, requalify every real install
+            # plan together. A later target's failure cannot leave an earlier
+            # child or its connection component installed.
+            plans = []
+            for role, receipt in zip(profile["ordered_roles"], (item[1] for item in manifests)):
                 manifest = profile["products"][role][0]
-                plans[role] = plan_install(manifest, staged[role], env)
-            for role in profile["ordered_roles"]:
-                manifest = profile["products"][role][0]
-                receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
-                                        + "-" + approved_lock_sha256[:12] + ".receipt.json")
                 _require(not receipt.exists() and not receipt.is_symlink(),
                          "BUNDLE_RECEIPT_ALREADY_EXISTS")
-                _preflight_filesystems(plans[role], roots, receipt.parent,
-                                       receipt.parent / (receipt.stem + ".rollback"))
+                plans.append((plan_install(manifest, staged[role], env), roots, receipt))
+            qualify_precommand_install_plans(plans, machine_profile=machine_profile)
             applied = []
             try:
                 for role in profile["ordered_roles"]:
