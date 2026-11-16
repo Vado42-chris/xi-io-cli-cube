@@ -11,17 +11,19 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "15ce1769b773b3882e3f3965945ca91a29df98ec",
+    "ref": "d98f2ff8fd8b73b1c831eb4e7a829b0f2fc96897",
     "files_unchanged_sha256": {
       "cli.py": "da0e475c02b890722f770acb2085f765370655a17f5967e8b9f8cb4b06a271be",
       "redaction.py": "83be0ef6a2afabcddbd1f731ebdddb86bc094f6d59ae8f24b27480dab6190a47",
       "__init__.py": "1cfa18cf7a7ce811c262f715af968d50db2efb237fc44f95f0e593f30a3e2c95",
       "observability.py": "d6d4f51afcdd741380fb5b6869948b044c7099879f2480d0a801eb9afe040d04",
-      "transaction.py": "2eea8abc14d8d3f21082f9438c68d2dfdc68b0d95ef0e9fc2c2f81fc7e7870fb",
+      "transaction.py": "a0fef74be55a6beeb5783685f34f7a886be18e4db477bba5a4fa8c7c3b73fa21",
       "diagnostics.py": "45b04222167028c95f28ebba4d8c57c1346b58f28d446529a4f55135aea2e581",
       "manifest.py": "e8550b6ca42a3dee51791fc4be0146f858b8b414a941da4448be9f7cd9e28719",
       "discovery.py": "c1c6096189c03b593707f7c440b8727ea0aff49135f9d8d26afd5d10e5ee60a8"
-    }
+    },
+    "source_promotion_state": "UPSTREAM_PR15_CANDIDATE_NOT_ACCEPTED",
+    "receiving_scope": "Shared kernel candidate is adopted for HEX bundle and native CLI/connection filesystem capability preflight; requires upstream main acceptance, installed receipts and product runtime acceptance"
   },
   "cli": {
     "source_manifest": "cli-source/SOURCE.json",
