@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -124,6 +125,91 @@ def plan_install(manifest: ProductManifest, payload_root: Path, env: dict[str, s
     return plan
 
 
+
+def _probe_filesystem(parent: Path, modes: set[int]) -> None:
+    """Apply-only, non-secret probe; not a claim of crash/power-loss durability."""
+    with tempfile.TemporaryDirectory(prefix=".xiio-fs-probe-", dir=parent) as name:
+        probe = Path(name)
+        if _mode(probe) != 0o700 or probe.stat().st_uid != os.getuid():
+            raise TransactionError("filesystem preflight: private directory mode/owner unsupported")
+        first, second = probe / "first", probe / "second"
+        fd = os.open(first, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(b"xiio-filesystem-probe\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        if _mode(first) != 0o600:
+            raise TransactionError("filesystem preflight: private file mode unsupported")
+        for mode in sorted(modes | {0o600}):
+            os.chmod(first, mode)
+            if _mode(first) != mode:
+                raise TransactionError(f"filesystem preflight: required file mode {mode:04o} unsupported")
+        os.chmod(first, 0o600)
+        # An NTFS/FUSE/noexec mount can report 0755 but still refuse exec.
+        # Probe the real destination filesystem before copying any payload bytes.
+        if any(mode & 0o111 for mode in modes):
+            executable = probe / "execute"
+            fd = os.open(executable, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(b"#!/bin/sh\nexit 0\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(executable, 0o700)
+            if _mode(executable) != 0o700:
+                raise TransactionError("filesystem preflight: executable mode unsupported")
+            try:
+                result = subprocess.run(
+                    [str(executable)], capture_output=True, timeout=3, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise TransactionError("filesystem preflight: direct executable launch unsupported") from exc
+            if result.returncode != 0:
+                raise TransactionError("filesystem preflight: direct executable launch failed")
+        # Exercise replacement as well as creation, with only disposable probe bytes.
+        second.write_bytes(b"replace-me")
+        os.replace(first, second)
+        if first.exists() or _mode(second) != 0o600 or second.read_bytes() != b"xiio-filesystem-probe\n":
+            raise TransactionError("filesystem preflight: rename/readback failed")
+
+
+def _preflight_filesystems(plan: list[PlanItem], roots: dict[str, Path], receipt_parent: Path, backup_root: Path) -> None:
+    """Qualify actual target parents before payload or backup contents are written.
+
+    Missing directories are temporary preparation, tracked and removed on both
+    success and failure. Existing directories are never chmodded. Probes are
+    placed in the explicit destination/receipt locations, not a different /tmp
+    filesystem or a nearest ancestor outside the chosen scope.
+    """
+    targets: dict[Path, set[int]] = {receipt_parent: {0o600}, backup_root: {0o600}}
+    for item in plan:
+        if item.action != "noop_same_hash":
+            parent = _dest_path(item.destination_scope, item.destination, roots).parent
+            targets.setdefault(parent, set()).add(item.expected_mode)
+        if item.action == "backup_replace" and item.existing_mode is not None:
+            targets[backup_root].add(item.existing_mode)
+    created: list[Path] = []
+    try:
+        for parent, modes in targets.items():
+            missing = []
+            current = parent
+            while not current.exists():
+                if current.is_symlink():
+                    raise TransactionError("filesystem preflight: dangling directory symlink")
+                missing.append(current)
+                current = current.parent
+            if not current.is_dir():
+                raise TransactionError("filesystem preflight: parent is not a directory")
+            for directory in reversed(missing):
+                directory.mkdir(mode=0o700)
+                created.append(directory)
+            _probe_filesystem(parent, modes)
+    finally:
+        # rmdir cannot delete an unexpected file written by another process.
+        # A cleanup failure is surfaced, never silently reported as clean.
+        for directory in reversed(created):
+            directory.rmdir()
+
+
 def apply_install(
     manifest: ProductManifest,
     payload_root: Path,
@@ -135,7 +221,6 @@ def apply_install(
     roots = xdg_roots(env)
     if receipt_path.is_symlink():
         raise TransactionError("receipt path symlink forbidden")
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
     backup_root = receipt_path.parent / (receipt_path.stem + ".rollback")
     if backup_root.is_symlink():
         raise TransactionError("rollback custody path symlink forbidden")
@@ -145,7 +230,13 @@ def apply_install(
         raise TransactionError("rollback custody path is not a directory")
     if backup_root.exists() and any(backup_root.iterdir()):
         raise TransactionError("rollback custody path is not empty")
-    backup_root.mkdir(parents=True, exist_ok=True)
+    if backup_root.exists() and (_mode(backup_root) != 0o700 or backup_root.stat().st_uid != os.getuid()):
+        raise TransactionError("rollback custody requires private owner-only directory")
+    _preflight_filesystems(plan, roots, receipt_path.parent, backup_root)
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if _mode(backup_root) != 0o700 or backup_root.stat().st_uid != os.getuid():
+        raise TransactionError("rollback custody requires private owner-only directory")
     completed: list[dict[str, Any]] = []
     receipt_tmp: Path | None = None
     try:
