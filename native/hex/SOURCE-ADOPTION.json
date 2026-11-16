@@ -79,9 +79,19 @@
         "examples": [
           "VeilRIFT -> Video-Games -> Pandora's Cube",
           "VeilRIFT -> TTRPG -> DND -> campaign/sourcebook Cubes",
-          "XI-IO Studio -> sellable product Cubes"
+          "XI-IO Studio -> sellable product Cubes",
+          "XI-IO Studio -> Desktop -> WordPress plugin Cube"
         ],
         "acceptance": "RECURSIVE_CUBE_GRAPH_CONTRACT"
+      },
+      "black_box": {
+        "rule": "Each Cube owns its reusable work-enablement package for that Cube/repository: scripts, skills, regression and acceptance tests, product-local manifests/settings, and stable agent/role assignment references needed to perform work. Black Box contains capability definitions and references, never customer credentials or implicit effect authority.",
+        "framework_refs": [
+          "standards/punchcards/api-glass-box-skill-index.v1.json",
+          "standards/runtime/xiio-persistent-agent-roster.v1.json",
+          "scripts/lib/estate-service-capability-catalog.mjs"
+        ],
+        "acceptance": "CUBE_BLACK_BOX_CAPABILITY_PACKAGE"
       }
     },
     "sphere_native_model": {
@@ -98,6 +108,10 @@
         ],
         "custody": "BINS owns resource identity, versions, provenance and storage bindings; Sphere records governed relationships rather than copying payload files.",
         "acceptance": "CROSS_CUBE_SPHERE_GRAPH_CONTRACT"
+      },
+      "customer_connections": {
+        "rule": "Sphere carries the customer's provisioned identities, connection bindings, account relationships, preferences, billing/provisioning relationship and BINS resource references used across all authorized Cubes. Secrets remain in authorized secret/custody providers, not copied into Cube manifests.",
+        "acceptance": "SPHERE_CUSTOMER_CONNECTION_GRAPH"
       }
     },
     "payload_delivery": {
@@ -141,7 +155,12 @@
       "BINS_CUSTODY!=SPHERE_RELATIONSHIP",
       "CUBE_GRAPH!=DIRECTORY_TREE",
       "SPHERE_RELATIONSHIP_MANY_TO_MANY",
-      "NODE_MATERIALIZES_INTERACTION_NOT_USER_IDENTITY"
+      "NODE_MATERIALIZES_INTERACTION_NOT_USER_IDENTITY",
+      "BLACK_BOX_CAPABILITY!=SPHERE_SECRET",
+      "AGENT_ASSIGNMENT_REF!=ACTIVE_WORKER_AUTHORITY",
+      "GLOBAL_ADMIN_WIDGET!=PRODUCT_FORK",
+      "METERING_AVAILABLE!=BILLING_CONSENT",
+      "CONNECTED_ACCOUNT!=EFFECT_AUTHORITY"
     ],
     "relationship_graph": {
       "framework_candidate_ref": "Vado42-chris/xi-io.net#1481",
@@ -161,7 +180,32 @@
         "ONE_SPHERE_MAY_BIND_MANY_CUBES",
         "NODE_REQUIRED_FOR_RUNNING_CUBE_SPHERE_INTERACTION",
         "NODE_IDENTITY!=INSTALL_PATH"
-      ]
+      ],
+      "glass_box": {
+        "rule": "Glass Box is the governed projection across the Cube/Sphere seam. It exposes portable capability schemas from the Cube Black Box together with current per-user/per-worker Sphere connection state, while resolving currentness, qualification and authority for each operation. It is not a credential store and does not grant authority by being visible.",
+        "framework_refs": [
+          "standards/punchcards/api-glass-box-skill-index.v1.json"
+        ],
+        "hard": [
+          "CAPABILITY_VISIBLE!=PROVIDER_CONNECTED",
+          "PROVIDER_CONNECTED!=EFFECT_AUTHORIZED",
+          "GLOBAL_SKILL_CATALOG!=CUSTOMER_CONNECTION_STATE",
+          "GLASS_BOX_PROJECTION!=BLACK_BOX_IMPLEMENTATION"
+        ]
+      },
+      "global_admin_projection": {
+        "rule": "Provisioning, connected-account administration and metered billing are shared framework capabilities projected as reusable widgets/surfaces into every applicable product Cube. Products consume the common contract; they do not fork customer/account/billing implementations.",
+        "requirements": [
+          "provisioned login resolves one Sphere/principal context",
+          "connected provider/account relationships resolve from Sphere state",
+          "metering is scoped to admitted product/service usage",
+          "billing consent and spending limits precede paid effects",
+          "Ward authorization remains per effect",
+          "BINS/resource custody references remain independently read back",
+          "widget availability does not imply provider or billing authority"
+        ],
+        "acceptance": "GLOBAL_ADMIN_WIDGET_CONSUMPTION_REQUIRED"
+      }
     }
   }
 }
