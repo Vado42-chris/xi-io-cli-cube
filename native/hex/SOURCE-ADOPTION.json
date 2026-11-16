@@ -11,18 +11,22 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "4c241c1bcb57374c2a26c5b0cdca2d036439b4e8",
+    "ref": "62d11ad2384be574578d50ab85bc29982b5494f8",
     "files_unchanged_sha256": {
-      "cli.py": "da0e475c02b890722f770acb2085f765370655a17f5967e8b9f8cb4b06a271be",
-      "redaction.py": "83be0ef6a2afabcddbd1f731ebdddb86bc094f6d59ae8f24b27480dab6190a47",
-      "__init__.py": "1cfa18cf7a7ce811c262f715af968d50db2efb237fc44f95f0e593f30a3e2c95",
-      "observability.py": "d6d4f51afcdd741380fb5b6869948b044c7099879f2480d0a801eb9afe040d04",
-      "transaction.py": "848bb6bfd74235f2969b632ae43b04f3387d6f8e878092ff31f68e78fdb4f497",
+      "__init__.py": "06f35e9d4b5de30b7b32f4aa56ee4ccbfb995c0c26a459db6ada3a31cf689509",
+      "cli.py": "1e4c302c8244f13666267dedf25336e26d8e02d4424ac2ff04c5732950510cd2",
       "diagnostics.py": "45b04222167028c95f28ebba4d8c57c1346b58f28d446529a4f55135aea2e581",
+      "discovery.py": "c1c6096189c03b593707f7c440b8727ea0aff49135f9d8d26afd5d10e5ee60a8",
+      "managed_update.py": "e175420d133b3b74cae97a9c816ace8faf197bdd0becdc52aab10531f1d0897f",
+      "managed_update_cli.py": "1fb7bf790d939ac7b64327cf4e00c31d8f87d9ec06db9f6cef8b4a326052d55e",
       "manifest.py": "e8550b6ca42a3dee51791fc4be0146f858b8b414a941da4448be9f7cd9e28719",
-      "discovery.py": "c1c6096189c03b593707f7c440b8727ea0aff49135f9d8d26afd5d10e5ee60a8"
+      "observability.py": "d6d4f51afcdd741380fb5b6869948b044c7099879f2480d0a801eb9afe040d04",
+      "redaction.py": "83be0ef6a2afabcddbd1f731ebdddb86bc094f6d59ae8f24b27480dab6190a47",
+      "runtime_activation.py": "76c8a3dd93d6fa54f08a6ed14e81073101591c7bb1aa68da2c1f352e3619c81c",
+      "runtime_profile.py": "0713b957e8df7d325cc050f3def00bb47ac4af4a1da3e0f208375e81aaaf6a1c",
+      "transaction.py": "848bb6bfd74235f2969b632ae43b04f3387d6f8e878092ff31f68e78fdb4f497"
     },
-    "acceptance_state": "CANDIDATE_UNMERGED",
+    "acceptance_state": "ACCEPTED_MAIN",
     "owner_pr": 15
   },
   "cli": {
