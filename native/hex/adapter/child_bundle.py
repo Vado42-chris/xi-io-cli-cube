@@ -29,10 +29,24 @@ SAFE_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MAX_LOCK_BYTES = 131072
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
-DEFAULT_RELEASE_HOSTS = frozenset((
-    "github.com", "raw.githubusercontent.com",
-    "release-assets.githubusercontent.com", "objects.githubusercontent.com"
-))
+# The installer has no built-in release provider. The trusted release
+# catalogue/adapter must supply its exact HTTPS provider hosts explicitly.
+# A GitHub source checkout, a fixture flag, or a customer-supplied lock is not
+# an authorization to download arbitrary provider artifacts.
+HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def _bound_release_hosts(allowed_hosts: frozenset[str] | None) -> frozenset[str]:
+    _require(isinstance(allowed_hosts, frozenset) and bool(allowed_hosts),
+             "BUNDLE_RELEASE_PROVIDER_UNBOUND")
+    for host in allowed_hosts:
+        _require(isinstance(host, str) and len(host) <= 253 and "." in host
+                 and host == host.lower()
+                 and all(HOST_LABEL.fullmatch(label) for label in host.split("."))
+                 and not host.split(".")[-1].isdigit()
+                 and not host.endswith((".local", ".localhost")),
+                 "BUNDLE_RELEASE_PROVIDER_HOST_INVALID")
+    return allowed_hosts
 
 
 class BundleError(ValueError):
@@ -75,11 +89,8 @@ def _safe_url(raw: object, allowed_hosts: frozenset[str], *,
         raise BundleError("BUNDLE_URL_INVALID") from exc
     _require(u.scheme == "https" and u.hostname in allowed_hosts
              and u.port in (None, 443) and not u.username and not u.password
-             and not u.fragment and (not u.query or
-                 (redirect and u.hostname in (
-                     "release-assets.githubusercontent.com",
-                     "objects.githubusercontent.com"
-                 ))) and u.path.startswith("/")
+             and not u.fragment and (not u.query or redirect)
+             and u.path.startswith("/")
              and "//" not in u.path and "\\" not in u.path,
              "BUNDLE_URL_NOT_APPROVED")
     return raw
@@ -121,12 +132,14 @@ def _fetch_https(url: str, dest: Path, limit: int,
 
 
 def load_bundle_profile(lock: Path, *,
-                        allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS):
+                        allowed_hosts: frozenset[str] | None = None):
     """Read a pinned projection of existing per-product manifests, not an SSOT.
 
-    The caller must obtain its trusted lock digest from the installed release
-    authority. A self-asserted fixture/QUALIFIED flag is never runtime authority.
+    The caller must obtain its trusted lock digest AND approved release hosts
+    from its current installed release authority. Neither the lock nor the
+    provider hostname itself establishes release, Work or effect authority.
     """
+    allowed_hosts = _bound_release_hosts(allowed_hosts)
     lock = Path(lock)
     raw = _safe_existing_file(lock, MAX_LOCK_BYTES)
     try:
@@ -312,7 +325,7 @@ def _secure_ensure_state_root(state_root: Path) -> int:
 
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
                    env: dict[str, str] | None = None,
-                   allowed_hosts: frozenset[str] = DEFAULT_RELEASE_HOSTS,
+                   allowed_hosts: frozenset[str] | None = None,
                    fetch=None, fail_after_product: int | None = None):
     """Acquire all children, verify all bytes, then apply existing transactions.
 
