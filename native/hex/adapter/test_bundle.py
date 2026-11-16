@@ -258,6 +258,32 @@ class BundleTests(unittest.TestCase):
         self.assertFalse(result["runtime_qualified"])
         self.assertFalse(result["authority_granted"])
 
+    def test_duplicate_product_identity_across_distinct_roles_is_refused_before_download(self):
+        f = self.fixture()
+        f.child("alpha", fixture=False)
+        f.child("beta", fixture=False, depends_on=("alpha",))
+        # The second manifest, digest and destination are individually valid.
+        # Aliased roles still cannot install the same product twice.
+        second = f.root / "beta.manifest.json"
+        manifest = json.loads(second.read_text())
+        manifest["product_id"] = "xi-io-alpha"
+        raw = json.dumps(manifest, sort_keys=True).encode()
+        second.write_bytes(raw)
+        f.rows[1]["product_id"] = "xi-io-alpha"
+        f.rows[1]["manifest_sha256"] = sha(raw)
+        lock, digest = f.lock(fixture=False)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_DUPLICATE_PRODUCT_ID"):
+            load_bundle_profile(lock)
+        attempted = []
+        def fetch(*args):
+            attempted.append(args)
+            raise AssertionError("FETCH_WITH_DUPLICATE_PRODUCT_ID")
+        with self.assertRaisesRegex(BundleError, "BUNDLE_DUPLICATE_PRODUCT_ID"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=fetch)
+        self.assertEqual(attempted, [])
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/alpha/alpha.bin").exists())
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/beta/beta.bin").exists())
+
     def test_duplicate_destinations_rejected(self):
         f = self.fixture()
         f.child("cli", destination="xi-io/shared/common.bin")
