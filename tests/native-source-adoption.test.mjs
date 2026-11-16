@@ -90,3 +90,22 @@ test('current fourteen-file candidate payload and historical repair verifier kee
  assert.equal(createHash('sha256').update(read(base+repair.verification_resource.path)).digest('hex'),repair.verification_resource.sha256);
  assert.notEqual(repair.verification_resource.sha256,payload.files['src/runtime-integrity.mjs'].sha256);
 });
+
+test('native Cube and Sphere semantics stay separate from deployable payload packaging',()=>{
+ const adoption=json('native/hex/SOURCE-ADOPTION.json');
+ const boundary=adoption.architecture_boundaries;
+ assert.ok(boundary);
+ assert.equal(boundary.cube_native_model.acceptance,'NATIVE_MATHEMATICAL_ACCEPTANCE_UNVERIFIED');
+ assert.equal(boundary.sphere_native_model.acceptance,'NATIVE_MATHEMATICAL_ACCEPTANCE_UNVERIFIED');
+ assert.deepEqual(boundary.cube_native_model.authority_refs,[
+  'Vado42-chris/xi-io.net#151','Vado42-chris/xi-io.net#1281']);
+ assert.match(boundary.payload_delivery.meaning,/packaging is separate from Cube\/Sphere mathematical serialization/);
+ assert.ok(boundary.payload_delivery.supported_adapter_families.includes('flatpak'));
+ assert.ok(boundary.payload_delivery.supported_adapter_families.includes('oci'));
+ assert.ok(boundary.payload_delivery.supported_adapter_families.includes('qcow2'));
+ assert.equal(boundary.node_runtime.acceptance,'REAL_NODE_READBACK_REQUIRED');
+ assert.ok(boundary.hard.includes('CUBE_NATIVE_FORMAT!=PAYLOAD_PACKAGE'));
+ assert.ok(boundary.hard.includes('SPHERE_DATA!=PAYLOAD_FILES'));
+ assert.ok(boundary.hard.includes('PAYLOAD_INSTALLED!=NODE_QUALIFIED'));
+ assert.ok(boundary.hard.includes('HOST_PROFILE!=PRODUCT_CUBE'));
+});
