@@ -244,12 +244,19 @@ class BundleTests(unittest.TestCase):
         with self.assertRaisesRegex(BundleError, "BUNDLE_DEPENDENCY_NOT_IN_PROFILE"):
             load_bundle_profile(lock)
 
-    def test_nonfixture_baseline_refuses_missing_products(self):
+    def test_nonfixture_suite_uses_verified_lock_not_donor_product_roster(self):
         f = self.fixture()
-        f.child("cli", fixture=False)
-        lock, _ = f.lock(fixture=False)
-        with self.assertRaisesRegex(BundleError, "BUNDLE_BASELINE_REQUIRED_PRODUCT_MISSING"):
-            load_bundle_profile(lock)
+        f.child("desktop-shell", fixture=False)
+        f.child("specialist-tool", fixture=False, depends_on=("desktop-shell",))
+        lock, digest = f.lock(fixture=False)
+        profile = load_bundle_profile(lock)
+        self.assertEqual(profile["profile_mode"], "suite")
+        self.assertEqual(profile["ordered_roles"], ("desktop-shell", "specialist-tool"))
+        result = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(result["receipt_count"], 2)
+        self.assertEqual(result["state"], "INSTALLED_BYTES_VERIFIED")
+        self.assertFalse(result["runtime_qualified"])
+        self.assertFalse(result["authority_granted"])
 
     def test_duplicate_destinations_rejected(self):
         f = self.fixture()
