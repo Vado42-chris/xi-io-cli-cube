@@ -463,6 +463,53 @@ class BundleTests(unittest.TestCase):
             p1.join(timeout=5)
 
 
+    def test_shared_installer_source_blob_is_exact_not_a_second_kernel(self):
+        source = (HERE / "kernel/xiio_installer/transaction.py").read_bytes()
+        blob = hashlib.sha1(b"blob " + str(len(source)).encode() + b"\\0" + source).hexdigest()
+        self.assertEqual(blob, "a6a39584ddf3fb4a4864215fdebb8754d47db2dc")
+
+    def test_qualify_entire_bundle_before_first_download_or_install(self):
+        f = self.fixture()
+        f.child("cli")
+        lock, digest = f.lock()
+        fetched = []
+        def attempted_fetch(url, output, limit):
+            fetched.append(url)
+            raise AssertionError("FETCH_BEFORE_FILESYSTEM_QUALIFICATION")
+        from xiio_installer.transaction import TransactionError
+        with patch("child_bundle.qualify_precommand_manifests",
+                   side_effect=TransactionError("mock unsupported filesystem")):
+            with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                               fetch=attempted_fetch)
+        self.assertEqual(fetched, [])
+        self.assertFalse((Path(f.env["XDG_STATE_HOME"]) /
+                          "xi-io/installer/bundles/core-test").exists())
+
+    def test_ntfs_0664_refused_before_fetch_and_every_child_effect(self):
+        f = self.fixture()
+        f.child("cli")
+        manifest_path = f.root / "cli.manifest.json"
+        data = json.loads(manifest_path.read_text())
+        data["payload"][0]["mode"] = "0755"
+        manifest_path.write_text(json.dumps(data, sort_keys=True))
+        f.rows[-1]["manifest_sha256"] = sha(manifest_path.read_bytes())
+        lock, digest = f.lock()
+        from xiio_installer import transaction as tx
+        chmod = os.chmod
+        fetched = []
+        def ntfs_chmod(file, mode, *args, **kwargs):
+            return chmod(file, 0o664 if mode == 0o755 else mode, *args, **kwargs)
+        with patch.object(tx.os, "chmod", side_effect=ntfs_chmod):
+            with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                               fetch=lambda url, output, limit: fetched.append(url))
+        self.assertEqual(fetched, [])
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli").exists())
+        self.assertFalse((Path(f.env["XDG_STATE_HOME"]) /
+                          "xi-io/installer/bundles/core-test").exists())
+
+
 def _concurrency_worker(lock, digest, env, barrier, done):
     def slow_fetch(url, output, limit):
         barrier.put("LOCKED_AND_FETCHING")
