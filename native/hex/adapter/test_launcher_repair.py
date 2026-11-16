@@ -21,6 +21,28 @@ def snapshot(root):
     return {str(p.relative_to(root)):(p.stat().st_mode&0o777,hash_bytes(p.read_bytes()) if p.is_file() else None) for p in root.rglob('*')}
 
 
+class LauncherRepairPrecommandRegression(unittest.TestCase):
+    def test_shared_qualifier_precedes_node_command_and_repair(self):
+        source=(HERE/'installer_adapter.py').read_text()
+        body=source[source.index('def handle_repair('):source.index('def handle(req):')]
+        qualification=body.index('qualification = qualify_precommand_targets(')
+        verify=body.index('verify_node(p)')
+        journal=body.index("journal.start('Repair only exact reviewed existing CLI launcher'")
+        effect=body.index('str(SOURCE/REPAIR_INSTALLER)')
+        self.assertLess(qualification,verify)
+        self.assertLess(qualification,journal)
+        self.assertLess(journal,effect)
+        self.assertIn("p['launcher_before']['mode']",body)
+        self.assertIn("Path(p['backup']).parent",body)
+        self.assertIn("account_login_required",body)
+
+    def test_installer_kernel_owns_exact_qualifier(self):
+        import sys
+        sys.path.insert(0,str(HERE/'kernel'))
+        from xiio_installer.transaction import qualify_precommand_targets
+        self.assertTrue(callable(qualify_precommand_targets))
+
+
 class LauncherRepairIntegration(unittest.TestCase):
     def setUp(self):
         self.fixture=Fixture();self.f=self.fixture.__enter__();self.home=self.f.home
