@@ -30,8 +30,7 @@
       "update_request.py": "6f448b910bdbcf001379fdc35ab87098816c7fa83e640ce1b62fc8d2a658b09e"
     },
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 21,
-    "acceptance_note": "Latest accepted Installer main generation after #18 and #21; Cube vendored kernel remains byte-identical. Package payload delivery remains distinct from Cube/Sphere native mathematical format."
+    "owner_pr": 21
   },
   "cli": {
     "source_manifest": "cli-source/SOURCE.json",
@@ -79,7 +78,14 @@
         "qcow2",
         "platform-native"
       ],
-      "acceptance": "ADAPTER_FAMILIES_REQUIRE_INDIVIDUAL_QUALIFICATION"
+      "acceptance": "ADAPTER_FAMILIES_REQUIRE_INDIVIDUAL_QUALIFICATION",
+      "install_projection": {
+        "schema": "xiio.payload-install-projection/v1",
+        "owner": "HEX/Installer receiving projection",
+        "meaning": "Immutable platform payload/dependency projection derived from current release manifests. It is not native Cube serialization, a customer Sphere, or a qualified Node.",
+        "source": "native/hex/adapter/child_bundle.py",
+        "acceptance": "PAYLOAD_BYTES_AND_RECEIPTS_ONLY"
+      }
     },
     "node_runtime": {
       "meaning": "Qualified running materialization of an admitted Cube plus authorized Sphere on a real target; installed bytes alone do not create a Node",
@@ -90,7 +96,10 @@
       "SPHERE_DATA!=PAYLOAD_FILES",
       "PAYLOAD_INSTALLED!=NODE_QUALIFIED",
       "HOST_PROFILE!=PRODUCT_CUBE",
-      "PACKAGE_FORMAT!=HALLBERGMATHS_SERIALIZATION"
+      "PACKAGE_FORMAT!=HALLBERGMATHS_SERIALIZATION",
+      "BUNDLE_PROFILE!=CUBE_NATIVE_SERIALIZATION",
+      "PAYLOAD_PROJECTION!=SPHERE_IDENTITY",
+      "INSTALL_RECEIPT!=NODE_RUNTIME_IDENTITY"
     ]
   }
 }
