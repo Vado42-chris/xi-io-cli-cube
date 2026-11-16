@@ -13,6 +13,9 @@ import child_bundle
 import install_preflight
 import local_step_actions
 from xiio_installer.observability import OperationJournal, inspect_operation
+from xiio_installer.manifest import load_manifest
+from xiio_installer.transaction import qualify_precommand_manifests
+import platform
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
 class Refused(Exception): pass
@@ -536,6 +539,30 @@ def handle(req):
             installed(p,expected_generation=aop['events'][-1]['details'].get('generation'))
             demand(file_bytes(Path(p['prefix'])/'previous').decode().strip()==p['previous_current'],'ROLLBACK_TARGET_CHANGED')
             connection_profile.readback(base,p,SOURCE/'connection',aop['events'][-1]['details'].get('connection_receipt_sha256'))
+        if act=='apply':
+            # Qualify the Switchboard component, CLI generation, launchers, pointers,
+            # rollback and journal targets together before the first install or
+            # journal command. Never infer capability from the caller's hostname.
+            manifest_path = connection_profile.paths(base,p)[1]
+            connection_receipt_path = connection_profile.paths(base,p)[3]
+            connection_manifest = load_manifest(manifest_path)
+            prefix = Path(p['prefix'])
+            qualification = qualify_precommand_manifests(
+                [(connection_manifest, connection_receipt_path)],
+                connection_profile.roots(p),
+                machine_profile={'os':platform.system(),
+                                 'architecture':platform.machine(),
+                                 'family':'linux'},
+                additional_targets={
+                    prefix: {0o600},
+                    prefix/'versions': {0o600},
+                    prefix/'bin': {0o755},
+                    base/'operations': {0o600},
+                },
+            )
+            demand(qualification.get('state')=='QUALIFIED_FOR_BOUNDED_LOCAL_APPLY'
+                   and qualification.get('account_login_required') is False,
+                   'PRECOMMAND_FILESYSTEM_QUALIFICATION_REQUIRED')
         journal=OperationJournal('native-cli-installer',act,operation_id=p['plan_id']+'-'+act,correlation_id=p['plan_id'],root=base)
         journal.start('Apply exact reviewed CLI generation' if act=='apply' else 'Restore previous CLI generation',details={'approval_digest':p['approval_digest']})
         connection_receipt=None
