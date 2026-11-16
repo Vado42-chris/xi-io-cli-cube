@@ -11,11 +11,11 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "9b5aea601a9186426d3950787dcef20b5bbf85bd",
+    "ref": "64328dd422ec5a751d61c03c382157656272d6f1",
     "files_unchanged_sha256": {
       "__init__.py": "06f35e9d4b5de30b7b32f4aa56ee4ccbfb995c0c26a459db6ada3a31cf689509",
       "cli.py": "d92dfb0c509c34c40f4c0d0f2aa3e1319381cb4bcc6269225af1204d9294bff2",
-      "consent.py": "6dab1a90755d893f065740a84a405f36296e0795bc09f1f04da1ee8829502558",
+      "consent.py": "a411148b8e1eb87375f644927b51ee2741c642e87274338f14636846dc06ea0c",
       "diagnostics.py": "45b04222167028c95f28ebba4d8c57c1346b58f28d446529a4f55135aea2e581",
       "discovery.py": "c1c6096189c03b593707f7c440b8727ea0aff49135f9d8d26afd5d10e5ee60a8",
       "managed_update.py": "e175420d133b3b74cae97a9c816ace8faf197bdd0becdc52aab10531f1d0897f",
@@ -30,8 +30,8 @@
       "update_request.py": "6f448b910bdbcf001379fdc35ab87098816c7fa83e640ce1b62fc8d2a658b09e"
     },
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 18,
-    "acceptance_note": "Merged Installer #18 exact accepted source; Cube vendored kernel must remain byte-identical and must not reinterpret package payloads as Cube/Sphere native format."
+    "owner_pr": 21,
+    "acceptance_note": "Latest accepted Installer main generation after #18 and #21; Cube vendored kernel remains byte-identical. Package payload delivery remains distinct from Cube/Sphere native mathematical format."
   },
   "cli": {
     "source_manifest": "cli-source/SOURCE.json",
