@@ -25,6 +25,29 @@ from xiio_installer.transaction import (TransactionError, apply_install, plan_in
     qualify_precommand_install_plans, qualify_precommand_manifests, rollback)
 
 SCHEMA = "xiio-installer-bundle-profile-v1"
+PAYLOAD_PROJECTION = "xiio.payload-install-projection/v1"
+
+def _payload_projection(profile):
+    """Describe immutable deployment payloads without claiming native Cube/Sphere/Node identity."""
+    return {
+        "schema": PAYLOAD_PROJECTION,
+        "release_profile_id": profile["profile_id"],
+        "release_profile_sha256": profile["lock_sha256"],
+        "mode": profile["profile_mode"],
+        "root_product_id": (
+            profile["products"][profile["product_root_role"]][0].product_id
+            if profile["product_root_role"] is not None else None
+        ),
+        "ordered_payload_products": tuple(
+            profile["products"][role][0].product_id for role in profile["ordered_roles"]
+        ),
+        # Native mathematical/data identities are owned by their admitted
+        # providers. Installing package bytes must never manufacture them.
+        "cube_native_identity": None,
+        "sphere_identity": None,
+        "node_runtime_identity": None,
+        "node_running": False,
+    }
 SAFE_ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MAX_LOCK_BYTES = 131072
@@ -270,13 +293,15 @@ def load_bundle_profile(lock: Path, *,
         visit(product_root_role)
         _require(permanent == set(products),
                  "BUNDLE_PRODUCT_PROFILE_NOT_EXACT_DEPENDENCY_CLOSURE")
-    return {
+    result = {
         "profile_id": profile_id, "fixture": fixture,
         "profile_mode": profile_mode, "product_root_role": product_root_role,
         "lock_sha256": _sha(raw), "ordered_roles": tuple(ordered),
         "products": products, "release_source_observed": True,
         "runtime_authority": False
     }
+    result["payload_projection"] = _payload_projection(result)
+    return result
 
 
 def _secure_ensure_state_root(state_root: Path) -> int:
@@ -479,6 +504,10 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 "profile_id": profile["profile_id"],
                 "lock_sha256": approved_lock_sha256,
                 "roles": list(profile["ordered_roles"]),
+                "payload_projection": {
+                    **profile["payload_projection"],
+                    "ordered_payload_products": list(profile["payload_projection"]["ordered_payload_products"]),
+                },
                 "receipt_count": len(applied),
                 "filesystem_precommand_state": filesystem["state"],
                 "runtime_qualified": False, "authority_granted": False,
