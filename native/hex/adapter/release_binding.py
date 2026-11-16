@@ -66,7 +66,8 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
         "product_ref":product_ref,"consumer_ref":consumer_ref,
         "release_ref":binding.get("release_ref"),"release_generation":binding.get("release_generation"),
         "approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),
-        "bundle_receipts":installed.get("receipts"),"readback_verified":True,
+        "bundle_state":installed.get("state"),"installed_role_count":len(installed.get("roles") or []),
+        "readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED",
         "effect_authority":False,
     }
     name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json"
