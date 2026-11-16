@@ -67,9 +67,10 @@ def activate_runtime_profile(
     for dep in profile.dependencies:
         if not set(dep.required_for_permissions).intersection(allowed):
             continue
-        unit=_run(["systemctl","--user","cat",dep.expected_unit],timeout=5)
-        if unit.returncode!=0:
-            raise RuntimeActivationError("RUNTIME_DEPENDENCY_NOT_INSTALLED:"+dep.dependency_id)
+        if dep.expected_unit is not None:
+            unit=_run(["systemctl","--user","cat",dep.expected_unit],timeout=5)
+            if unit.returncode!=0:
+                raise RuntimeActivationError("RUNTIME_DEPENDENCY_NOT_INSTALLED:"+dep.dependency_id)
     binding_receipt=None
     if runtime_binding_profile is not None:
         if dependency_binding_receipts is None or runtime_binding_destination is None:

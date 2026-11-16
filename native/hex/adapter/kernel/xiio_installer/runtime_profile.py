@@ -44,7 +44,7 @@ class RuntimeDependency:
     accepted_generation:str
     materializer:str
     required_for_permissions:tuple[str,...]
-    expected_unit:str
+    expected_unit:str|None
 
 @dataclass(frozen=True)
 class RuntimeProfile:
@@ -104,12 +104,14 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
         # breaks CONSENT_PROFILE_GENERATION_STALE / hotpatch qualification.
         dep_generation=_text(row.get("accepted_generation"),f"DEPENDENCY_{i}_GENERATION")
         materializer=_text(row.get("materializer"),f"DEPENDENCY_{i}_MATERIALIZER")
-        expected_unit=_text(row.get("expected_unit"),f"DEPENDENCY_{i}_UNIT")
+        expected_unit=row.get("expected_unit")
+        if expected_unit is not None:
+            expected_unit=_text(expected_unit,f"DEPENDENCY_{i}_UNIT")
         if did in dep_ids:
             raise RuntimeProfileError("DUPLICATE_RUNTIME_DEPENDENCY")
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}",dep_generation):
             raise RuntimeProfileError(f"DEPENDENCY_{i}_GENERATION_INVALID")
-        if not SAFE_UNIT.fullmatch(expected_unit):
+        if expected_unit is not None and not SAFE_UNIT.fullmatch(expected_unit):
             raise RuntimeProfileError(f"DEPENDENCY_{i}_UNIT_INVALID")
         dep_ids.add(did)
         dependencies.append(RuntimeDependency(
