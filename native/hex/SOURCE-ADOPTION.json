@@ -31,7 +31,20 @@
     },
     "acceptance_state": "ACCEPTED_MAIN",
     "owner_pr": 21,
-    "acceptance_note": "Latest accepted Installer main generation after #18 and #21; Cube vendored kernel remains byte-identical. Package payload delivery remains distinct from Cube/Sphere native mathematical format."
+    "acceptance_note": "Latest accepted Installer main generation after #18 and #21; Cube vendored kernel remains byte-identical. Package payload delivery remains distinct from Cube/Sphere native mathematical format.",
+    "accepted_generation_history": [
+      {
+        "owner_pr": 18,
+        "merge_ref": "9b5aea601a9186426d3950787dcef20b5bbf85bd",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 21,
+        "merge_ref": "64328dd422ec5a751d61c03c382157656272d6f1",
+        "status": "CURRENT_ACCEPTED_MAIN"
+      }
+    ],
+    "currentness_rule": "Vendored kernel must match latest accepted Installer main generation; a newer lane report about an older merged PR cannot downgrade currentness."
   },
   "cli": {
     "source_manifest": "cli-source/SOURCE.json",
