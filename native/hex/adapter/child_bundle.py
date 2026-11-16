@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 from xiio_installer.discovery import xdg_roots
 from xiio_installer.manifest import load_manifest, sha256_file, verify_payload
-from xiio_installer.transaction import apply_install, plan_install, rollback
+from xiio_installer.transaction import apply_install, plan_install, rollback, _preflight_filesystems
 
 SCHEMA = "xiio-installer-bundle-profile-v1"
 BASELINE_ROLES = frozenset(("cli", "ibal", "switchboard", "bins", "ward", "inbox"))
@@ -374,9 +374,22 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
                      == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
 
+            # Every destination, including later connection components, must be
+            # qualified before the first product receives installed payload bytes.
+            # This consumes the vendored canonical Installer filesystem probe,
+            # not a parallel HEX machine/filesystem policy.
+            plans = {}
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
-                plan_install(manifest, staged[role], env)
+                plans[role] = plan_install(manifest, staged[role], env)
+            for role in profile["ordered_roles"]:
+                manifest = profile["products"][role][0]
+                receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
+                                        + "-" + approved_lock_sha256[:12] + ".receipt.json")
+                _require(not receipt.exists() and not receipt.is_symlink(),
+                         "BUNDLE_RECEIPT_ALREADY_EXISTS")
+                _preflight_filesystems(plans[role], roots, receipt.parent,
+                                       receipt.parent / (receipt.stem + ".rollback"))
             applied = []
             try:
                 for role in profile["ordered_roles"]:
