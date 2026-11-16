@@ -114,3 +114,21 @@ test('native Cube and Sphere semantics stay separate from deployable payload pac
  assert.ok(boundary.hard.includes('PAYLOAD_INSTALLED!=NODE_QUALIFIED'));
  assert.ok(boundary.hard.includes('HOST_PROFILE!=PRODUCT_CUBE'));
 });
+
+test('recursive Cubes share governed Sphere relationships and only runtime interactions create Nodes',()=>{
+ const adoption=json('native/hex/SOURCE-ADOPTION.json');
+ const boundary=adoption.architecture_boundaries;
+ assert.equal(boundary.cube_native_model.recursive_composition.acceptance,'RECURSIVE_CUBE_GRAPH_CONTRACT');
+ assert.match(boundary.cube_native_model.recursive_composition.rule,/child Cubes recursively/);
+ assert.equal(boundary.sphere_native_model.cross_cube_scope.acceptance,'CROSS_CUBE_SPHERE_GRAPH_CONTRACT');
+ assert.match(boundary.sphere_native_model.cross_cube_scope.rule,/may relate to many top-level and nested Cubes/);
+ assert.match(boundary.sphere_native_model.cross_cube_scope.custody,/BINS owns resource identity/);
+ assert.equal(boundary.node_runtime.interaction_seam.acceptance,'INTERACTION_NODE_RUNTIME_REQUIRED');
+ assert.match(boundary.node_runtime.interaction_seam.rule,/installed\/running and interacts with an authorized Sphere/);
+ assert.ok(boundary.node_runtime.interaction_seam.requirements.includes('Ward-authorized effects'));
+ assert.ok(boundary.node_runtime.interaction_seam.requirements.some(x=>x.startsWith('BINS-backed user resource custody')));
+ assert.ok(boundary.hard.includes('CUBE_CHILD!=NEW_USER_SPHERE'));
+ assert.ok(boundary.hard.includes('ONE_SPHERE_MAY_RELATE_TO_MANY_CUBES'));
+ assert.ok(boundary.hard.includes('DIRECTORY_EDGE!=RUNNING_NODE'));
+ assert.ok(boundary.hard.includes('BINS_CUSTODY!=SPHERE_RELATIONSHIP'));
+});
