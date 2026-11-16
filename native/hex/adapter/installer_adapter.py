@@ -548,18 +548,26 @@ def handle(req):
             connection_receipt_path = connection_profile.paths(base,p)[3]
             connection_manifest = load_manifest(manifest_path)
             prefix = Path(p['prefix'])
+            extra_targets = {
+                prefix: {0o600},
+                prefix/'versions': {0o600},
+                prefix/'bin': {0o755},
+                base/'operations': {0o600},
+            }
+            # Rollback preserves each existing file's original mode, not merely
+            # the new manifest mode. Qualify that mode before the first effect.
+            backup_parent = connection_receipt_path.parent / (
+                connection_receipt_path.stem + '.rollback')
+            for item in p['connection']['plan']:
+                if item.get('action') == 'backup_replace' and item.get('existing_mode') is not None:
+                    extra_targets.setdefault(backup_parent, set()).add(item['existing_mode'])
             qualification = qualify_precommand_manifests(
                 [(connection_manifest, connection_receipt_path)],
                 xdg_roots(connection_profile.roots(p)),
                 machine_profile={'os':platform.system(),
                                  'architecture':platform.machine(),
                                  'family':'linux'},
-                additional_targets={
-                    prefix: {0o600},
-                    prefix/'versions': {0o600},
-                    prefix/'bin': {0o755},
-                    base/'operations': {0o600},
-                },
+                additional_targets=extra_targets,
             )
             demand(qualification.get('state')=='QUALIFIED_FOR_BOUNDED_LOCAL_APPLY'
                    and qualification.get('account_login_required') is False,
