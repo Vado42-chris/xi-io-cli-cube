@@ -7,7 +7,7 @@ from native.hex.adapter.child_bundle import BundleError
 class ReleaseBindingTests(unittest.TestCase):
  def fixture(self):
   td=tempfile.TemporaryDirectory(); root=Path(td.name); lock=root/'bundle.json'
-  manifest=root/'manifest.json'; manifest.write_text(json.dumps({"schema_version":"xiio-installer-product-manifest-v1","product_id":"product-demo","version":"1","fixture":True,"files":[]}))
+  manifest=root/'manifest.json'; manifest.write_text(json.dumps({"schema_version":"xiio-installer-product-manifest-v1","profile_id":"release-binding-test","product_id":"product-demo","display_name":"Product Demo","version":"1.0.0","channel":"fixture","fixture":True,"payload":[]}))
   msha=hashlib.sha256(manifest.read_bytes()).hexdigest()
   lock.write_text(json.dumps({"schema_version":"xiio-installer-bundle-profile-v1","profile_id":"demo","fixture":True,"products":[{"role":"demo","product_id":"product-demo","manifest":"manifest.json","manifest_sha256":msha,"depends_on":[],"payload_urls":{}}]},separators=(',',':')))
   sha=hashlib.sha256(lock.read_bytes()).hexdigest()
