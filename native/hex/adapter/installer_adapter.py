@@ -15,7 +15,7 @@ import local_step_actions
 from xiio_installer.observability import OperationJournal, inspect_operation
 from xiio_installer.discovery import xdg_roots
 from xiio_installer.manifest import load_manifest
-from xiio_installer.transaction import qualify_precommand_manifests
+from xiio_installer.transaction import qualify_precommand_manifests, qualify_precommand_targets
 import platform
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
@@ -315,6 +315,20 @@ def handle_repair(req,base,p):
     demand(not view['do_not_retry'],'UNCERTAIN_REPAIR_OUTCOME_DO_NOT_RETRY')
     demand(view['phase']=='PREPARED_REPAIR_NOT_APPLIED','DUPLICATE_REPAIR_REFUSED')
     repair_unresolved(base,p['prefix'],p['launcher'],p['plan_id'])
+    # The repair launcher and backup must also support the original executable
+    # mode, before invoking Node or the canonical repair installer.
+    repair_modes = {0o755, p['launcher_before']['mode']}
+    qualification = qualify_precommand_targets({
+        Path(p['bin_dir']): repair_modes,
+        Path(p['backup']).parent: set(repair_modes),
+        Path(p['prefix']): {0o600},
+        base/'operations': {0o600},
+    }, machine_profile={'os':platform.system(),
+                        'architecture':platform.machine(),
+                        'family':'linux'})
+    demand(qualification.get('state')=='QUALIFIED_FOR_BOUNDED_LOCAL_APPLY'
+           and qualification.get('account_login_required') is False,
+           'REPAIR_PRECOMMAND_FILESYSTEM_QUALIFICATION_REQUIRED')
     verify_node(p);demand(repair_source()==p['repair_source'],'REPAIR_SOURCE_CHANGED_SINCE_REVIEW')
     demand(repair_bin(Path(p['bin_dir']))==p['launcher_directory_before'],'LAUNCHER_DIRECTORY_CHANGED_SINCE_REVIEW')
     repair_pending(Path(p['launcher']))
