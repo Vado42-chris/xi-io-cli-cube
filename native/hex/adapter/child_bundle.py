@@ -330,17 +330,15 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
         "architecture": observed["architecture"],
         "family": observed["platform"]["family"],
     }
-    # Fail before creating bundle state, fetching a child, or applying any
-    # installed file. The canonical Installer owns both machine and filesystem
-    # qualification; the manifest and approved digest are already sealed.
+    # Resolve the exact manifest/receipt targets from the sealed bundle lock.
+    # Probe only after obtaining the existing descriptor-anchored install lock
+    # to avoid concurrent temporary probes colliding on a fresh destination.
     manifests = [
         (profile["products"][role][0],
          state_root / (role + "-" + profile["products"][role][0].version.replace("/", "-")
                        + "-" + approved_lock_sha256[:12] + ".receipt.json"))
         for role in profile["ordered_roles"]
     ]
-    qualify_precommand_manifests(manifests, roots, machine_profile=machine_profile)
-
     state_fd = _secure_ensure_state_root(state_root)
     lock_fd = None
     try:
@@ -366,6 +364,11 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
         st_path = state_root.stat()
         _require(st_desc.st_ino == st_path.st_ino and st_desc.st_dev == st_path.st_dev,
                  "BUNDLE_STATE_ROOT_UNTRUSTED")
+
+        # One shared Installer qualification for ALL child destinations happens
+        # under the acquired bundle lock, before any download or installed
+        # connection/CLI payload effect. No account enrollment is required.
+        qualify_precommand_manifests(manifests, roots, machine_profile=machine_profile)
 
         fetcher = fetch or (lambda url, path, size: _fetch_https(url, path, size, allowed_hosts))
         _require(callable(fetcher), "BUNDLE_FETCH_UNAVAILABLE")
