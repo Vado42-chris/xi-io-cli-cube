@@ -38,6 +38,10 @@ test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  assert.equal(adoption.kernel.ref,'64328dd422ec5a751d61c03c382157656272d6f1');
  assert.equal(adoption.kernel.acceptance_state,'ACCEPTED_MAIN');
  assert.equal(adoption.kernel.owner_pr,21);
+ assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21]);
+ assert.equal(adoption.kernel.accepted_generation_history.at(-1).merge_ref,adoption.kernel.ref);
+ assert.equal(adoption.kernel.accepted_generation_history.at(-1).status,'CURRENT_ACCEPTED_MAIN');
+ assert.match(adoption.kernel.currentness_rule,/cannot downgrade currentness/);
  assert.match(adoption.kernel.acceptance_note,/Merged Installer #18 exact accepted source/);
  const directory=new URL('../native/hex/adapter/kernel/xiio_installer/',import.meta.url);
  assert.deepEqual(readdirSync(directory).filter(n=>n.endsWith('.py')).sort(),Object.keys(adoption.kernel.files_unchanged_sha256).sort());
