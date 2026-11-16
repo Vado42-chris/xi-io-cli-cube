@@ -42,7 +42,7 @@ test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).merge_ref,adoption.kernel.ref);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).status,'CURRENT_ACCEPTED_MAIN');
  assert.match(adoption.kernel.currentness_rule,/cannot downgrade currentness/);
- assert.match(adoption.kernel.acceptance_note,/Merged Installer #18 exact accepted source/);
+ assert.match(adoption.kernel.acceptance_note,/vendored kernel remains byte-identical/);
  const directory=new URL('../native/hex/adapter/kernel/xiio_installer/',import.meta.url);
  assert.deepEqual(readdirSync(directory).filter(n=>n.endsWith('.py')).sort(),Object.keys(adoption.kernel.files_unchanged_sha256).sort());
  for(const [name,sha256]of Object.entries(adoption.kernel.files_unchanged_sha256)){
@@ -63,8 +63,9 @@ test('HEX preserves recursive Cube and shared Sphere graph boundaries',()=>{
  assert.equal(a.relationship_graph.framework_candidate_ref,'Vado42-chris/xi-io.net#1481');
  for(const hard of ['CUBE_GRAPH!=DIRECTORY_TREE','SPHERE_RELATIONSHIP_MANY_TO_MANY','NODE_MATERIALIZES_INTERACTION_NOT_USER_IDENTITY'])assert.ok(a.hard.includes(hard));
  for(const hard of ['CUBE_DOES_NOT_OWN_SPHERE','NESTED_CUBE_MAY_BIND_SAME_SPHERE_AS_ANCESTOR','ONE_SPHERE_MAY_BIND_MANY_CUBES','NODE_IDENTITY!=INSTALL_PATH'])assert.ok(a.relationship_graph.hard.includes(hard));
- assert.ok(a.relationship_graph.examples.some(x=>x.includes('veilrift:ttrpg:dnd')));
- assert.ok(a.relationship_graph.examples.some(x=>x.includes('cube:studio')));
+ assert.match(a.relationship_graph.model,/Cube hierarchy is recursive/);
+ assert.match(a.relationship_graph.model,/independent many-to-many graph edges/);
+ assert.match(a.relationship_graph.model,/authorized Cube\/Sphere interaction on a qualified runtime/);
 });
 
 test('HEX preserves Black Box, Sphere connection and Glass Box seam custody',()=>{
@@ -168,5 +169,5 @@ test('Cube Black Box and Sphere connection state meet only through governed Glas
  assert.ok(b.hard.includes('AGENT_ASSIGNMENT_REF!=ACTIVE_WORKER_AUTHORITY'));
  assert.ok(b.hard.includes('GLOBAL_ADMIN_WIDGET!=PRODUCT_FORK'));
  assert.ok(b.hard.includes('CONNECTED_ACCOUNT!=EFFECT_AUTHORITY'));
- assert.ok(b.cube_native_model.recursive_composition.examples.includes('XI-IO Studio -> Desktop -> WordPress plugin Cube'));
+ assert.match(b.cube_native_model.black_box.rule,/stable agent\/role assignment references/);
 });
