@@ -80,9 +80,17 @@ def _safe_existing_file(path: Path, limit: int) -> bytes:
     return data
 
 
+def _validate_url_spelling(raw: object) -> None:
+    # Reject raw bytes that URL parsers/transports discard or reinterpret.
+    # Do not normalize the publisher's approved URL into a different request.
+    _require(isinstance(raw, str) and len(raw) <= 2048
+             and not any(ord(char) <= 32 or ord(char) == 127 or char.isspace()
+                         for char in raw), "BUNDLE_URL_INVALID")
+
+
 def _safe_url(raw: object, allowed_hosts: frozenset[str], *,
               redirect: bool = False) -> str:
-    _require(isinstance(raw, str) and len(raw) <= 2048, "BUNDLE_URL_INVALID")
+    _validate_url_spelling(raw)
     try:
         u = urlsplit(raw)
         port = u.port  # urllib validates the port lazily; keep its errors typed.
@@ -101,6 +109,17 @@ class _HTTPSRedirectOnly(urllib.request.HTTPRedirectHandler):
     def __init__(self, allowed_hosts: frozenset[str]):
         super().__init__()
         self.allowed_hosts = allowed_hosts
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        # urllib parses and quotes Location before redirect_request. Inspect
+        # the selected raw header first so that it cannot erase controls.
+        for name in ("location", "uri"):
+            if name in headers:
+                _validate_url_spelling(headers[name])
+                break
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         _safe_url(newurl, self.allowed_hosts, redirect=True)

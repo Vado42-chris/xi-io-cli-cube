@@ -35,9 +35,9 @@ test('CLI payload manifest still verifies exact adopted bytes',()=>{
 test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  const adoption=json('native/hex/SOURCE-ADOPTION.json');
  assert.equal(adoption.kernel.repository,'Vado42-chris/xi-io_installer');
- assert.equal(adoption.kernel.ref,'9b5aea601a9186426d3950787dcef20b5bbf85bd');
+ assert.equal(adoption.kernel.ref,'64328dd422ec5a751d61c03c382157656272d6f1');
  assert.equal(adoption.kernel.acceptance_state,'ACCEPTED_MAIN');
- assert.equal(adoption.kernel.owner_pr,18);
+ assert.equal(adoption.kernel.owner_pr,21);
  const directory=new URL('../native/hex/adapter/kernel/xiio_installer/',import.meta.url);
  assert.deepEqual(readdirSync(directory).filter(n=>n.endsWith('.py')).sort(),Object.keys(adoption.kernel.files_unchanged_sha256).sort());
  for(const [name,sha256]of Object.entries(adoption.kernel.files_unchanged_sha256)){

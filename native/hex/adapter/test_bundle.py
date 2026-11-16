@@ -1,5 +1,8 @@
 """Actual existing-kernel child bundle tests, disposable paths, zero network/host effects."""
 import hashlib
+import io
+from email.message import Message
+from urllib.request import Request
 import json
 import multiprocessing as mp
 import os
@@ -15,6 +18,7 @@ sys.path.insert(0, str(HERE / "kernel"))
 from child_bundle import (
     BundleError,
     _safe_url,
+    _HTTPSRedirectOnly,
     load_bundle_profile as _load_bundle_profile,
     install_bundle as _install_bundle,
 )
@@ -188,6 +192,76 @@ class BundleTests(unittest.TestCase):
                                    fetch=lambda *_: self.fail("fetch with invalid port"))
                 for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
                     self.assertFalse(Path(f.env[name]).exists())
+
+    def test_raw_url_controls_and_whitespace_refuse_before_fetch_or_write(self):
+        # urlsplit and Request normalize different raw bytes. Validate the exact
+        # approved spelling before either parser can silently discard them.
+        chars = [chr(i) for i in range(33)] + [chr(127), "\u00a0", "\u2003"]
+        for char in chars:
+            for url in (char + "https://github.com/releases/cli.bin",
+                        "https://github.com/releases/c" + char + "li.bin",
+                        "https://github.com/releases/cli.bin" + char):
+                with self.subTest(url=repr(url)):
+                    for redirect in (False, True):
+                        with self.assertRaisesRegex(BundleError, "^BUNDLE_URL_INVALID$"):
+                            _safe_url(url, FIXTURE_RELEASE_HOSTS, redirect=redirect)
+                    f = self.fixture()
+                    f.child("cli")
+                    f.rows[0]["payload_urls"]["cli.bin"] = url
+                    lock, digest = f.lock()
+                    with self.assertRaisesRegex(BundleError, "^BUNDLE_URL_INVALID$"):
+                        install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                                       fetch=lambda *_: self.fail("fetch with raw control"))
+                    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+                        self.assertFalse(Path(f.env[name]).exists())
+        encoded = "https://github.com/releases/my%20asset.bin"
+        self.assertEqual(_safe_url(encoded, FIXTURE_RELEASE_HOSTS), encoded)
+        signed = encoded + "?sig=opaque%20value"
+        self.assertEqual(_safe_url(signed, FIXTURE_RELEASE_HOSTS, redirect=True), signed)
+
+    def test_real_redirect_callbacks_refuse_raw_header_controls_before_normalization(self):
+        # No network: exercise urllib's actual entrypoint, not just redirect_request.
+        for status in (301, 302, 303, 307, 308):
+            for header in ("Location", "URI"):
+                for char in [chr(i) for i in range(33)] + [chr(127), "\u00a0", "\u2003"]:
+                    with self.subTest(status=status, header=header, char=repr(char)):
+                        handler = _HTTPSRedirectOnly(FIXTURE_RELEASE_HOSTS)
+                        class RefuseOpen:
+                            def open(inner, *_args, **_kwargs):
+                                self.fail("redirect dispatched a raw-control header")
+                        handler.parent = RefuseOpen()
+                        request = Request("https://github.com/releases/original.bin")
+                        request.timeout = 1
+                        headers = Message()
+                        headers[header] = "https://github.com/releases/c" + char + "li.bin"
+                        with self.assertRaisesRegex(BundleError, "^BUNDLE_URL_INVALID$"):
+                            getattr(handler, "http_error_" + str(status))(
+                                request, io.BytesIO(b""), status, "Redirect", headers)
+
+    def test_real_redirect_callbacks_preserve_relative_and_signed_encoded_urls(self):
+        for status in (301, 302, 303, 307, 308):
+            for header in ("Location", "URI"):
+                for target, expected in (
+                    ("next%20asset.bin", "https://github.com/releases/next%20asset.bin"),
+                    ("https://github.com/releases/a%20b.bin?sig=opaque%20value&token=a%2Fb%3D",
+                     "https://github.com/releases/a%20b.bin?sig=opaque%20value&token=a%2Fb%3D"),
+                ):
+                    with self.subTest(status=status, header=header, target=target):
+                        calls = []
+                        class RecordOpen:
+                            def open(inner, request, **kwargs):
+                                calls.append((request.full_url, kwargs))
+                                return "TEST_ONLY_RESPONSE"
+                        handler = _HTTPSRedirectOnly(FIXTURE_RELEASE_HOSTS)
+                        handler.parent = RecordOpen()
+                        request = Request("https://github.com/releases/original.bin")
+                        request.timeout = 1
+                        headers = Message()
+                        headers[header] = target
+                        result = getattr(handler, "http_error_" + str(status))(
+                            request, io.BytesIO(b""), status, "Redirect", headers)
+                        self.assertEqual(result, "TEST_ONLY_RESPONSE")
+                        self.assertEqual(calls, [(expected, {"timeout": 1})])
 
     def test_product_profile_installs_only_selected_root_and_transitive_dependencies(self):
         f = self.fixture()
