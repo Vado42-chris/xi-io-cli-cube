@@ -67,7 +67,7 @@ class PrecommandBoundary(unittest.TestCase):
         kernel = Path(__file__).resolve().parent / "kernel/xiio_installer/transaction.py"
         content = kernel.read_bytes()
         blob = hashlib.sha1(b"blob " + str(len(content)).encode() +
-                            b"\\0" + content).hexdigest()
+                            b"\0" + content).hexdigest()
         self.assertEqual(blob, "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2")
         from xiio_installer.transaction import qualify_precommand_manifests
         self.assertTrue(callable(qualify_precommand_manifests))
