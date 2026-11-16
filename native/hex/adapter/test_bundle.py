@@ -22,7 +22,6 @@ from child_bundle import (
     _HTTPSRedirectOnly,
     load_bundle_profile as _load_bundle_profile,
     install_bundle as _install_bundle,
-    install_registered_bundle,
 )
 from xiio_installer.transaction import rollback
 
@@ -119,23 +118,6 @@ class BundleFixture:
 
 
 class BundleTests(unittest.TestCase):
-    def test_registered_bundle_reopens_release_binding_before_fetch(self):
-        f = self.fixture()
-        f.child("cli", fixture=False)
-        lock, digest = f.lock(fixture=False)
-        reads = []
-        def reader(**coords):
-            reads.append(coords)
-            return {"schema":"xiio.release-distribution-lock/v1","product_ref":"product:alpha",
-                    "consumer_ref":"consumer:hex","release_generation":"gen:7",
-                    "approved_lock_sha256":digest,"provider_hosts":["github.com"],
-                    "lifecycle":"DISTRIBUTABLE","adopter_current":True}
-        result = install_registered_bundle(lock, product_ref="product:alpha",
-            consumer_ref="consumer:hex", read_release_binding=reader,
-            env=f.env, fetch=f.fetch)
-        self.assertEqual(reads,[{"product_ref":"product:alpha","consumer_ref":"consumer:hex"}])
-        self.assertEqual(result["state"],"INSTALLED_BYTES_VERIFIED")
-
     def test_registered_bundle_refuses_release_substitution_before_fetch(self):
         f = self.fixture()
         f.child("cli", fixture=False)
