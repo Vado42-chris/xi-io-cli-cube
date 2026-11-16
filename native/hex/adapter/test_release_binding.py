@@ -7,9 +7,9 @@ from native.hex.adapter.child_bundle import BundleError
 class ReleaseBindingTests(unittest.TestCase):
  def fixture(self):
   td=tempfile.TemporaryDirectory(); root=Path(td.name); lock=root/'bundle.json'
-  manifest=root/'manifest.json'; manifest.write_text(json.dumps({"schema_version":"xiio-installer-product-manifest-v1","profile_id":"release-binding-test","product_id":"product-demo","display_name":"Product Demo","version":"1.0.0","channel":"fixture","fixture":True,"payload":[]}))
+  manifest=root/'manifest.json'; manifest.write_text(json.dumps({"schema_version":"xiio-installer-product-manifest-v1","profile_id":"release-binding-test","product_id":"product-demo","display_name":"Product Demo","version":"1.0.0","channel":"fixture","fixture":True,"payload":[{"source":"demo.bin","sha256":"0000000000000000000000000000000000000000000000000000000000000000","size":1,"destination_scope":"data","destination":"xi-io/demo/demo.bin","mode":"0644","overwrite":"fail"}]}))
   msha=hashlib.sha256(manifest.read_bytes()).hexdigest()
-  lock.write_text(json.dumps({"schema_version":"xiio-installer-bundle-profile-v1","profile_id":"demo","fixture":True,"products":[{"role":"demo","product_id":"product-demo","manifest":"manifest.json","manifest_sha256":msha,"depends_on":[],"payload_urls":{}}]},separators=(',',':')))
+  lock.write_text(json.dumps({"schema_version":"xiio-installer-bundle-profile-v1","profile_id":"demo","fixture":True,"products":[{"role":"demo","product_id":"product-demo","manifest":"manifest.json","manifest_sha256":msha,"depends_on":[],"payload_urls":{"demo.bin":"https://releases.example.test/demo.bin"}}]},separators=(',',':')))
   sha=hashlib.sha256(lock.read_bytes()).hexdigest()
   release={"schema":"xiio.framework.distributable-release-projection/v1","release_ref":"release:1","product_ref":"product-demo","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE","effect_authority":False}
   adopter={"schema":"xiio.framework.release-adopter-lock/v1","adopter_lock_ref":"adopter:hex:1","consumer_ref":"consumer:hex","product_ref":"product-demo","release_ref":"release:1","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"state":"ADOPTED_CURRENT","effect_authority":False}
