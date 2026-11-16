@@ -52,6 +52,31 @@ returns CONFIGURATION_REQUIRED. Installing bytes never establishes a session or
 authorizes a job. The installer neither reads credentials nor executes a
 configured connection; that remains separate explicit host admission.
 
+## Provider-neutral bundle release source, source candidate
+
+`child_bundle.load_bundle_profile` and `child_bundle.install_bundle` have no
+default artifact-provider domain. Their `allowed_hosts` argument must come
+from the existing *trusted, current product release* owner along with the exact
+approved bundle-lock SHA-256, product identity, generation and published
+manifest. It is an HTTPS origin restriction, **not** proof of authority by itself.
+
+When that current release-provider binding is unavailable, the bundle refuses
+with `BUNDLE_RELEASE_PROVIDER_UNBOUND` **before network fetch, file staging or
+product installation**. Invalid private, wildcard or malformed hostname
+declarations refuse with `BUNDLE_RELEASE_PROVIDER_HOST_INVALID`. Initial URLs
+remain HTTPS-only and credential-free; redirects may use bounded signed query
+parameters only at an explicitly approved host. Neither fixture flags nor a
+provider-native GitHub URL can create Work, Ward approval, entitlement,
+customer Sphere access or an installed/running Node.
+
+The test suite supplies `github.com` as a **local synthetic fixture host**
+and independently verifies a different approved HTTPS provider. No special
+GitHub/Cloudflare/tenant domain is baked into the production bundle installer.
+This release-source configuration is separate from local installation, which
+requires no XI-IO account login. The native product-selection receiver still
+needs to consume the trusted release-host binding from its existing
+registration/authority owner before this candidate is releasable.
+
 ## Intentional limitations
 
 - Fresh installation has no prior CLI generation; `rollback_available=false`.
