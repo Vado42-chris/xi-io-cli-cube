@@ -121,6 +121,47 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(len(fetched), 3)
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/unrelated/unrelated.bin").exists())
 
+    def test_precommand_noexec_before_download_and_first_product_effect(self):
+        f = self.fixture()
+        f.child("cli")
+        manifest_path = f.root / "cli.manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["payload"][0]["mode"] = "0755"
+        raw = json.dumps(manifest, sort_keys=True).encode()
+        manifest_path.write_bytes(raw)
+        f.rows[0]["manifest_sha256"] = sha(raw)
+        lock, digest = f.lock()
+        fetched = []
+        def not_fetched(*args):
+            fetched.append(args)
+            raise AssertionError("DOWNLOAD_WAS_ALLOWED_BEFORE_FILESYSTEM_PROOF")
+        with patch("xiio_installer.transaction.subprocess.run",
+                   side_effect=PermissionError("NTFS/noexec EACCES")) as launch:
+            with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
+                install_bundle(lock, approved_lock_sha256=digest,
+                               env=f.env, fetch=not_fetched)
+            launch.assert_called()
+        self.assertEqual(fetched, [])
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        self.assertFalse(state_root.exists())
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
+        self.assertEqual(list(f.root.rglob(".xiio-fs-probe-*")), [])
+
+    def test_precommand_must_cover_every_child_before_download(self):
+        f = self.fixture()
+        f.child("cli").child("bins", depends_on=("cli",))
+        lock, digest = f.lock()
+        checked = []
+        def bounded_probe(manifests, roots, **kwargs):
+            checked.extend((item[0].product_id, item[1]) for item in manifests)
+            raise ValueError("UNQUALIFIED_SECOND_CHILD")
+        with patch("child_bundle.qualify_precommand_manifests",
+                   side_effect=bounded_probe):
+            with self.assertRaises(ValueError):
+                install_bundle(lock, approved_lock_sha256=digest,
+                               env=f.env, fetch=lambda *_: self.fail("download before preflight"))
+        self.assertEqual([item[0] for item in checked], ["xi-io-cli", "xi-io-bins"])
+
     def test_product_profile_refuses_extra_unrelated_role_instead_of_silently_installing_it(self):
         f = self.fixture()
         f.child("dependency").child("selected", depends_on=("dependency",)).child("unrelated")
