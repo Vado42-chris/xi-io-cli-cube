@@ -9,6 +9,7 @@ from typing import Any
 from urllib.request import urlopen
 
 from .runtime_profile import RuntimeProfile, RuntimeProfileError, compile_user_consent
+from .runtime_binding import materialize_runtime_bindings
 
 class RuntimeActivationError(RuntimeError):
     pass
@@ -57,6 +58,9 @@ def activate_runtime_profile(
     consent_receipt_path:Path,
     activation_receipt_path:Path,
     principal_ref:str="local-user",
+    runtime_binding_profile:dict[str,Any]|None=None,
+    dependency_binding_receipts:dict[str,dict[str,Any]]|None=None,
+    runtime_binding_destination:Path|None=None,
 )->dict[str,Any]:
     consent=compile_user_consent(profile,grants=grants,update_policy=update_policy,principal_ref=principal_ref)
     allowed=set(consent["permissions"])
@@ -66,6 +70,15 @@ def activate_runtime_profile(
         unit=_run(["systemctl","--user","cat",dep.expected_unit],timeout=5)
         if unit.returncode!=0:
             raise RuntimeActivationError("RUNTIME_DEPENDENCY_NOT_INSTALLED:"+dep.dependency_id)
+    binding_receipt=None
+    if runtime_binding_profile is not None:
+        if dependency_binding_receipts is None or runtime_binding_destination is None:
+            raise RuntimeActivationError("RUNTIME_BINDING_INPUTS_REQUIRED")
+        try:
+            binding_receipt=materialize_runtime_bindings(profile,runtime_binding_profile,dependency_binding_receipts,runtime_binding_destination)
+        except Exception as exc:
+            raise RuntimeActivationError("RUNTIME_BINDING_MATERIALIZATION_FAILED:"+str(exc)) from exc
+
     selected=[]
     for service in profile.services:
         if not set(service.required_permissions).issubset(allowed):
@@ -122,6 +135,7 @@ def activate_runtime_profile(
         "permissions":consent["permissions"],
         "update_policy":consent["update_policy"],
         "services":activated,
+        "runtime_binding":binding_receipt,
         "readback_verified":all(row["active"] for row in activated),
         "provider_effect":False,
         "hard":[
