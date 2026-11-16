@@ -344,41 +344,6 @@ def _secure_ensure_state_root(state_root: Path) -> int:
 
 
 
-def install_registered_bundle(lock: Path, *, product_ref: str, consumer_ref: str,
-                              read_release_binding, env: dict[str, str] | None = None,
-                              fetch=None, fail_after_product: int | None = None):
-    """Install only from an independently reopened framework release/adopter binding."""
-    _require(isinstance(product_ref, str) and bool(product_ref),
-             "BUNDLE_PRODUCT_REF_REQUIRED")
-    _require(isinstance(consumer_ref, str) and bool(consumer_ref),
-             "BUNDLE_CONSUMER_REF_REQUIRED")
-    _require(callable(read_release_binding), "BUNDLE_RELEASE_BINDING_READER_UNBOUND")
-    binding = read_release_binding(product_ref=product_ref, consumer_ref=consumer_ref)
-    _require(isinstance(binding, dict)
-             and binding.get("schema") == "xiio.release-distribution-lock/v1",
-             "BUNDLE_RELEASE_BINDING_INVALID")
-    _require(binding.get("product_ref") == product_ref,
-             "BUNDLE_RELEASE_PRODUCT_MISMATCH")
-    _require(binding.get("consumer_ref") == consumer_ref,
-             "BUNDLE_RELEASE_CONSUMER_MISMATCH")
-    _require(binding.get("lifecycle") == "DISTRIBUTABLE"
-             and binding.get("adopter_current") is True,
-             "BUNDLE_RELEASE_BINDING_NOT_CURRENT")
-    approved = binding.get("approved_lock_sha256")
-    _require(isinstance(approved, str) and SHA256.fullmatch(approved),
-             "BUNDLE_RELEASE_LOCK_INVALID")
-    hosts = binding.get("provider_hosts")
-    _require(isinstance(hosts, (list, tuple)) and bool(hosts),
-             "BUNDLE_RELEASE_PROVIDER_UNBOUND")
-    allowed_hosts = _bound_release_hosts(frozenset(hosts))
-    # The binding is reopened before the lock is parsed or any network/filesystem
-    # effect. install_bundle independently compares the exact lock bytes to the
-    # authoritative digest and preserves the existing transaction custody.
-    return install_bundle(lock, approved_lock_sha256=approved, env=env,
-                          allowed_hosts=allowed_hosts, fetch=fetch,
-                          fail_after_product=fail_after_product)
-
-
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
                    env: dict[str, str] | None = None,
                    allowed_hosts: frozenset[str] | None = None,
