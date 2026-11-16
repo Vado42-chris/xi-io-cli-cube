@@ -1,5 +1,8 @@
 import unittest,tempfile,subprocess,json,os,shutil
 from pathlib import Path
+from unittest.mock import patch
+import installer_adapter as native_adapter
+from xiio_installer.transaction import TransactionError
 ADAPTER=Path(__file__).resolve().parent/'installer_adapter.py'
 NODE=shutil.which('node')
 class RealPayload(unittest.TestCase):
@@ -43,4 +46,30 @@ class RealPayload(unittest.TestCase):
   self.assertFalse(self.call({'action':'apply',**a})['ok'])
   Path(p['prefix']).mkdir(parents=True);(Path(p['prefix'])/'unrelated').write_text('preserve')
   a['approved']=True;self.assertFalse(self.call({'action':'apply',**a})['ok']);self.assertEqual((Path(p['prefix'])/'unrelated').read_text(),'preserve')
+
+ def test_cli_filesystem_failure_refuses_before_connection_install(self):
+  p=self.prepare();self.assertFalse(Path(p['prefix']).exists())
+  base=self.home/'state/xi-io/installer'
+  with patch.dict(os.environ,self.env), patch.object(native_adapter,'_preflight_filesystems',
+     side_effect=[None,TransactionError('filesystem preflight: noexec CLI destination')]) as probes:
+   with self.assertRaisesRegex(TransactionError,'noexec CLI destination'):
+    native_adapter.handle({'action':'apply','plan_id':p['plan_id'],
+                           'approval_digest':p['approval_digest'],'approved':True})
+  self.assertEqual(probes.call_count,2,'connection and CLI must both be qualified before effects')
+  self.assertFalse(Path(p['prefix']).exists(),'no installed connection or CLI payload may remain')
+  self.assertFalse((base/'operations'/(p['plan_id']+'-apply.jsonl')).exists(),
+                   'a capability denial must not be misreported as an attempted install')
+
+ def test_native_preflight_runs_before_connection_component_apply(self):
+  p=self.prepare();base=self.home/'state/xi-io/installer'
+  with patch.dict(os.environ,self.env), patch.object(native_adapter,'qualify_apply_targets',
+       side_effect=TransactionError('filesystem preflight: unsupported')) as preflight:
+   with patch.object(native_adapter.connection_profile,'apply',side_effect=AssertionError('CONNECTION_EFFECT_RAN')) as effect:
+    with self.assertRaisesRegex(TransactionError,'filesystem preflight: unsupported'):
+     native_adapter.handle({'action':'apply','plan_id':p['plan_id'],
+                            'approval_digest':p['approval_digest'],'approved':True})
+    self.assertEqual(preflight.call_count,1)
+    effect.assert_not_called()
+  self.assertFalse(Path(p['prefix']).exists())
+
 if __name__=='__main__':unittest.main()
