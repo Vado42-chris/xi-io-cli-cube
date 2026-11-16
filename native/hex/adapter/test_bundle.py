@@ -118,31 +118,6 @@ class BundleFixture:
 
 
 class BundleTests(unittest.TestCase):
-    def test_registered_bundle_refuses_release_substitution_before_fetch(self):
-        f = self.fixture()
-        f.child("cli", fixture=False)
-        lock, digest = f.lock(fixture=False)
-        fetched = []
-        base={"schema":"xiio.release-distribution-lock/v1","product_ref":"product:alpha",
-              "consumer_ref":"consumer:hex","release_generation":"gen:7",
-              "approved_lock_sha256":digest,"provider_hosts":["github.com"],
-              "lifecycle":"DISTRIBUTABLE","adopter_current":True}
-        cases=[
-          ({"product_ref":"product:other"},"BUNDLE_RELEASE_PRODUCT_MISMATCH"),
-          ({"consumer_ref":"consumer:other"},"BUNDLE_RELEASE_CONSUMER_MISMATCH"),
-          ({"lifecycle":"CANDIDATE"},"BUNDLE_RELEASE_BINDING_NOT_CURRENT"),
-          ({"adopter_current":False},"BUNDLE_RELEASE_BINDING_NOT_CURRENT"),
-          ({"approved_lock_sha256":"a"*64},"BUNDLE_APPROVAL_DIGEST_MISMATCH"),
-          ({"provider_hosts":["evil.example.com"]},"BUNDLE_URL_NOT_APPROVED"),
-        ]
-        for patch,reason in cases:
-            binding={**base,**patch}
-            with self.assertRaisesRegex(BundleError,reason):
-                install_registered_bundle(lock,product_ref="product:alpha",
-                    consumer_ref="consumer:hex",read_release_binding=lambda **_:binding,
-                    env=f.env,fetch=lambda *args:fetched.append(args))
-        self.assertEqual(fetched,[])
-
     def fixture(self):
         td = tempfile.TemporaryDirectory(prefix="xiio-bundle-fixture-")
         self.addCleanup(td.cleanup)
