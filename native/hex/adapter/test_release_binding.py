@@ -1,7 +1,7 @@
 import hashlib,json,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
-from native.hex.adapter.release_binding import install_from_release_binding
+from native.hex.adapter.release_binding import install_from_release_binding,install_from_distribution_reader
 from native.hex.adapter.child_bundle import BundleError
 
 class ReleaseBindingTests(unittest.TestCase):
@@ -35,4 +35,44 @@ class ReleaseBindingTests(unittest.TestCase):
     with self.assertRaisesRegex(BundleError,code):
      install_from_release_binding(lock,release=rr,adopter=aa,expected_product_ref="product-demo")
     install.assert_not_called()
+
+ def test_framework_distribution_reader_is_authority_source(self):
+  td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
+  binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
+   "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
+   "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
+   "adopter_current":True,"effect_authority":False,"installed":False}
+  reads=[]
+  def reader(**coords): reads.append(coords); return binding
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED"}) as install:
+   out=install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",
+      read_release_distribution=reader,fetch=lambda *_:None)
+   self.assertEqual(out["state"],"INSTALLED")
+   self.assertEqual(reads,[{"product_ref":"product-demo","consumer_ref":"consumer:hex"}])
+   self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
+
+ def test_framework_distribution_substitution_refuses_before_install(self):
+  td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
+  base={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
+   "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
+   "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
+   "adopter_current":True,"effect_authority":False,"installed":False}
+  cases=[({"product_ref":"other"},"BUNDLE_RELEASE_PRODUCT_MISMATCH"),
+         ({"consumer_ref":"other"},"BUNDLE_RELEASE_CONSUMER_MISMATCH"),
+         ({"lifecycle":"CANDIDATE"},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
+         ({"adopter_current":False},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
+         ({"effect_authority":True},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
+         ({"installed":True},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
+         ({"approved_lock_sha256":"a"*64},"BUNDLE_RELEASE_LOCK_DIGEST_MISMATCH"),
+         ({"provider_hosts":["evil.example.test"]},"BUNDLE_URL_NOT_APPROVED")]
+  for patching,code in cases:
+   binding={**base,**patching}
+   with self.subTest(code=code),patch('native.hex.adapter.release_binding.install_bundle') as install:
+    with self.assertRaisesRegex(BundleError,code):
+     install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",
+       read_release_distribution=lambda **_:binding)
+    install.assert_not_called()
+
 if __name__=="__main__":unittest.main()
