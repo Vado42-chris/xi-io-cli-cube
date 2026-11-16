@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import json
 import os
+import platform
 import re
 import stat
 import tempfile
@@ -20,7 +21,8 @@ from urllib.parse import urlsplit
 
 from xiio_installer.discovery import xdg_roots
 from xiio_installer.manifest import load_manifest, sha256_file, verify_payload
-from xiio_installer.transaction import apply_install, plan_install, rollback
+from xiio_installer.transaction import (TransactionError, apply_install, plan_install,
+    qualify_precommand_install_plans, qualify_precommand_manifests, rollback)
 
 SCHEMA = "xiio-installer-bundle-profile-v1"
 BASELINE_ROLES = frozenset(("cli", "ibal", "switchboard", "bins", "ward", "inbox"))
@@ -322,6 +324,26 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
     roots = xdg_roots(env)
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
+    observed_machine = {
+        "os": platform.system(), "architecture": platform.machine(), "family": "linux"
+    }
+    receipts = {}
+    for role in profile["ordered_roles"]:
+        manifest = profile["products"][role][0]
+        receipts[role] = state_root / (role + "-" + manifest.version.replace("/", "-")
+                                       + "-" + approved_lock_sha256[:12] + ".receipt.json")
+    # Verify the actual destination filesystems BEFORE staging and any
+    # download, payload installation, executable command or connection effect.
+    # The only side effects here are disposable probe files cleaned by Installer.
+    try:
+        filesystem = qualify_precommand_manifests(
+            [(profile["products"][role][0], receipts[role])
+             for role in profile["ordered_roles"]],
+            roots, machine_profile=observed_machine,
+            additional_targets={state_root: {0o600}},
+        )
+    except (TransactionError, OSError) as exc:
+        raise BundleError("BUNDLE_FILESYSTEM_UNQUALIFIED") from exc
 
     state_fd = _secure_ensure_state_root(state_root)
     lock_fd = None
@@ -374,15 +396,25 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             _require(load_bundle_profile(lock, allowed_hosts=allowed_hosts)["lock_sha256"]
                      == approved_lock_sha256, "BUNDLE_LOCK_CHANGED_AFTER_ACQUISITION")
 
+            plans = []
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
-                plan_install(manifest, staged[role], env)
+                plans.append((plan_install(manifest, staged[role], env), roots,
+                              receipts[role]))
+            # A new destination/profile after download cannot bypass the
+            # Installer's current pre-command qualification.
+            try:
+                qualify_precommand_install_plans(
+                    plans, machine_profile=observed_machine,
+                    additional_targets={state_root: {0o600}},
+                )
+            except (TransactionError, OSError) as exc:
+                raise BundleError("BUNDLE_FILESYSTEM_CHANGED_BEFORE_APPLY") from exc
             applied = []
             try:
                 for role in profile["ordered_roles"]:
                     manifest = profile["products"][role][0]
-                    receipt = state_root / (role + "-" + manifest.version.replace("/", "-")
-                                            + "-" + approved_lock_sha256[:12] + ".receipt.json")
+                    receipt = receipts[role]
                     _require(not receipt.exists() and not receipt.is_symlink(),
                              "BUNDLE_RECEIPT_ALREADY_EXISTS")
                     apply_install(manifest, staged[role], receipt, env)
@@ -407,6 +439,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 "lock_sha256": approved_lock_sha256,
                 "roles": list(profile["ordered_roles"]),
                 "receipt_count": len(applied),
+                "filesystem_precommand_state": filesystem["state"],
                 "runtime_qualified": False, "authority_granted": False,
                 "device_connected": False, "child_services_started": False
             }
