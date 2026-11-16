@@ -18,6 +18,7 @@ from .service_profile import compile_service_activation, load_service_profile
 from .update_request import authorize_update, load_update_request
 from .runtime_profile import load_runtime_profile, qualify_update_request
 from .runtime_activation import activate_runtime_profile, revoke_runtime_consent
+from .runtime_binding import load_runtime_binding_profile, runtime_binding_destination
 
 
 def _refs_from_items(items: list[Any]) -> list[dict[str, Any]]:
@@ -192,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     ar.add_argument("--grant", action="append", default=[])
     ar.add_argument("--update-policy", choices=["MANUAL","SECURITY_AUTO","MANAGED"])
     ar.add_argument("--principal-ref", default="local-user")
+    ar.add_argument("--runtime-bindings", type=Path)
+    ar.add_argument("--dependency-binding-receipts", type=Path)
     ar.add_argument("--approve", action="store_true", help="required for runtime activation")
     rr = sub.add_parser("revoke-runtime-consent")
     rr.add_argument("consent_receipt", type=Path)
@@ -360,6 +363,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["state"]=="AUTHORIZED_FOR_WARD_ADMISSION" else 3
         if args.cmd == "activate-runtime":
             profile = load_runtime_profile(args.runtime_profile)
+            binding_profile=load_runtime_binding_profile(args.runtime_bindings) if args.runtime_bindings else None
+            dependency_receipts=json.loads(args.dependency_binding_receipts.read_text(encoding="utf-8")) if args.dependency_binding_receipts else None
+            if (args.runtime_bindings is None)!=(args.dependency_binding_receipts is None):
+                raise RuntimeError("RUNTIME_BINDING_ARGUMENTS_MUST_BE_PAIRED")
+            binding_destination=runtime_binding_destination(binding_profile) if binding_profile else None
             result = activate_runtime_profile(
                 profile,
                 grants=args.grant,
@@ -367,6 +375,9 @@ def main(argv: list[str] | None = None) -> int:
                 consent_receipt_path=args.consent_receipt,
                 activation_receipt_path=args.activation_receipt,
                 principal_ref=args.principal_ref,
+                runtime_binding_profile=binding_profile,
+                dependency_binding_receipts=dependency_receipts,
+                runtime_binding_destination=binding_destination,
             )
             finalized = _finish_terminal_or_report_unknown(
                 journal, "passed", "runtime profile activated with local consent and service readback",

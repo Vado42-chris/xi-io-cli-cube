@@ -30,6 +30,16 @@ def load_runtime_binding_profile(path:Path)->dict[str,Any]:
         seen.add(key);_text(row.get("source_role"),f"RUNTIME_BINDING_{i}_ROLE_REQUIRED");_text(row.get("source_field"),f"RUNTIME_BINDING_{i}_FIELD_REQUIRED")
     return raw
 
+def runtime_binding_destination(binding_profile:dict[str,Any],env:dict[str,str]|None=None)->Path:
+    env=env or os.environ
+    home=Path(env.get("HOME") or str(Path.home())).resolve()
+    root=Path(env.get("XDG_CONFIG_HOME") or home/".config").resolve()
+    destination=Path(_text(binding_profile.get("destination"),"RUNTIME_BINDING_DESTINATION_REQUIRED"))
+    if destination.is_absolute() or ".." in destination.parts: raise RuntimeBindingError("RUNTIME_BINDING_DESTINATION_UNSAFE")
+    target=(root/destination).resolve()
+    if target==root or root not in target.parents: raise RuntimeBindingError("RUNTIME_BINDING_DESTINATION_OUTSIDE_CONFIG")
+    return target
+
 def materialize_runtime_bindings(profile:RuntimeProfile,binding_profile:dict[str,Any],dependency_receipts:dict[str,dict[str,Any]],destination:Path)->dict[str,Any]:
     if binding_profile.get("product_id")!=profile.product_id: raise RuntimeBindingError("RUNTIME_BINDING_PRODUCT_MISMATCH")
     deps={d.dependency_id:d for d in profile.dependencies}
