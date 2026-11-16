@@ -50,12 +50,12 @@ class RealPayload(unittest.TestCase):
  def test_cli_filesystem_failure_refuses_before_connection_install(self):
   p=self.prepare();self.assertFalse(Path(p['prefix']).exists())
   base=self.home/'state/xi-io/installer'
-  with patch.dict(os.environ,self.env), patch.object(native_adapter,'_preflight_filesystems',
-     side_effect=[None,TransactionError('filesystem preflight: noexec CLI destination')]) as probes:
+  with patch.dict(os.environ,self.env), patch.object(native_adapter,'qualify_precommand_manifests',
+     side_effect=TransactionError('filesystem preflight: noexec CLI destination')) as probes:
    with self.assertRaisesRegex(TransactionError,'noexec CLI destination'):
     native_adapter.handle({'action':'apply','plan_id':p['plan_id'],
                            'approval_digest':p['approval_digest'],'approved':True})
-  self.assertEqual(probes.call_count,2,'connection and CLI must both be qualified before effects')
+  self.assertEqual(probes.call_count,1,'shared Installer must qualify both targets in one admission')
   self.assertFalse(Path(p['prefix']).exists(),'no installed connection or CLI payload may remain')
   self.assertFalse((base/'operations'/(p['plan_id']+'-apply.jsonl')).exists(),
                    'a capability denial must not be misreported as an attempted install')
