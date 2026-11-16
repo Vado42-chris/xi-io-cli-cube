@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import json
 import os
+import platform
 import re
 import stat
 import tempfile
@@ -21,7 +22,7 @@ from urllib.parse import urlsplit
 
 from xiio_installer.discovery import xdg_roots
 from xiio_installer.manifest import load_manifest, sha256_file, verify_payload
-from xiio_installer.transaction import apply_install, plan_install, rollback
+from xiio_installer.transaction import apply_install, plan_install, rollback, qualify_precommand_manifests
 
 SCHEMA = "xiio-installer-bundle-profile-v1"
 BASELINE_ROLES = frozenset(("cli", "ibal", "switchboard", "bins", "ward", "inbox"))
@@ -504,6 +505,26 @@ def bundle_apply_custody(lock: Path, *, approved_lock_sha256: str,
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    # Prequalify the entire immutable child manifest set before acquiring the
+    # first download, creating a custody journal, or applying any child.
+    roots = xdg_roots(env)
+    state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
+    manifests = [
+        (profile["products"][role][0],
+         _bundle_receipt_path(state_root, role, profile["products"][role][0],
+                              approved_lock_sha256))
+        for role in profile["ordered_roles"]
+    ]
+    qualification = qualify_precommand_manifests(
+        manifests, roots,
+        machine_profile={"os": platform.system(),
+                         "architecture": platform.machine(),
+                         "family": "linux"},
+        additional_targets={state_root: {0o600}},
+    )
+    _require(qualification.get("state") == "QUALIFIED_FOR_BOUNDED_LOCAL_APPLY"
+             and qualification.get("account_login_required") is False,
+             "BUNDLE_PRECOMMAND_FILESYSTEM_QUALIFICATION_REQUIRED")
     _roots, state_root = _bundle_state_root(profile, env, create=True)
     fd = _open_bundle_apply_lock(state_root)
     custody = _BundleApplyCustody(profile["profile_id"], approved_lock_sha256, state_root, fd)
