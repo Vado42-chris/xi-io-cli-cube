@@ -326,7 +326,7 @@ class BundleTests(unittest.TestCase):
         f.env["XDG_STATE_HOME"] = str(state_link)
         f.child("cli")
         lock, digest = f.lock()
-        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+        with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
             install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
         self.assertFalse((outside / "xi-io").exists())
 
@@ -339,7 +339,7 @@ class BundleTests(unittest.TestCase):
         (state_dir / "xi-io").symlink_to(outside, target_is_directory=True)
         f.child("cli")
         lock, digest = f.lock()
-        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+        with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
             install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
         self.assertFalse((outside / "installer").exists())
 
@@ -352,7 +352,7 @@ class BundleTests(unittest.TestCase):
         (bundles_dir / "core-test").symlink_to(outside, target_is_directory=True)
         f.child("cli")
         lock, digest = f.lock()
-        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+        with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
             install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
         self.assertEqual(len(list(outside.iterdir())), 0)
 
@@ -366,7 +366,7 @@ class BundleTests(unittest.TestCase):
         lock, digest = f.lock()
         # When non-root or when permissions fail at the OS level:
         with patch("os.mkdir", side_effect=PermissionError(13, "Permission denied")):
-            with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+            with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
                 install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
 
     def test_cube9_file_ancestor_refused(self):
@@ -376,7 +376,7 @@ class BundleTests(unittest.TestCase):
         (state_dir / "xi-io").write_text("regular file")
         f.child("cli")
         lock, digest = f.lock()
-        with self.assertRaisesRegex(BundleError, "BUNDLE_STATE_ROOT_UNTRUSTED"):
+        with self.assertRaisesRegex(BundleError, "BUNDLE_FILESYSTEM_UNQUALIFIED"):
             install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
 
     def test_cube9_concurrent_symlink_swap_refused(self):
