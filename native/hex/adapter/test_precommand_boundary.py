@@ -49,6 +49,18 @@ class PrecommandBoundary(unittest.TestCase):
         for target in ["prefix/'versions'", "prefix/'bin'", "base/'operations'"]:
             self.assertIn(target, source)
 
+    def test_launcher_repair_qualifies_before_node_and_repair_command(self):
+        source = inspect.getsource(installer_adapter.handle_repair)
+        qualified = source.index("qualification = qualify_precommand_targets(")
+        node = source.index("verify_node(p)")
+        journal = source.index("journal.start('Repair only exact reviewed existing CLI launcher'")
+        command = source.index("str(SOURCE/REPAIR_INSTALLER)")
+        self.assertLess(qualified, node)
+        self.assertLess(qualified, journal)
+        self.assertLess(journal, command)
+        self.assertIn("p['launcher_before']['mode']", source)
+        self.assertIn("Path(p['backup']).parent", source)
+
     def test_one_accepted_kernel_owns_precommand_qualification(self):
         from xiio_installer.transaction import qualify_precommand_manifests
         self.assertTrue(callable(qualify_precommand_manifests))
