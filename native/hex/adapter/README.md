@@ -19,15 +19,20 @@ Upstream CLI source is pinned in `../cli-source/SOURCE.json`; seven payload file
 are Git-blob-identical. Only `install.mjs` is adapted: `--packaged-source` verifies
 all manifest files into memory before destination effects, then supplies bytes
 to the existing generation/receipt/launcher/pointer implementation. No gh or
-network is needed. Installer kernel modules are copied unchanged from
-`xi-io_installer@15ce1769b773b3882e3f3965945ca91a29df98ec`.
+network is needed. Installer kernel modules are copied unchanged from the accepted
+`xi-io_installer` main generation `62d11ad2384be574578d50ab85bc29982b5494f8`,
+as pinned in `native/hex/SOURCE-ADOPTION.json`. Source custody is not proof
+of installed customer runtime or entitlement.
 
 CLI owns its generation/launcher/pointer mutations and previous-generation rollback.
 The connection files and finite launcher use the existing kernel manifest and
-transaction receipt, not a new copy/rollback engine. Connection is applied first;
-if CLI fails while its prior current pointer is preserved, the existing kernel
-rolls back connection changes. Changed/uncertain CLI pointers remain UNKNOWN for
-reconciliation; there is no false cross-component atomicity claim.
+transaction receipt, not a new copy/rollback engine. **Before either effect**,
+the accepted Installer pre-command API qualifies the connection and CLI
+destinations, including the executable filesystem, receipt and rollback roots.
+Only then is the connection component applied first; if CLI fails while its
+prior current pointer is preserved, the existing kernel rolls back connection
+changes. Changed/uncertain CLI pointers remain UNKNOWN for reconciliation;
+there is no false cross-component atomicity claim.
 The kernel's `OperationJournal` owns started/terminal/unknown operation evidence.
 Native plan JSON holds immutable review input and is not a second outcome ledger.
 Prepare does not write the target. Plan binds packaged bytes, selected Node hash,
@@ -51,6 +56,31 @@ XIIO_DEVICE_REF, XIIO_DEVICE_BROKER_URL and XIIO_DEVICE_PORTS_MODULE bindings it
 returns CONFIGURATION_REQUIRED. Installing bytes never establishes a session or
 authorizes a job. The installer neither reads credentials nor executes a
 configured connection; that remains separate explicit host admission.
+
+## Provider-neutral bundle release source, source candidate
+
+`child_bundle.load_bundle_profile` and `child_bundle.install_bundle` have no
+default artifact-provider domain. Their `allowed_hosts` argument must come
+from the existing *trusted, current product release* owner along with the exact
+approved bundle-lock SHA-256, product identity, generation and published
+manifest. It is an HTTPS origin restriction, **not** proof of authority by itself.
+
+When that current release-provider binding is unavailable, the bundle refuses
+with `BUNDLE_RELEASE_PROVIDER_UNBOUND` **before network fetch, file staging or
+product installation**. Invalid private, wildcard or malformed hostname
+declarations refuse with `BUNDLE_RELEASE_PROVIDER_HOST_INVALID`. Initial URLs
+remain HTTPS-only and credential-free; redirects may use bounded signed query
+parameters only at an explicitly approved host. Neither fixture flags nor a
+provider-native GitHub URL can create Work, Ward approval, entitlement,
+customer Sphere access or an installed/running Node.
+
+The test suite supplies `github.com` as a **local synthetic fixture host**
+and independently verifies a different approved HTTPS provider. No special
+GitHub/Cloudflare/tenant domain is baked into the production bundle installer.
+This release-source configuration is separate from local installation, which
+requires no XI-IO account login. The native product-selection receiver still
+needs to consume the trusted release-host binding from its existing
+registration/authority owner before this candidate is releasable.
 
 ## Intentional limitations
 

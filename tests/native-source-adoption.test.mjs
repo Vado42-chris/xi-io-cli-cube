@@ -35,9 +35,14 @@ test('CLI payload manifest still verifies exact adopted bytes',()=>{
 test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  const adoption=json('native/hex/SOURCE-ADOPTION.json');
  assert.equal(adoption.kernel.repository,'Vado42-chris/xi-io_installer');
- assert.equal(adoption.kernel.ref,'62d11ad2384be574578d50ab85bc29982b5494f8');
+ assert.equal(adoption.kernel.ref,'64328dd422ec5a751d61c03c382157656272d6f1');
  assert.equal(adoption.kernel.acceptance_state,'ACCEPTED_MAIN');
- assert.equal(adoption.kernel.owner_pr,15);
+ assert.equal(adoption.kernel.owner_pr,21);
+ assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21]);
+ assert.equal(adoption.kernel.accepted_generation_history.at(-1).merge_ref,adoption.kernel.ref);
+ assert.equal(adoption.kernel.accepted_generation_history.at(-1).status,'CURRENT_ACCEPTED_MAIN');
+ assert.match(adoption.kernel.currentness_rule,/cannot downgrade currentness/);
+ assert.match(adoption.kernel.acceptance_note,/vendored kernel remains byte-identical/);
  const directory=new URL('../native/hex/adapter/kernel/xiio_installer/',import.meta.url);
  assert.deepEqual(readdirSync(directory).filter(n=>n.endsWith('.py')).sort(),Object.keys(adoption.kernel.files_unchanged_sha256).sort());
  for(const [name,sha256]of Object.entries(adoption.kernel.files_unchanged_sha256)){
@@ -53,6 +58,26 @@ test('packaging provenance adds no runtime schema, registry or authority',()=>{
  assert.match(provenance.inherited_donor_portability_debt,/historical Aries\/Loki/);
  assert.match(provenance.inherited_donor_portability_debt,/requires repinning\/requalification/);
 });
+test('HEX preserves recursive Cube and shared Sphere graph boundaries',()=>{
+ const a=json('native/hex/SOURCE-ADOPTION.json').architecture_boundaries;
+ assert.equal(a.relationship_graph.framework_candidate_ref,'Vado42-chris/xi-io.net#1481');
+ for(const hard of ['CUBE_GRAPH!=DIRECTORY_TREE','SPHERE_RELATIONSHIP_MANY_TO_MANY','NODE_MATERIALIZES_INTERACTION_NOT_USER_IDENTITY'])assert.ok(a.hard.includes(hard));
+ for(const hard of ['CUBE_DOES_NOT_OWN_SPHERE','NESTED_CUBE_MAY_BIND_SAME_SPHERE_AS_ANCESTOR','ONE_SPHERE_MAY_BIND_MANY_CUBES','NODE_IDENTITY!=INSTALL_PATH'])assert.ok(a.relationship_graph.hard.includes(hard));
+ assert.match(a.relationship_graph.model,/Cube hierarchy is recursive/);
+ assert.match(a.relationship_graph.model,/independent many-to-many graph edges/);
+ assert.match(a.relationship_graph.model,/authorized Cube\/Sphere interaction on a qualified runtime/);
+});
+
+test('HEX preserves Black Box, Sphere connection and Glass Box seam custody',()=>{
+ const a=json('native/hex/SOURCE-ADOPTION.json').architecture_boundaries;
+ const seam=a.cube_sphere_seam;
+ assert.equal(seam.black_box_custody,'CUBE');
+ assert.equal(seam.sphere_connection_custody,'SPHERE_VIA_BINS');
+ assert.equal(seam.glass_box_custody,'NODE_SEAM_PROJECTION');
+ assert.equal(seam.global_admin,'SHARED_SERVICE_PROJECTED_TO_APPLICABLE_NODES');
+ for(const hard of ['BLACK_BOX!=CUSTOMER_SECRET_STORE','BLACK_BOX!=LIVE_WORKER_ASSIGNMENT','SPHERE_CONNECTION!=CUBE_DEFAULT','GLASS_BOX!=SECOND_TRUTH_STORE','CONNECTED_PROVIDER!=AUTHORIZED_EFFECT','ADMIN_WIDGET!=COPIED_ADMIN_DATABASE'])assert.ok(seam.hard.includes(hard));
+});
+
 test('launcher-only repair consumes exact qualified PR15 without changing packaged install transport',()=>{
  const base='native/hex/cli-source/';const m=json(base+'launcher-repair.SOURCE.json');
  assert.equal(m.ref,'0f2b444abbe8f7a99c5f4520b1222c568eba6dd1');assert.equal(m.modifications,false);
@@ -89,4 +114,60 @@ test('current fourteen-file candidate payload and historical repair verifier kee
  assert.equal(repair.verification_resource.path,'launcher-repair.runtime-integrity.mjs');
  assert.equal(createHash('sha256').update(read(base+repair.verification_resource.path)).digest('hex'),repair.verification_resource.sha256);
  assert.notEqual(repair.verification_resource.sha256,payload.files['src/runtime-integrity.mjs'].sha256);
+});
+
+test('native Cube and Sphere semantics stay separate from deployable payload packaging',()=>{
+ const adoption=json('native/hex/SOURCE-ADOPTION.json');
+ const boundary=adoption.architecture_boundaries;
+ assert.ok(boundary);
+ assert.equal(boundary.cube_native_model.acceptance,'NATIVE_MATHEMATICAL_ACCEPTANCE_UNVERIFIED');
+ assert.equal(boundary.sphere_native_model.acceptance,'NATIVE_MATHEMATICAL_ACCEPTANCE_UNVERIFIED');
+ assert.deepEqual(boundary.cube_native_model.authority_refs,[
+  'Vado42-chris/xi-io.net#151','Vado42-chris/xi-io.net#1281']);
+ assert.match(boundary.payload_delivery.meaning,/packaging is separate from Cube\/Sphere mathematical serialization/);
+ assert.ok(boundary.payload_delivery.supported_adapter_families.includes('flatpak'));
+ assert.ok(boundary.payload_delivery.supported_adapter_families.includes('oci'));
+ assert.ok(boundary.payload_delivery.supported_adapter_families.includes('qcow2'));
+ assert.equal(boundary.node_runtime.acceptance,'REAL_NODE_READBACK_REQUIRED');
+ assert.ok(boundary.hard.includes('CUBE_NATIVE_FORMAT!=PAYLOAD_PACKAGE'));
+ assert.ok(boundary.hard.includes('SPHERE_DATA!=PAYLOAD_FILES'));
+ assert.ok(boundary.hard.includes('PAYLOAD_INSTALLED!=NODE_QUALIFIED'));
+ assert.ok(boundary.hard.includes('HOST_PROFILE!=PRODUCT_CUBE'));
+});
+
+test('recursive Cubes share governed Sphere relationships and only runtime interactions create Nodes',()=>{
+ const adoption=json('native/hex/SOURCE-ADOPTION.json');
+ const boundary=adoption.architecture_boundaries;
+ assert.equal(boundary.cube_native_model.recursive_composition.acceptance,'RECURSIVE_CUBE_GRAPH_CONTRACT');
+ assert.match(boundary.cube_native_model.recursive_composition.rule,/child Cubes recursively/);
+ assert.equal(boundary.sphere_native_model.cross_cube_scope.acceptance,'CROSS_CUBE_SPHERE_GRAPH_CONTRACT');
+ assert.match(boundary.sphere_native_model.cross_cube_scope.rule,/may relate to many top-level and nested Cubes/);
+ assert.match(boundary.sphere_native_model.cross_cube_scope.custody,/BINS owns resource identity/);
+ assert.equal(boundary.node_runtime.interaction_seam.acceptance,'INTERACTION_NODE_RUNTIME_REQUIRED');
+ assert.match(boundary.node_runtime.interaction_seam.rule,/installed\/running and interacts with an authorized Sphere/);
+ assert.ok(boundary.node_runtime.interaction_seam.requirements.includes('Ward-authorized effects'));
+ assert.ok(boundary.node_runtime.interaction_seam.requirements.some(x=>x.startsWith('BINS-backed user resource custody')));
+ assert.ok(boundary.hard.includes('CUBE_CHILD!=NEW_USER_SPHERE'));
+ assert.ok(boundary.hard.includes('ONE_SPHERE_MAY_RELATE_TO_MANY_CUBES'));
+ assert.ok(boundary.hard.includes('DIRECTORY_EDGE!=RUNNING_NODE'));
+ assert.ok(boundary.hard.includes('BINS_CUSTODY!=SPHERE_RELATIONSHIP'));
+});
+
+test('Cube Black Box and Sphere connection state meet only through governed Glass Box projections',()=>{
+ const b=json('native/hex/SOURCE-ADOPTION.json').architecture_boundaries;
+ assert.equal(b.cube_native_model.black_box.acceptance,'CUBE_BLACK_BOX_CAPABILITY_PACKAGE');
+ assert.match(b.cube_native_model.black_box.rule,/scripts, skills, regression and acceptance tests/);
+ assert.match(b.cube_native_model.black_box.rule,/never customer credentials or implicit effect authority/);
+ assert.equal(b.sphere_native_model.customer_connections.acceptance,'SPHERE_CUSTOMER_CONNECTION_GRAPH');
+ assert.match(b.sphere_native_model.customer_connections.rule,/billing\/provisioning relationship and BINS resource references/);
+ assert.equal(b.relationship_graph.glass_box.hard.includes('CAPABILITY_VISIBLE!=PROVIDER_CONNECTED'),true);
+ assert.equal(b.relationship_graph.glass_box.hard.includes('PROVIDER_CONNECTED!=EFFECT_AUTHORIZED'),true);
+ assert.equal(b.relationship_graph.global_admin_projection.acceptance,'GLOBAL_ADMIN_WIDGET_CONSUMPTION_REQUIRED');
+ assert.match(b.relationship_graph.global_admin_projection.rule,/projected as reusable widgets\/surfaces into every applicable product Cube/);
+ assert.ok(b.relationship_graph.global_admin_projection.requirements.includes('billing consent and spending limits precede paid effects'));
+ assert.ok(b.hard.includes('BLACK_BOX_CAPABILITY!=SPHERE_SECRET'));
+ assert.ok(b.hard.includes('AGENT_ASSIGNMENT_REF!=ACTIVE_WORKER_AUTHORITY'));
+ assert.ok(b.hard.includes('GLOBAL_ADMIN_WIDGET!=PRODUCT_FORK'));
+ assert.ok(b.hard.includes('CONNECTED_ACCOUNT!=EFFECT_AUTHORITY'));
+ assert.match(b.cube_native_model.black_box.rule,/stable agent\/role assignment references/);
 });

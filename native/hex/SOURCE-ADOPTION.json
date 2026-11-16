@@ -11,10 +11,11 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "62d11ad2384be574578d50ab85bc29982b5494f8",
+    "ref": "64328dd422ec5a751d61c03c382157656272d6f1",
     "files_unchanged_sha256": {
       "__init__.py": "06f35e9d4b5de30b7b32f4aa56ee4ccbfb995c0c26a459db6ada3a31cf689509",
-      "cli.py": "1e4c302c8244f13666267dedf25336e26d8e02d4424ac2ff04c5732950510cd2",
+      "cli.py": "d92dfb0c509c34c40f4c0d0f2aa3e1319381cb4bcc6269225af1204d9294bff2",
+      "consent.py": "a411148b8e1eb87375f644927b51ee2741c642e87274338f14636846dc06ea0c",
       "diagnostics.py": "45b04222167028c95f28ebba4d8c57c1346b58f28d446529a4f55135aea2e581",
       "discovery.py": "c1c6096189c03b593707f7c440b8727ea0aff49135f9d8d26afd5d10e5ee60a8",
       "managed_update.py": "e175420d133b3b74cae97a9c816ace8faf197bdd0becdc52aab10531f1d0897f",
@@ -24,10 +25,26 @@
       "redaction.py": "83be0ef6a2afabcddbd1f731ebdddb86bc094f6d59ae8f24b27480dab6190a47",
       "runtime_activation.py": "76c8a3dd93d6fa54f08a6ed14e81073101591c7bb1aa68da2c1f352e3619c81c",
       "runtime_profile.py": "0713b957e8df7d325cc050f3def00bb47ac4af4a1da3e0f208375e81aaaf6a1c",
-      "transaction.py": "848bb6bfd74235f2969b632ae43b04f3387d6f8e878092ff31f68e78fdb4f497"
+      "service_profile.py": "2b8ab837a3cfd916ca5160206fa8265e775a09f0de48d311eb3afc7c562f766e",
+      "transaction.py": "848bb6bfd74235f2969b632ae43b04f3387d6f8e878092ff31f68e78fdb4f497",
+      "update_request.py": "6f448b910bdbcf001379fdc35ab87098816c7fa83e640ce1b62fc8d2a658b09e"
     },
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 15
+    "owner_pr": 21,
+    "acceptance_note": "Latest accepted Installer main generation after #18 and #21; Cube vendored kernel remains byte-identical. Package payload delivery remains distinct from Cube/Sphere native mathematical format.",
+    "accepted_generation_history": [
+      {
+        "owner_pr": 18,
+        "merge_ref": "9b5aea601a9186426d3950787dcef20b5bbf85bd",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 21,
+        "merge_ref": "64328dd422ec5a751d61c03c382157656272d6f1",
+        "status": "CURRENT_ACCEPTED_MAIN"
+      }
+    ],
+    "currentness_rule": "Vendored kernel must match latest accepted Installer main generation; a newer lane report about an older merged PR cannot downgrade currentness."
   },
   "cli": {
     "source_manifest": "cli-source/SOURCE.json",
@@ -48,5 +65,168 @@
     "remote independently returned operation"
   ],
   "historical_source_archive_not_build_input": true,
-  "inherited_donor_portability_debt": "Exact pinned CLI/connection source retains historical Aries/Loki profile names, help text and device aliases. Native packaging does not use these strings as portable defaults, installation targets or authority. Any donor cleanup belongs upstream and requires repinning/requalification, not silent local source edits."
+  "inherited_donor_portability_debt": "Exact pinned CLI/connection source retains historical Aries/Loki profile names, help text and device aliases. Native packaging does not use these strings as portable defaults, installation targets or authority. Any donor cleanup belongs upstream and requires repinning/requalification, not silent local source edits.",
+  "architecture_boundaries": {
+    "cube_native_model": {
+      "meaning": "Reusable XI-IO project/product structure and native mathematical representation; not an OS package or customer host layout",
+      "authority_refs": [
+        "Vado42-chris/xi-io.net#151",
+        "Vado42-chris/xi-io.net#1281"
+      ],
+      "acceptance": "NATIVE_MATHEMATICAL_ACCEPTANCE_UNVERIFIED",
+      "recursive_composition": {
+        "rule": "A Cube may contain or reference child Cubes recursively. Parent/child composition expresses reusable product/project structure, not customer ownership or runtime authority.",
+        "examples": [
+          "VeilRIFT -> Video-Games -> Pandora's Cube",
+          "VeilRIFT -> TTRPG -> DND -> campaign/sourcebook Cubes",
+          "XI-IO Studio -> sellable product Cubes",
+          "XI-IO Studio -> Desktop -> WordPress plugin Cube"
+        ],
+        "acceptance": "RECURSIVE_CUBE_GRAPH_CONTRACT"
+      },
+      "black_box": {
+        "rule": "Each Cube owns its reusable work-enablement package for that Cube/repository: scripts, skills, regression and acceptance tests, product-local manifests/settings, and stable agent/role assignment references needed to perform work. Black Box contains capability definitions and references, never customer credentials or implicit effect authority.",
+        "framework_refs": [
+          "standards/punchcards/api-glass-box-skill-index.v1.json",
+          "standards/runtime/xiio-persistent-agent-roster.v1.json",
+          "scripts/lib/estate-service-capability-catalog.mjs"
+        ],
+        "acceptance": "CUBE_BLACK_BOX_CAPABILITY_PACKAGE"
+      }
+    },
+    "sphere_native_model": {
+      "meaning": "User/customer-specific persistent data and native mathematical representation; survives payload replacement and is never embedded as donor-machine literals",
+      "authority_refs": [
+        "Vado42-chris/xi-io.net#151"
+      ],
+      "acceptance": "NATIVE_MATHEMATICAL_ACCEPTANCE_UNVERIFIED",
+      "cross_cube_scope": {
+        "rule": "A User Sphere is a user/customer data and relationship domain that may relate to many top-level and nested Cubes. It is not duplicated merely because a user uses another Cube.",
+        "examples": [
+          "one User Data Sphere relates to VeilRIFT Cubes",
+          "the same User Data Sphere relates to XI-IO Studio product Cubes"
+        ],
+        "custody": "BINS owns resource identity, versions, provenance and storage bindings; Sphere records governed relationships rather than copying payload files.",
+        "acceptance": "CROSS_CUBE_SPHERE_GRAPH_CONTRACT"
+      },
+      "customer_connections": {
+        "rule": "Sphere carries the customer's provisioned identities, connection bindings, account relationships, preferences, billing/provisioning relationship and BINS resource references used across all authorized Cubes. Secrets remain in authorized secret/custody providers, not copied into Cube manifests.",
+        "acceptance": "SPHERE_CUSTOMER_CONNECTION_GRAPH"
+      }
+    },
+    "payload_delivery": {
+      "meaning": "Built, immutable platform delivery artifact selected and installed by HEX; packaging is separate from Cube/Sphere mathematical serialization",
+      "supported_adapter_families": [
+        "flatpak",
+        "appimage",
+        "deb",
+        "oci",
+        "qcow2",
+        "platform-native"
+      ],
+      "acceptance": "ADAPTER_FAMILIES_REQUIRE_INDIVIDUAL_QUALIFICATION"
+    },
+    "node_runtime": {
+      "meaning": "Qualified running materialization of an admitted Cube plus authorized Sphere on a real target; installed bytes alone do not create a Node",
+      "acceptance": "REAL_NODE_READBACK_REQUIRED",
+      "interaction_seam": {
+        "rule": "Create/register a Node when software from a Cube is installed/running and interacts with an authorized Sphere on a qualified runtime. A directory relationship alone is not a Node.",
+        "requirements": [
+          "accepted Cube generation",
+          "authorized Sphere relationship",
+          "qualified installed/running runtime",
+          "Ward-authorized effects",
+          "BINS-backed user resource custody where persistent user data is read or written",
+          "independent runtime and consumer readback"
+        ],
+        "acceptance": "INTERACTION_NODE_RUNTIME_REQUIRED"
+      }
+    },
+    "hard": [
+      "CUBE_NATIVE_FORMAT!=PAYLOAD_PACKAGE",
+      "SPHERE_DATA!=PAYLOAD_FILES",
+      "PAYLOAD_INSTALLED!=NODE_QUALIFIED",
+      "HOST_PROFILE!=PRODUCT_CUBE",
+      "PACKAGE_FORMAT!=HALLBERGMATHS_SERIALIZATION",
+      "CUBE_CHILD!=NEW_USER_SPHERE",
+      "ONE_SPHERE_MAY_RELATE_TO_MANY_CUBES",
+      "DIRECTORY_EDGE!=RUNNING_NODE",
+      "NODE_RUNTIME!=USER_IDENTITY",
+      "BINS_CUSTODY!=SPHERE_RELATIONSHIP",
+      "CUBE_GRAPH!=DIRECTORY_TREE",
+      "SPHERE_RELATIONSHIP_MANY_TO_MANY",
+      "NODE_MATERIALIZES_INTERACTION_NOT_USER_IDENTITY",
+      "BLACK_BOX_CAPABILITY!=SPHERE_SECRET",
+      "AGENT_ASSIGNMENT_REF!=ACTIVE_WORKER_AUTHORITY",
+      "GLOBAL_ADMIN_WIDGET!=PRODUCT_FORK",
+      "METERING_AVAILABLE!=BILLING_CONSENT",
+      "CONNECTED_ACCOUNT!=EFFECT_AUTHORITY",
+      "BLACK_BOX_CUBE_LOCAL!=GLASS_BOX_SEAM",
+      "SPHERE_CONNECTION_STATE!=CUBE_SOURCE",
+      "GLOBAL_ADMIN_PROJECTED!=GLOBAL_ADMIN_COPIED"
+    ],
+    "relationship_graph": {
+      "framework_candidate_ref": "Vado42-chris/xi-io.net#1481",
+      "model": "Cube hierarchy is recursive; Sphere bindings are independent many-to-many graph edges; Node materializes an authorized Cube/Sphere interaction on a qualified runtime.",
+      "examples": [
+        "sphere:user -> cube:veilrift",
+        "sphere:user -> cube:veilrift:ttrpg:dnd",
+        "sphere:user -> cube:veilrift:video-games:pandoras-cube",
+        "sphere:user -> cube:studio",
+        "sphere:user -> cube:studio:sam-law"
+      ],
+      "hard": [
+        "DIRECTORY_PARENT!=CUBE_AUTHORITY",
+        "CUBE_PATH!=CUBE_IDENTITY",
+        "CUBE_DOES_NOT_OWN_SPHERE",
+        "NESTED_CUBE_MAY_BIND_SAME_SPHERE_AS_ANCESTOR",
+        "ONE_SPHERE_MAY_BIND_MANY_CUBES",
+        "NODE_REQUIRED_FOR_RUNNING_CUBE_SPHERE_INTERACTION",
+        "NODE_IDENTITY!=INSTALL_PATH"
+      ],
+      "glass_box": {
+        "rule": "Glass Box is the governed projection across the Cube/Sphere seam. It exposes portable capability schemas from the Cube Black Box together with current per-user/per-worker Sphere connection state, while resolving currentness, qualification and authority for each operation. It is not a credential store and does not grant authority by being visible.",
+        "framework_refs": [
+          "standards/punchcards/api-glass-box-skill-index.v1.json"
+        ],
+        "hard": [
+          "CAPABILITY_VISIBLE!=PROVIDER_CONNECTED",
+          "PROVIDER_CONNECTED!=EFFECT_AUTHORIZED",
+          "GLOBAL_SKILL_CATALOG!=CUSTOMER_CONNECTION_STATE",
+          "GLASS_BOX_PROJECTION!=BLACK_BOX_IMPLEMENTATION"
+        ]
+      },
+      "global_admin_projection": {
+        "rule": "Provisioning, connected-account administration and metered billing are shared framework capabilities projected as reusable widgets/surfaces into every applicable product Cube. Products consume the common contract; they do not fork customer/account/billing implementations.",
+        "requirements": [
+          "provisioned login resolves one Sphere/principal context",
+          "connected provider/account relationships resolve from Sphere state",
+          "metering is scoped to admitted product/service usage",
+          "billing consent and spending limits precede paid effects",
+          "Ward authorization remains per effect",
+          "BINS/resource custody references remain independently read back",
+          "widget availability does not imply provider or billing authority"
+        ],
+        "acceptance": "GLOBAL_ADMIN_WIDGET_CONSUMPTION_REQUIRED"
+      }
+    },
+    "cube_sphere_seam": {
+      "framework_candidate_ref": "Vado42-chris/xi-io.net#1481",
+      "black_box_custody": "CUBE",
+      "sphere_connection_custody": "SPHERE_VIA_BINS",
+      "glass_box_custody": "NODE_SEAM_PROJECTION",
+      "global_admin": "SHARED_SERVICE_PROJECTED_TO_APPLICABLE_NODES",
+      "hard": [
+        "BLACK_BOX!=CUSTOMER_SECRET_STORE",
+        "BLACK_BOX!=LIVE_WORKER_ASSIGNMENT",
+        "SPHERE_CONNECTION!=CUBE_DEFAULT",
+        "BINS_RESOURCE_REF!=RAW_SECRET",
+        "GLASS_BOX!=SECOND_TRUTH_STORE",
+        "VISIBLE_CAPABILITY!=CONNECTED_PROVIDER",
+        "CONNECTED_PROVIDER!=AUTHORIZED_EFFECT",
+        "ADMIN_WIDGET!=COPIED_ADMIN_DATABASE",
+        "METERED_EVENT!=INVOICE_WITHOUT_VERIFIED_RATE_AND_USAGE"
+      ]
+    }
+  }
 }
