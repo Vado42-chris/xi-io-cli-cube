@@ -77,9 +77,9 @@
       "relationships": {
         "recursive_composition": "A Cube may contain or reference nested Cubes. Nesting expresses reusable product/project structure, not a separate customer data store.",
         "examples_are_noncanonical": [
-          "VeilRIFT -> Video Games -> game Cube",
-          "VeilRIFT -> TTRPG -> ruleset/campaign/sourcebook Cubes",
-          "XI-IO Studio -> sellable product Cubes"
+          "top-level product Cube -> product-family Cube -> sellable/interactive child Cube",
+          "product Cube -> rules/platform Cube -> content/source Cube",
+          "studio/business Cube -> independently sellable product Cubes"
         ]
       }
     },
