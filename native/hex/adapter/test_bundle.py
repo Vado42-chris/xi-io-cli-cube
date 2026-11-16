@@ -14,7 +14,7 @@ sys.path.insert(0, str(HERE / "kernel"))
 
 from child_bundle import (BundleError, load_bundle_profile,
                                    install_bundle)
-from xiio_installer.transaction import rollback
+from xiio_installer.transaction import rollback, TransactionError
 
 
 def sha(value):
@@ -36,7 +36,7 @@ class BundleFixture:
         self.rows = []
 
     def child(self, role, *, depends_on=(), bytes_=None, destination=None,
-              fixture=True, overwrite="fail"):
+              fixture=True, overwrite="fail", mode="0644"):
         b = bytes_ if bytes_ is not None else (role + " delivered\n").encode()
         url = "https://github.com/xiio-test/releases/" + role + ".bin"
         self.payloads[url] = b
@@ -57,7 +57,7 @@ class BundleFixture:
                 "size": len(b),
                 "destination_scope": "xdg_data",
                 "destination": destination or "xi-io/" + role + "/" + source,
-                "mode": "0644",
+                "mode": mode,
                 "overwrite": overwrite,
             }],
         }
@@ -420,6 +420,48 @@ class BundleTests(unittest.TestCase):
         finally:
             done.put("RELEASE")
             p1.join(timeout=5)
+
+
+    def test_later_connection_filesystem_refused_before_cli_install(self):
+        # The connection destination may have different mount semantics from
+        # the earlier CLI destination. No earlier product may be installed.
+        f = self.fixture()
+        f.child("cli").child("connection", depends_on=("cli",))
+        lock, digest = f.lock()
+        real_probe = __import__("xiio_installer.transaction", fromlist=["_probe_filesystem"])._probe_filesystem
+
+        def deny_later_destination(parent, modes):
+            if parent.name == "connection":
+                raise TransactionError("filesystem preflight: target mount unsupported")
+            return real_probe(parent, modes)
+
+        with patch("xiio_installer.transaction._probe_filesystem",
+                   side_effect=deny_later_destination):
+            with self.assertRaisesRegex(TransactionError, "filesystem preflight"):
+                install_bundle(lock, approved_lock_sha256=digest,
+                               env=f.env, fetch=f.fetch)
+
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/connection/connection.bin").exists())
+        state = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        self.assertEqual(list(state.glob("*.receipt.json")), [])
+
+    def test_noexec_cli_target_refused_before_install_and_receipt(self):
+        # NTFS/FUSE/noexec may report the expected mode while refusing launch.
+        # Inject the real executable-probe failure without touching host mounts.
+        f = self.fixture()
+        f.child("cli", bytes_=b"#!/bin/sh\\nexit 0\\n", mode="0755")
+        lock, digest = f.lock()
+        with patch("xiio_installer.transaction.subprocess.run",
+                   side_effect=PermissionError(13, "noexec target")):
+            with self.assertRaisesRegex(TransactionError, "direct executable launch unsupported"):
+                install_bundle(lock, approved_lock_sha256=digest,
+                               env=f.env, fetch=f.fetch)
+
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
+        state = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        self.assertEqual(list(state.glob("*.receipt.json")), [])
+
 
 
 def _concurrency_worker(lock, digest, env, barrier, done):
