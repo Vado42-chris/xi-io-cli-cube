@@ -527,19 +527,6 @@ def handle(req):
             return {**view,'readback':rb,'connection_readback':cr,'connection_state':'CONFIGURATION_REQUIRED','connected':False,'observation_current':True}
         demand(req.get('approved') is True and req.get('approval_digest')==p['approval_digest'],'EXACT_APPROVAL_REQUIRED')
         demand(not view['do_not_retry'],'UNCERTAIN_OUTCOME_DO_NOT_RETRY')
-        verify_node(p)
-        demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
-        connection_profile.validate(base,p,SOURCE/'connection',act=='apply')
-        if act=='apply':
-            demand(view['phase']=='PREPARED_NOT_INSTALLED','DUPLICATE_APPLY_REFUSED')
-            demand(tree(Path(p['prefix']))==p['destination_before'],'DESTINATION_CHANGED_SINCE_REVIEW')
-        else:
-            demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and p.get('previous_current'),'NO_PREVIOUS_GENERATION_ROLLBACK_UNAVAILABLE')
-            aop=observation(base,p,'apply')
-            demand(digest(canonical(tree(Path(p['prefix']))))==aop['events'][-1]['details'].get('destination_tree_digest'),'INSTALLED_STATE_DRIFT')
-            installed(p,expected_generation=aop['events'][-1]['details'].get('generation'))
-            demand(file_bytes(Path(p['prefix'])/'previous').decode().strip()==p['previous_current'],'ROLLBACK_TARGET_CHANGED')
-            connection_profile.readback(base,p,SOURCE/'connection',aop['events'][-1]['details'].get('connection_receipt_sha256'))
         if act=='apply':
             # Qualify the Switchboard component, CLI generation, launchers, pointers,
             # rollback and journal targets together before the first install or
@@ -572,6 +559,19 @@ def handle(req):
             demand(qualification.get('state')=='QUALIFIED_FOR_BOUNDED_LOCAL_APPLY'
                    and qualification.get('account_login_required') is False,
                    'PRECOMMAND_FILESYSTEM_QUALIFICATION_REQUIRED')
+        verify_node(p)
+        demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
+        connection_profile.validate(base,p,SOURCE/'connection',act=='apply')
+        if act=='apply':
+            demand(view['phase']=='PREPARED_NOT_INSTALLED','DUPLICATE_APPLY_REFUSED')
+            demand(tree(Path(p['prefix']))==p['destination_before'],'DESTINATION_CHANGED_SINCE_REVIEW')
+        else:
+            demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and p.get('previous_current'),'NO_PREVIOUS_GENERATION_ROLLBACK_UNAVAILABLE')
+            aop=observation(base,p,'apply')
+            demand(digest(canonical(tree(Path(p['prefix']))))==aop['events'][-1]['details'].get('destination_tree_digest'),'INSTALLED_STATE_DRIFT')
+            installed(p,expected_generation=aop['events'][-1]['details'].get('generation'))
+            demand(file_bytes(Path(p['prefix'])/'previous').decode().strip()==p['previous_current'],'ROLLBACK_TARGET_CHANGED')
+            connection_profile.readback(base,p,SOURCE/'connection',aop['events'][-1]['details'].get('connection_receipt_sha256'))
         journal=OperationJournal('native-cli-installer',act,operation_id=p['plan_id']+'-'+act,correlation_id=p['plan_id'],root=base)
         journal.start('Apply exact reviewed CLI generation' if act=='apply' else 'Restore previous CLI generation',details={'approval_digest':p['approval_digest']})
         connection_receipt=None
