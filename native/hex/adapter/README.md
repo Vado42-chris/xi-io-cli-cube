@@ -19,15 +19,20 @@ Upstream CLI source is pinned in `../cli-source/SOURCE.json`; seven payload file
 are Git-blob-identical. Only `install.mjs` is adapted: `--packaged-source` verifies
 all manifest files into memory before destination effects, then supplies bytes
 to the existing generation/receipt/launcher/pointer implementation. No gh or
-network is needed. Installer kernel modules are copied unchanged from
-`xi-io_installer@15ce1769b773b3882e3f3965945ca91a29df98ec`.
+network is needed. Installer kernel modules are copied unchanged from the accepted
+`xi-io_installer` main generation `62d11ad2384be574578d50ab85bc29982b5494f8`,
+as pinned in `native/hex/SOURCE-ADOPTION.json`. Source custody is not proof
+of installed customer runtime or entitlement.
 
 CLI owns its generation/launcher/pointer mutations and previous-generation rollback.
 The connection files and finite launcher use the existing kernel manifest and
-transaction receipt, not a new copy/rollback engine. Connection is applied first;
-if CLI fails while its prior current pointer is preserved, the existing kernel
-rolls back connection changes. Changed/uncertain CLI pointers remain UNKNOWN for
-reconciliation; there is no false cross-component atomicity claim.
+transaction receipt, not a new copy/rollback engine. **Before either effect**,
+the accepted Installer pre-command API qualifies the connection and CLI
+destinations, including the executable filesystem, receipt and rollback roots.
+Only then is the connection component applied first; if CLI fails while its
+prior current pointer is preserved, the existing kernel rolls back connection
+changes. Changed/uncertain CLI pointers remain UNKNOWN for reconciliation;
+there is no false cross-component atomicity claim.
 The kernel's `OperationJournal` owns started/terminal/unknown operation evidence.
 Native plan JSON holds immutable review input and is not a second outcome ledger.
 Prepare does not write the target. Plan binds packaged bytes, selected Node hash,
