@@ -138,7 +138,30 @@
       "ONE_SPHERE_MAY_RELATE_TO_MANY_CUBES",
       "DIRECTORY_EDGE!=RUNNING_NODE",
       "NODE_RUNTIME!=USER_IDENTITY",
-      "BINS_CUSTODY!=SPHERE_RELATIONSHIP"
-    ]
+      "BINS_CUSTODY!=SPHERE_RELATIONSHIP",
+      "CUBE_GRAPH!=DIRECTORY_TREE",
+      "SPHERE_RELATIONSHIP_MANY_TO_MANY",
+      "NODE_MATERIALIZES_INTERACTION_NOT_USER_IDENTITY"
+    ],
+    "relationship_graph": {
+      "framework_candidate_ref": "Vado42-chris/xi-io.net#1481",
+      "model": "Cube hierarchy is recursive; Sphere bindings are independent many-to-many graph edges; Node materializes an authorized Cube/Sphere interaction on a qualified runtime.",
+      "examples": [
+        "sphere:user -> cube:veilrift",
+        "sphere:user -> cube:veilrift:ttrpg:dnd",
+        "sphere:user -> cube:veilrift:video-games:pandoras-cube",
+        "sphere:user -> cube:studio",
+        "sphere:user -> cube:studio:sam-law"
+      ],
+      "hard": [
+        "DIRECTORY_PARENT!=CUBE_AUTHORITY",
+        "CUBE_PATH!=CUBE_IDENTITY",
+        "CUBE_DOES_NOT_OWN_SPHERE",
+        "NESTED_CUBE_MAY_BIND_SAME_SPHERE_AS_ANCESTOR",
+        "ONE_SPHERE_MAY_BIND_MANY_CUBES",
+        "NODE_REQUIRED_FOR_RUNNING_CUBE_SPHERE_INTERACTION",
+        "NODE_IDENTITY!=INSTALL_PATH"
+      ]
+    }
   }
 }
