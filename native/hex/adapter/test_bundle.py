@@ -465,7 +465,7 @@ class BundleTests(unittest.TestCase):
 
     def test_shared_installer_source_blob_is_exact_not_a_second_kernel(self):
         source = (HERE / "kernel/xiio_installer/transaction.py").read_bytes()
-        blob = hashlib.sha1(b"blob " + str(len(source)).encode() + b"\\0" + source).hexdigest()
+        blob = hashlib.sha1(b"blob " + str(len(source)).encode() + b"\0" + source).hexdigest()
         self.assertEqual(blob, "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2")
 
     def test_qualify_entire_bundle_before_first_download_or_install(self):
