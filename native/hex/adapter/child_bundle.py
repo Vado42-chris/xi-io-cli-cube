@@ -85,10 +85,11 @@ def _safe_url(raw: object, allowed_hosts: frozenset[str], *,
     _require(isinstance(raw, str) and len(raw) <= 2048, "BUNDLE_URL_INVALID")
     try:
         u = urlsplit(raw)
+        port = u.port  # urllib validates the port lazily; keep its errors typed.
     except ValueError as exc:
         raise BundleError("BUNDLE_URL_INVALID") from exc
     _require(u.scheme == "https" and u.hostname in allowed_hosts
-             and u.port in (None, 443) and not u.username and not u.password
+             and port in (None, 443) and not u.username and not u.password
              and not u.fragment and (not u.query or redirect)
              and u.path.startswith("/")
              and "//" not in u.path and "\\" not in u.path,

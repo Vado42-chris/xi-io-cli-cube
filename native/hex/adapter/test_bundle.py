@@ -172,6 +172,23 @@ class BundleTests(unittest.TestCase):
             _safe_url("https://objects.githubusercontent.com/object?sig=opaque",
                       hosts, redirect=True)
 
+    def test_malformed_ports_are_typed_refusals_before_fetch_or_write(self):
+        for port in ("not-a-port", "65536", "-1"):
+            with self.subTest(port=port):
+                url = f"https://github.com:{port}/releases/cli.bin"
+                for redirect in (False, True):
+                    with self.assertRaisesRegex(BundleError, "^BUNDLE_URL_INVALID$"):
+                        _safe_url(url, FIXTURE_RELEASE_HOSTS, redirect=redirect)
+                f = self.fixture()
+                f.child("cli")
+                f.rows[0]["payload_urls"]["cli.bin"] = url
+                lock, digest = f.lock()
+                with self.assertRaisesRegex(BundleError, "^BUNDLE_URL_INVALID$"):
+                    install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                                   fetch=lambda *_: self.fail("fetch with invalid port"))
+                for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+                    self.assertFalse(Path(f.env[name]).exists())
+
     def test_product_profile_installs_only_selected_root_and_transitive_dependencies(self):
         f = self.fixture()
         f.child("bins", fixture=False).child("ward", fixture=False, depends_on=("bins",)).child(
