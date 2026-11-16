@@ -15,6 +15,8 @@ import permission_profile
 import service_profile
 import server_profile
 from xiio_installer.observability import OperationJournal, inspect_operation
+from xiio_installer.discovery import xdg_roots
+from xiio_installer.transaction import PlanItem, plan_install, _preflight_filesystems
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
 class Refused(Exception): pass
@@ -78,6 +80,37 @@ def observed_preflight():
     except (OSError,ValueError,KeyError,TypeError):
         observation['connection_payload']={'available':False,'required':True,'state':'BUNDLED_CONNECTION_SOURCE_UNQUALIFIED'}
     return observation
+def qualify_apply_targets(base,p):
+    """Qualify BOTH installed destinations before the first connection or CLI effect.
+
+    Uses the canonical Installer capability probes packaged with HEX. The CLI
+    entries below are capability-only projections of the native install.mjs
+    generation, pointer and launcher paths; they are never installed by this
+    helper and do not replace the CLI's own transaction/receipt authority.
+    """
+    m, payload_root, receipt = connection_profile.validate(base,p,SOURCE/'connection',True)
+    conn_env = connection_profile.roots(p)
+    conn_plan = plan_install(m,payload_root,conn_env)
+    _preflight_filesystems(conn_plan,xdg_roots(conn_env),receipt.parent,
+                           receipt.parent/(receipt.stem+'.rollback'))
+    prefix = safe_path(Path(p['prefix']))
+    # install.mjs stages private 0600 generation files/pointers and an 0755
+    # native launcher. Probe their actual parent filesystems, not /tmp or HOME.
+    targets = [
+        ('versions/install-receipt.json',0o600),
+        ('current',0o600),
+        ('previous',0o600),
+        ('bin/xi-io-cli',0o755),
+    ]
+    projections = [PlanItem(
+        source='filesystem-qualification-only',destination_scope='cli',
+        destination=rel,action='create',expected_sha256='',
+        existing_sha256=None,expected_mode=mode,existing_mode=None,
+        overwrite='fail',
+    ) for rel,mode in targets]
+    _preflight_filesystems(projections,{'cli':prefix},prefix,prefix/'versions')
+
+
 def root():
     # System environment supplies only the owner's ordinary XDG state location.
     p=safe_path(Path(os.environ.get('XDG_STATE_HOME',str(Path.home()/'.local/state')))/'xi-io/installer')
@@ -471,6 +504,7 @@ def handle(req):
         if act=='apply':
             demand(view['phase']=='PREPARED_NOT_INSTALLED','DUPLICATE_APPLY_REFUSED')
             demand(tree(Path(p['prefix']))==p['destination_before'],'DESTINATION_CHANGED_SINCE_REVIEW')
+            qualify_apply_targets(base,p)
         else:
             demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and p.get('previous_current'),'NO_PREVIOUS_GENERATION_ROLLBACK_UNAVAILABLE')
             aop=observation(base,p,'apply')
