@@ -190,3 +190,51 @@ The existing packaged source now carries exact CLI PR16 `958a5fe9d4a409e4ab2b690
 Rollback readback binds the exact reviewed previous receipt, rather than demanding that a historical six-file generation contain the newly added module. PR15 launcher-only repair retains its original verifier bytes in the separately named resource above; its installer, hashes and generation-preservation contract are unchanged.
 
 `test_connection_delivery.py` exercises actual adapter install, installed CLI invocation through native refusal, six-to-seven-file update and rollback, missing-payload refusal and prior-receipt drift. Missing/invalid bindings are deliberate negative tests, not enrollment, authentication, connected or remote-execution evidence.
+
+
+## Shared Installer pre-command qualification, 2026-11-16
+
+This HEX receiver consumes the existing Installer kernel and is **not** a new
+filesystem policy owner. The bundled `xiio_installer/transaction.py` is the
+exact Git blob `32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2` from
+accepted `Vado42-chris/xi-io_installer` main following Installer PR #15.
+
+The three existing HEX execution seams use the public shared qualifier:
+
+- CLI apply plus required Switchboard connection: qualify the connection
+  manifest's destination, receipt and rollback parents, the old backup modes,
+  selected CLI prefix, generated version parent, executable launcher parent,
+  and adapter operation journal **before** Node identity subprocess, journal
+  start, connection.apply, or install.mjs.
+- Child bundle apply: qualify every immutable child manifest together,
+  including receipt and backup destinations and the bundle custody/state root,
+  **before** creating apply custody, acquiring payloads or installing the first
+  child. A later per-product Installer apply still requalifies each actual plan.
+- Launcher repair: qualify the selected executable launcher and backup parent
+  in the original preserved mode, CLI prefix and adapter journal **before**
+  Node verification, journal start or the canonical repair command.
+
+Machine OS/architecture and target filesystem are observed locally at execution
+time. No fixed customer machine, NTFS volume path, personal account, project
+name or sign-in is part of a white-label install manifest. Denied/unknown/noexec
+or non-POSIX chmod semantics block execution, and a prior approval flag is not
+an exemption. Probe receipts are not installed-product, Ward, or customer
+authorization receipts.
+
+Executable source/hostile gates are in
+`native/hex/adapter/test_precommand_boundary.py`, invoked by
+`.github/workflows/installer-contract.yml` alongside the existing child
+bundle suite. This includes rejecting two-child install before acquisition
+and verifying all three effect boundaries plus the exact upstream Git blob.
+
+**Current release disposition: SOURCE_CANDIDATE / HOLD.** A merged Installer
+kernel is not equivalent to qualified installed HEX, and the Installer #15
+merge workflow's Debian/kernel jobs returned failure with no executed steps.
+This receiver's exact HEAD has no executed qualifying workflow result yet.
+Required before promotion: native Python tests and all HEX workflows against
+the exact head, independent review/collision admission, a real supported
+filesystem versus NTFS/noexec refusal before effect, complete installer and
+launcher readbacks, approved main merge, installed product Node and
+RETURN/APPLY_RETURN. Do not assign accepted-main or customer-ready credit
+to this branch or to any downstream product until its actual binary and
+receipt are consumed and verified.
