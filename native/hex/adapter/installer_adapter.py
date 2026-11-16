@@ -13,6 +13,7 @@ import child_bundle
 import install_preflight
 import local_step_actions
 from xiio_installer.observability import OperationJournal, inspect_operation
+from xiio_installer.discovery import xdg_roots
 from xiio_installer.manifest import load_manifest
 from xiio_installer.transaction import qualify_precommand_manifests
 import platform
@@ -549,7 +550,7 @@ def handle(req):
             prefix = Path(p['prefix'])
             qualification = qualify_precommand_manifests(
                 [(connection_manifest, connection_receipt_path)],
-                connection_profile.roots(p),
+                xdg_roots(connection_profile.roots(p)),
                 machine_profile={'os':platform.system(),
                                  'architecture':platform.machine(),
                                  'family':'linux'},
