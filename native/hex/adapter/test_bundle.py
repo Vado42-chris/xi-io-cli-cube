@@ -734,5 +734,23 @@ def _concurrency_worker(lock, digest, env, barrier, done):
         barrier.put(f"ERROR: {exc}")
 
 
+    def test_product_profile_exposes_payload_projection_without_minting_cube_sphere_or_node(self):
+        lock = self._make_product_lock(root_role="studio", roles=("framework", "studio"))
+        profile = child_bundle.load_bundle_profile(lock, allowed_hosts={"releases.example.test"})
+        projection = profile["payload_projection"]
+        self.assertEqual(projection["schema"], "xiio.payload-install-projection/v1")
+        self.assertEqual(projection["release_profile_id"], profile["profile_id"])
+        self.assertEqual(projection["release_profile_sha256"], profile["lock_sha256"])
+        self.assertEqual(projection["root_product_id"], profile["products"]["studio"][0].product_id)
+        self.assertEqual(
+            projection["ordered_payload_products"],
+            tuple(profile["products"][role][0].product_id for role in profile["ordered_roles"]),
+        )
+        self.assertIsNone(projection["cube_native_identity"])
+        self.assertIsNone(projection["sphere_identity"])
+        self.assertIsNone(projection["node_runtime_identity"])
+        self.assertFalse(projection["node_running"])
+
+
 if __name__ == "__main__":
     unittest.main()
