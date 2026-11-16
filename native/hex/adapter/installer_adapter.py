@@ -468,8 +468,6 @@ def handle(req):
             permissions=permission_profile.require_capability(p.get('permission_profile',{}),'install_files')
             demand(permissions['permission_digest']==p.get('permission_digest'),'PERMISSION_DIGEST_CHANGED')
         demand(not view['do_not_retry'],'UNCERTAIN_OUTCOME_DO_NOT_RETRY')
-        verify_node(p)
-        demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
         connection_manifest,connection_payload,connection_receipt = connection_profile.validate(
             base,p,SOURCE/'connection',act=='apply')
         if act=='apply':
@@ -507,6 +505,10 @@ def handle(req):
                 )
             except (TransactionError, OSError) as exc:
                 raise Refused('INSTALLER_PRECOMMAND_FILESYSTEM_UNQUALIFIED') from exc
+        # Do not run even the selected Node version command before the
+        # actual connection and CLI target filesystems are qualified.
+        verify_node(p)
+        demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
         journal=OperationJournal('native-cli-installer',act,operation_id=p['plan_id']+'-'+act,correlation_id=p['plan_id'],root=base)
         journal.start('Apply exact reviewed CLI generation' if act=='apply' else 'Restore previous CLI generation',details={'approval_digest':p['approval_digest'],'filesystem_precommand_state':filesystem_qualification['state'] if filesystem_qualification else 'NOT_APPLICABLE_ROLLBACK'})
         connection_receipt=None
