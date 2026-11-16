@@ -67,6 +67,16 @@ test('HEX preserves recursive Cube and shared Sphere graph boundaries',()=>{
  assert.ok(a.relationship_graph.examples.some(x=>x.includes('cube:studio')));
 });
 
+test('HEX preserves Black Box, Sphere connection and Glass Box seam custody',()=>{
+ const a=json('native/hex/SOURCE-ADOPTION.json').architecture_boundaries;
+ const seam=a.cube_sphere_seam;
+ assert.equal(seam.black_box_custody,'CUBE');
+ assert.equal(seam.sphere_connection_custody,'SPHERE_VIA_BINS');
+ assert.equal(seam.glass_box_custody,'NODE_SEAM_PROJECTION');
+ assert.equal(seam.global_admin,'SHARED_SERVICE_PROJECTED_TO_APPLICABLE_NODES');
+ for(const hard of ['BLACK_BOX!=CUSTOMER_SECRET_STORE','BLACK_BOX!=LIVE_WORKER_ASSIGNMENT','SPHERE_CONNECTION!=CUBE_DEFAULT','GLASS_BOX!=SECOND_TRUTH_STORE','CONNECTED_PROVIDER!=AUTHORIZED_EFFECT','ADMIN_WIDGET!=COPIED_ADMIN_DATABASE'])assert.ok(seam.hard.includes(hard));
+});
+
 test('launcher-only repair consumes exact qualified PR15 without changing packaged install transport',()=>{
  const base='native/hex/cli-source/';const m=json(base+'launcher-repair.SOURCE.json');
  assert.equal(m.ref,'0f2b444abbe8f7a99c5f4520b1222c568eba6dd1');assert.equal(m.modifications,false);
