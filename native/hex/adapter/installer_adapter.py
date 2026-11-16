@@ -15,8 +15,8 @@ import permission_profile
 import service_profile
 import server_profile
 from xiio_installer.observability import OperationJournal, inspect_operation
-from xiio_installer.discovery import xdg_roots
-from xiio_installer.transaction import PlanItem, plan_install, _preflight_filesystems
+from xiio_installer.discovery import xdg_roots, discover_host
+from xiio_installer.transaction import qualify_precommand_manifests
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
 class Refused(Exception): pass
@@ -81,34 +81,32 @@ def observed_preflight():
         observation['connection_payload']={'available':False,'required':True,'state':'BUNDLED_CONNECTION_SOURCE_UNQUALIFIED'}
     return observation
 def qualify_apply_targets(base,p):
-    """Qualify BOTH installed destinations before the first connection or CLI effect.
+    """Qualify the reviewed connection and native CLI filesystem destinations.
 
-    Uses the canonical Installer capability probes packaged with HEX. The CLI
-    entries below are capability-only projections of the native install.mjs
-    generation, pointer and launcher paths; they are never installed by this
-    helper and do not replace the CLI's own transaction/receipt authority.
+    This uses the Installer's single pre-command machine/filesystem contract,
+    before either the connection kernel or the CLI generation installer runs.
+    No installed account, Ward sign-in or alternative installer is required.
     """
-    m, payload_root, receipt = connection_profile.validate(base,p,SOURCE/'connection',True)
+    m, _payload_root, receipt = connection_profile.validate(base,p,SOURCE/'connection',True)
     conn_env = connection_profile.roots(p)
-    conn_plan = plan_install(m,payload_root,conn_env)
-    _preflight_filesystems(conn_plan,xdg_roots(conn_env),receipt.parent,
-                           receipt.parent/(receipt.stem+'.rollback'))
     prefix = safe_path(Path(p['prefix']))
-    # install.mjs stages private 0600 generation files/pointers and an 0755
-    # native launcher. Probe their actual parent filesystems, not /tmp or HOME.
-    targets = [
-        ('versions/install-receipt.json',0o600),
-        ('current',0o600),
-        ('previous',0o600),
-        ('bin/xi-io-cli',0o755),
-    ]
-    projections = [PlanItem(
-        source='filesystem-qualification-only',destination_scope='cli',
-        destination=rel,action='create',expected_sha256='',
-        existing_sha256=None,expected_mode=mode,existing_mode=None,
-        overwrite='fail',
-    ) for rel,mode in targets]
-    _preflight_filesystems(projections,{'cli':prefix},prefix,prefix/'versions')
+    observed = discover_host(conn_env)
+    machine_profile = {
+        'os': observed['os'],
+        'architecture': observed['architecture'],
+        'family': observed['platform']['family'],
+    }
+    # The approved native CLI installer writes private generation files,
+    # current/previous pointers and a 0755 launcher on these exact volumes.
+    extra_targets = {
+        prefix: {0o600},
+        prefix/'versions': {0o600},
+        prefix/'bin': {0o755},
+    }
+    return qualify_precommand_manifests(
+        [(m,receipt)],xdg_roots(conn_env),
+        machine_profile=machine_profile,additional_targets=extra_targets,
+    )
 
 
 def root():
@@ -501,10 +499,11 @@ def handle(req):
         verify_node(p)
         demand(payload()==p['payload'],'PAYLOAD_CHANGED_SINCE_REVIEW')
         connection_profile.validate(base,p,SOURCE/'connection',act=='apply')
+        precommand_qualification=None
         if act=='apply':
             demand(view['phase']=='PREPARED_NOT_INSTALLED','DUPLICATE_APPLY_REFUSED')
             demand(tree(Path(p['prefix']))==p['destination_before'],'DESTINATION_CHANGED_SINCE_REVIEW')
-            qualify_apply_targets(base,p)
+            precommand_qualification=qualify_apply_targets(base,p)
         else:
             demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and p.get('previous_current'),'NO_PREVIOUS_GENERATION_ROLLBACK_UNAVAILABLE')
             aop=observation(base,p,'apply')
@@ -513,7 +512,7 @@ def handle(req):
             demand(file_bytes(Path(p['prefix'])/'previous').decode().strip()==p['previous_current'],'ROLLBACK_TARGET_CHANGED')
             connection_profile.readback(base,p,SOURCE/'connection',aop['events'][-1]['details'].get('connection_receipt_sha256'))
         journal=OperationJournal('native-cli-installer',act,operation_id=p['plan_id']+'-'+act,correlation_id=p['plan_id'],root=base)
-        journal.start('Apply exact reviewed CLI generation' if act=='apply' else 'Restore previous CLI generation',details={'approval_digest':p['approval_digest']})
+        journal.start('Apply exact reviewed CLI generation' if act=='apply' else 'Restore previous CLI generation',details={'approval_digest':p['approval_digest'],'precommand_filesystem_qualification':precommand_qualification})
         connection_receipt=None
         try:
             if act=='apply':
