@@ -213,10 +213,11 @@ def qualify_precommand_targets(
     required. The caller must bind every destination it will write, including
     executable launchers, receipts and backup areas. No command is generated.
     """
-    if not isinstance(machine_profile, dict) or (
-        machine_profile.get("os") != platform.system()
-        or machine_profile.get("architecture") != platform.machine()
-        or machine_profile.get("family") != "linux"
+    if (platform.system() != "Linux" or not platform.machine()
+        or not isinstance(machine_profile, dict) or
+        machine_profile.get("os") != platform.system() or
+        machine_profile.get("architecture") != platform.machine() or
+        machine_profile.get("family") != "linux"
     ):
         raise TransactionError("filesystem preflight: current machine profile required")
     if not isinstance(targets, dict) or not targets:
