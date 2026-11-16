@@ -2,7 +2,7 @@ import json,os,tempfile,unittest,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from xiio_installer.runtime_profile import load_runtime_profile
-from xiio_installer.runtime_binding import load_runtime_binding_profile,materialize_runtime_bindings,RuntimeBindingError
+from xiio_installer.runtime_binding import load_runtime_binding_profile,materialize_runtime_bindings,runtime_binding_destination,RuntimeBindingError
 G="a"*40
 class T(unittest.TestCase):
  def setUp(self):
@@ -10,6 +10,9 @@ class T(unittest.TestCase):
   self.rp.write_text(json.dumps({"schema_version":"xiio-installer-runtime-profile-v1","profile_id":"p","generation":"g","product_id":"product","default_permissions":[],"optional_permissions":[],"update_policy_default":"MANUAL","services":[],"dependencies":[{"dependency_id":"node-authority","owner_repo":"owner/node","accepted_generation":G,"materializer":"installed-receipt","required_for_permissions":[]}]}))
   self.bp.write_text(json.dumps({"schema_version":"xiio.product-runtime-binding-profile/v1","product_id":"product","destination":"xi-io/product/runtime.env","bindings":[{"key":"PRODUCT_NODE_MODULE","source_role":"node-authority","source_field":"provider_module"}]}))
  def receipt(self,**kw): return {"schema":"xiio.installer-dependency-binding-receipt/v1","dependency_id":"node-authority","owner_repo":"owner/node","accepted_generation":G,"fields":{"provider_module":"/installed/node/provider.mjs"},**kw}
+ def test_destination_is_profile_relative_under_xdg_config(self):
+  b=load_runtime_binding_profile(self.bp);target=runtime_binding_destination(b,{"HOME":str(self.d/"home"),"XDG_CONFIG_HOME":str(self.d/"cfg")})
+  self.assertEqual(target,(self.d/"cfg/xi-io/product/runtime.env").resolve())
  def test_module_dependency_needs_no_fake_systemd_unit(self):
   p=load_runtime_profile(self.rp);self.assertIsNone(p.dependencies[0].expected_unit)
  def test_materializes_private_exact_receipt_value(self):
