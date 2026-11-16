@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, json, os, sys, tempfile
+import hashlib, json, os, tempfile
 from pathlib import Path
 from typing import Any
 
@@ -48,53 +48,20 @@ def compile_policy(raw:dict[str,Any])->dict[str,Any]:
 def digest(body:dict[str,Any])->str:
     return hashlib.sha256(json.dumps(body,sort_keys=True,separators=(",",":")).encode()).hexdigest()
 
-def _sync_directory(path:Path)->None:
-    # Directory-entry durability is distinct from flushing the receipt bytes.
-    fd=os.open(path,os.O_RDONLY | getattr(os,"O_DIRECTORY",0))
-    try: os.fsync(fd)
-    finally: os.close(fd)
-
-def _prepare_receipt_directory(path:Path)->None:
-    missing=[]
-    current=path
-    while not current.exists():
-        missing.append(current)
-        current=current.parent
-    # Probe support before creating receipt state. Unsupported filesystems fail closed.
-    _sync_directory(current)
-    for directory in reversed(missing):
-        directory.mkdir(exist_ok=True)
-        _sync_directory(directory)
-        _sync_directory(directory.parent)
-
-def _write_receipt_temp(receipt:dict[str,Any],parent:Path,prefix:str)->Path:
-    fd,name=tempfile.mkstemp(prefix=prefix,dir=parent)
-    tmp=Path(name)
-    try:
-        with os.fdopen(fd,"w",encoding="utf-8") as out:
-            os.fchmod(out.fileno(),0o600)
-            out.write(json.dumps(receipt,indent=2,sort_keys=True)+"\n")
-            out.flush()
-            os.fsync(out.fileno())
-        return tmp
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-
 def write_receipt(policy:dict[str,Any],path:Path)->dict[str,Any]:
     if path.is_symlink() or path.exists(): raise ConsentError("CONSENT_RECEIPT_PATH_INVALID")
+    path.parent.mkdir(parents=True,exist_ok=True)
     body=compile_policy(policy)
-    _prepare_receipt_directory(path.parent)
     receipt={**body,"consent_sha256":digest(body)}
-    tmp=_write_receipt_temp(receipt,path.parent,".xiio-consent-")
+    fd,tmp_name=tempfile.mkstemp(prefix=".xiio-consent-",dir=path.parent); os.close(fd)
+    tmp=Path(tmp_name)
     try:
+        tmp.write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+        os.chmod(tmp,0o600)
         # Publish insert-only: the absence check above is not an atomic lease.
         # A concurrent consent writer must never be silently overwritten.
         try:
             os.link(tmp,path)
-            try: _sync_directory(path.parent)
-            except OSError as exc:
-                raise ConsentError("CONSENT_PUBLISHED_DURABILITY_UNCONFIRMED") from exc
         except FileExistsError:
             raise ConsentError("CONSENT_RECEIPT_PATH_INVALID") from None
     finally:
@@ -125,7 +92,6 @@ def authorize(receipt:dict[str,Any],*,scope:str,principal_ref:str,device_ref:str
 
 
 def replace_receipt(policy:dict[str,Any],path:Path,expected_consent_sha256:str)->dict[str,Any]:
-    _sync_directory(path.parent)
     lock=path.parent/(path.name+".update.lock")
     try:
         fd=os.open(lock,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
@@ -151,22 +117,14 @@ def replace_receipt(policy:dict[str,Any],path:Path,expected_consent_sha256:str)-
             afd=os.open(archive,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
             with os.fdopen(afd,"wb") as out:
                 out.write(archive_bytes); out.flush(); os.fsync(out.fileno())
-        _sync_directory(path.parent)  # Persist archive before replacing current policy.
-        tmp=_write_receipt_temp(receipt,path.parent,".xiio-consent-update-")
+        fd2,tmp_name=tempfile.mkstemp(prefix=".xiio-consent-update-",dir=path.parent); os.close(fd2)
+        tmp=Path(tmp_name)
         try:
-            os.replace(tmp,path)
-            try: _sync_directory(path.parent)
-            except OSError as exc:
-                raise ConsentError("CONSENT_PUBLISHED_DURABILITY_UNCONFIRMED") from exc
+            tmp.write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+            os.chmod(tmp,0o600); os.replace(tmp,path)
         finally:
             if tmp.exists(): tmp.unlink()
         return {**receipt,"previous_receipt":archive.name}
     finally:
-        error_in_flight=sys.exc_info()[0] is not None
-        try:
-            lock.unlink()
-            _sync_directory(path.parent)
+        try: lock.unlink()
         except FileNotFoundError: pass
-        except OSError as exc:
-            if not error_in_flight:
-                raise ConsentError("CONSENT_PUBLISHED_DURABILITY_UNCONFIRMED") from exc
