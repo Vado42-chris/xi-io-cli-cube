@@ -1,5 +1,6 @@
 """HEX consumption of the accepted Installer pre-command gate, disposable only."""
 import inspect
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,6 +63,12 @@ class PrecommandBoundary(unittest.TestCase):
         self.assertIn("Path(p['backup']).parent", source)
 
     def test_one_accepted_kernel_owns_precommand_qualification(self):
+        # Git blob pin of the accepted Installer main source, not an HEX fork.
+        kernel = Path(__file__).resolve().parent / "kernel/xiio_installer/transaction.py"
+        content = kernel.read_bytes()
+        blob = hashlib.sha1(b"blob " + str(len(content)).encode() +
+                            b"\\0" + content).hexdigest()
+        self.assertEqual(blob, "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2")
         from xiio_installer.transaction import qualify_precommand_manifests
         self.assertTrue(callable(qualify_precommand_manifests))
         source = inspect.getsource(qualify_precommand_manifests)
