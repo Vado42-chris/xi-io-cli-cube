@@ -13,6 +13,9 @@ from .diagnostics import diagnostic_bundle, evidence_status
 from .observability import OperationJournal, inspect_operation, list_operations
 from .redaction import redact_text
 from .transaction import apply_install, plan_install, rollback
+from .consent import SCOPES, authorize, compile_policy, read_receipt, replace_receipt, write_receipt
+from .service_profile import compile_service_activation, load_service_profile
+from .update_request import authorize_update, load_update_request
 from .runtime_profile import load_runtime_profile, qualify_update_request
 from .runtime_activation import activate_runtime_profile, revoke_runtime_consent
 
@@ -50,10 +53,16 @@ def _expected_action(cmd: str) -> str:
         "plan": "compile an installation plan without mutation",
         "apply": "apply an explicitly approved installation transaction",
         "rollback": "rollback an explicitly approved installation transaction",
-        "diagnostic-bundle": "export a redacted diagnostic bundle to an explicitly approved external path",
+        "consent-write": "store explicit local install/update permissions",
+        "consent-update": "replace local install/update permissions with compare-and-swap",
+        "consent-status": "read the local install/update permission receipt",
+        "consent-check": "evaluate one requested operation against local permission",
+        "service-activation": "compile a consent-bound local service activation packet",
+        "update-authorize": "authorize a central update request against local consent",
         "activate-runtime": "activate explicitly opted-in runtime services and persist consent/readback",
         "revoke-runtime-consent": "revoke future managed-update consent without silently stopping services",
-        "qualify-update": "qualify a central update request against local consent without executing it",
+        "qualify-update": "qualify a central update request against local runtime consent without executing it",
+        "diagnostic-bundle": "export a redacted diagnostic bundle to an explicitly approved external path",
     }.get(cmd, cmd)
 
 
@@ -148,10 +157,34 @@ def main(argv: list[str] | None = None) -> int:
     rp = sub.add_parser("rollback")
     rp.add_argument("receipt", type=Path)
     rp.add_argument("--approve", action="store_true", help="required for mutation")
-    sub.add_parser("operations")
-    sub.add_parser("evidence-status")
-    ip = sub.add_parser("inspect-operation")
-    ip.add_argument("target_operation_id")
+    cp = sub.add_parser("consent-write")
+    cp.add_argument("policy", type=Path)
+    cp.add_argument("receipt", type=Path)
+    cp.add_argument("--approve", action="store_true", help="required to persist permission choices")
+    cu = sub.add_parser("consent-update")
+    cu.add_argument("policy", type=Path)
+    cu.add_argument("receipt", type=Path)
+    cu.add_argument("expected_consent_sha256")
+    cu.add_argument("--approve", action="store_true", help="required to replace permission choices")
+    cs = sub.add_parser("consent-status")
+    cs.add_argument("receipt", type=Path)
+    cc = sub.add_parser("consent-check")
+    cc.add_argument("receipt", type=Path)
+    cc.add_argument("scope", choices=SCOPES)
+    cc.add_argument("principal_ref")
+    cc.add_argument("device_ref")
+    cc.add_argument("--product-id")
+    cc.add_argument("--service-id")
+    sa = sub.add_parser("service-activation")
+    sa.add_argument("profile", type=Path)
+    sa.add_argument("consent_receipt", type=Path)
+    sa.add_argument("principal_ref")
+    sa.add_argument("device_ref")
+    ua = sub.add_parser("update-authorize")
+    ua.add_argument("request", type=Path)
+    ua.add_argument("consent_receipt", type=Path)
+    ua.add_argument("principal_ref")
+    ua.add_argument("device_ref")
     ar = sub.add_parser("activate-runtime")
     ar.add_argument("runtime_profile", type=Path)
     ar.add_argument("consent_receipt", type=Path)
@@ -167,6 +200,10 @@ def main(argv: list[str] | None = None) -> int:
     qu.add_argument("runtime_profile", type=Path)
     qu.add_argument("consent_receipt", type=Path)
     qu.add_argument("update_request", type=Path)
+    sub.add_parser("operations")
+    sub.add_parser("evidence-status")
+    ip = sub.add_parser("inspect-operation")
+    ip.add_argument("target_operation_id")
     db = sub.add_parser("diagnostic-bundle")
     db.add_argument("source_operation_id")
     db.add_argument("--output", type=Path)
@@ -203,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 70
 
-    approval_required = args.cmd in {"apply", "rollback", "activate-runtime", "revoke-runtime-consent"} or (
+    approval_required = args.cmd in {"apply", "rollback", "consent-write", "consent-update", "activate-runtime", "revoke-runtime-consent"} or (
         args.cmd == "diagnostic-bundle" and args.output is not None
     )
     if approval_required and not args.approve:
@@ -236,6 +273,136 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        if args.cmd == "consent-write":
+            policy_raw = json.loads(args.policy.read_text(encoding="utf-8"))
+            policy = compile_policy(policy_raw)
+            receipt = write_receipt(policy, args.receipt)
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed", "local permission receipt stored",
+                expected_action=expected, execution_result="succeeded",
+                do_not_retry_before_reconcile=True,
+                changed_resources=[{"kind":"consent_receipt","path":redact_text(str(args.receipt))}],
+                rollback_eligible=False,
+                details={"kernel_version":__version__,"scopes":receipt["scopes"]},
+            )
+            if not finalized: return 70
+            print(json.dumps(receipt, indent=2))
+            return 0
+        if args.cmd == "consent-update":
+            policy_raw = json.loads(args.policy.read_text(encoding="utf-8"))
+            receipt = replace_receipt(
+                policy_raw, args.receipt, args.expected_consent_sha256
+            )
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed", "local permission receipt replaced with currentness check",
+                expected_action=expected, execution_result="succeeded",
+                do_not_retry_before_reconcile=True,
+                changed_resources=[{"kind":"consent_receipt","path":redact_text(str(args.receipt))}],
+                rollback_eligible=True,
+                details={"kernel_version":__version__,"consent_sha256":receipt["consent_sha256"]},
+            )
+            if not finalized: return 70
+            print(json.dumps(receipt, indent=2))
+            return 0
+        if args.cmd == "consent-status":
+            receipt = read_receipt(args.receipt)
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed", "local permission receipt read and verified",
+                expected_action=expected, execution_result="succeeded",
+                details={"kernel_version":__version__},
+            )
+            if not finalized: return 70
+            print(json.dumps(receipt, indent=2))
+            return 0
+        if args.cmd == "consent-check":
+            receipt = read_receipt(args.receipt)
+            result = authorize(
+                receipt, scope=args.scope, principal_ref=args.principal_ref,
+                device_ref=args.device_ref, product_id=args.product_id, service_id=args.service_id,
+            )
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed" if result["state"]=="CONSENTED" else "blocked",
+                "permission evaluation completed",
+                expected_action=expected, execution_result="succeeded",
+                details={"kernel_version":__version__,"scope":args.scope,"state":result["state"]},
+            )
+            if not finalized: return 70
+            print(json.dumps(result, indent=2))
+            return 0 if result["state"]=="CONSENTED" else 3
+        if args.cmd == "service-activation":
+            profile = load_service_profile(args.profile)
+            consent = read_receipt(args.consent_receipt)
+            result = compile_service_activation(
+                profile, consent, principal_ref=args.principal_ref, device_ref=args.device_ref
+            )
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed", "service activation packet compiled",
+                expected_action=expected, execution_result="succeeded",
+                details={"kernel_version":__version__,"product_id":result.get("product_id")},
+            )
+            if not finalized: return 70
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.cmd == "update-authorize":
+            request = load_update_request(args.request)
+            consent = read_receipt(args.consent_receipt)
+            result = authorize_update(
+                request, consent, principal_ref=args.principal_ref, device_ref=args.device_ref
+            )
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed" if result["state"]=="AUTHORIZED_FOR_WARD_ADMISSION" else "blocked",
+                "central update request evaluated against local permission",
+                expected_action=expected, execution_result="succeeded",
+                details={"kernel_version":__version__,"request_id":result["request_id"],"state":result["state"]},
+            )
+            if not finalized: return 70
+            print(json.dumps(result, indent=2))
+            return 0 if result["state"]=="AUTHORIZED_FOR_WARD_ADMISSION" else 3
+        if args.cmd == "activate-runtime":
+            profile = load_runtime_profile(args.runtime_profile)
+            result = activate_runtime_profile(
+                profile,
+                grants=args.grant,
+                update_policy=args.update_policy,
+                consent_receipt_path=args.consent_receipt,
+                activation_receipt_path=args.activation_receipt,
+                principal_ref=args.principal_ref,
+            )
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed", "runtime profile activated with local consent and service readback",
+                expected_action=expected, execution_result="succeeded",
+                do_not_retry_before_reconcile=True, rollback_eligible=True,
+                details={"kernel_version":__version__,"consent_ref":result.get("consent_ref")},
+            )
+            if not finalized: return 70
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.cmd == "revoke-runtime-consent":
+            result = revoke_runtime_consent(args.consent_receipt)
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed", "runtime managed-update consent revoked",
+                expected_action=expected, execution_result="succeeded",
+                do_not_retry_before_reconcile=True, rollback_eligible=False,
+                details={"kernel_version":__version__},
+            )
+            if not finalized: return 70
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.cmd == "qualify-update":
+            profile = load_runtime_profile(args.runtime_profile)
+            consent = json.loads(args.consent_receipt.read_text(encoding="utf-8"))
+            request = json.loads(args.update_request.read_text(encoding="utf-8"))
+            result = qualify_update_request(profile, consent, request)
+            finalized = _finish_terminal_or_report_unknown(
+                journal, "passed" if result.get("state") != "DENIED" else "blocked",
+                "central update request qualified against local runtime consent; no effect attempted",
+                expected_action=expected, execution_result="not_attempted",
+                rollback_eligible=False,
+                details={"kernel_version":__version__,"update_state":result.get("state")},
+            )
+            if not finalized: return 70
+            print(json.dumps(result, indent=2))
+            return 0
         if args.cmd == "discover":
             result = discover_host()
             finalized = _finish_terminal_or_report_unknown(
@@ -317,64 +484,6 @@ def main(argv: list[str] | None = None) -> int:
             if not finalized:
                 return 70
             result = {"rolled_back": True, "receipt": redact_text(str(args.receipt))}
-            print(json.dumps(result, indent=2))
-            return 0
-        if args.cmd == "activate-runtime":
-            profile = load_runtime_profile(args.runtime_profile)
-            result = activate_runtime_profile(
-                profile,
-                grants=args.grant,
-                update_policy=args.update_policy,
-                consent_receipt_path=args.consent_receipt,
-                activation_receipt_path=args.activation_receipt,
-                principal_ref=args.principal_ref,
-            )
-            finalized = _finish_terminal_or_report_unknown(
-                journal,
-                "passed",
-                "runtime profile activated with local consent and service readback",
-                expected_action=expected,
-                execution_result="succeeded",
-                do_not_retry_before_reconcile=True,
-                rollback_eligible=True,
-                details={"kernel_version": __version__, "consent_ref": result.get("consent_ref")},
-            )
-            if not finalized:
-                return 70
-            print(json.dumps(result, indent=2))
-            return 0
-        if args.cmd == "revoke-runtime-consent":
-            result = revoke_runtime_consent(args.consent_receipt)
-            finalized = _finish_terminal_or_report_unknown(
-                journal,
-                "passed",
-                "runtime managed-update consent revoked",
-                expected_action=expected,
-                execution_result="succeeded",
-                do_not_retry_before_reconcile=True,
-                rollback_eligible=False,
-                details={"kernel_version": __version__},
-            )
-            if not finalized:
-                return 70
-            print(json.dumps(result, indent=2))
-            return 0
-        if args.cmd == "qualify-update":
-            profile = load_runtime_profile(args.runtime_profile)
-            consent = json.loads(args.consent_receipt.read_text(encoding="utf-8"))
-            request = json.loads(args.update_request.read_text(encoding="utf-8"))
-            result = qualify_update_request(profile, consent, request)
-            finalized = _finish_terminal_or_report_unknown(
-                journal,
-                "passed" if result.get("state") != "DENIED" else "blocked",
-                "central update request qualified against local consent; no effect attempted",
-                expected_action=expected,
-                execution_result="not_attempted",
-                rollback_eligible=False,
-                details={"kernel_version": __version__, "update_state": result.get("state")},
-            )
-            if not finalized:
-                return 70
             print(json.dumps(result, indent=2))
             return 0
         if args.cmd == "diagnostic-bundle" and args.output is not None:
