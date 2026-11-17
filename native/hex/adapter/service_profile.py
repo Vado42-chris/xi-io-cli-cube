@@ -6,7 +6,8 @@ never accepts arbitrary unit names, and never treats central requests as local
 effect authority.
 """
 from __future__ import annotations
-import hashlib, json, os, re, stat, subprocess
+import fcntl, hashlib, json, os, re, stat, subprocess
+from contextlib import contextmanager
 from pathlib import Path
 import permission_profile
 
@@ -136,7 +137,47 @@ def _plan_digest(plan):
  if not isinstance(plan,dict): raise ValueError('SERVICE_PLAN_SCHEMA_INVALID')
  return _digest({key:value for key,value in plan.items() if key!='plan_digest'})
 
-def compile_service_plan(catalog,permissions,service_ids,action):
+def _permission_grant_ref(base):
+ if base is None: raise ValueError('SERVICE_PERMISSION_GRANT_BASE_REQUIRED')
+ try: value=os.fspath(base)
+ except TypeError as exc: raise ValueError('SERVICE_PERMISSION_GRANT_BASE_INVALID') from exc
+ if not isinstance(value,str) or not os.path.isabs(value):
+  raise ValueError('SERVICE_PERMISSION_GRANT_BASE_INVALID')
+ normalized=os.path.normpath(value)
+ return 'sha256:'+hashlib.sha256(normalized.encode()).hexdigest()
+
+def _current_permission_grant(permissions,permission_base,permission_plan_id,expected_digest=None):
+ grant_ref=_permission_grant_ref(permission_base)
+ current=permission_profile.load_grant(permission_base,permission_plan_id)
+ if expected_digest is not None and current.get('permission_digest')!=expected_digest:
+  raise ValueError('SERVICE_PERMISSION_GRANT_CHANGED_SINCE_REVIEW')
+ if not isinstance(permissions,dict) or permissions!=current:
+  raise ValueError('SERVICE_PERMISSION_PROFILE_NOT_CURRENT_GRANT')
+ return current,grant_ref
+
+@contextmanager
+def _locked_current_permission_grant(permissions,permission_base,permission_plan_id,expected_digest,expected_ref):
+ grant_ref=_permission_grant_ref(permission_base)
+ if grant_ref!=expected_ref: raise ValueError('SERVICE_PERMISSION_GRANT_LOCATOR_CHANGED')
+ name=permission_profile._plan_name(permission_plan_id)
+ root_fd=permission_profile._open_permissions_root(permission_base,False)
+ lock_fd=None
+ try:
+  lock_fd=permission_profile._open_grant_lock(root_fd,name)
+  current=permission_profile._read_grant(root_fd,name,permission_plan_id)
+  if current.get('permission_digest')!=expected_digest:
+   raise ValueError('SERVICE_PERMISSION_GRANT_CHANGED_SINCE_REVIEW')
+  if not isinstance(permissions,dict) or permissions!=current:
+   raise ValueError('SERVICE_PERMISSION_PROFILE_NOT_CURRENT_GRANT')
+  yield current
+ finally:
+  if lock_fd is not None:
+   fcntl.flock(lock_fd,fcntl.LOCK_UN);os.close(lock_fd)
+  os.close(root_fd)
+
+def compile_service_plan(catalog,permissions,service_ids,action,*,permission_base=None,permission_plan_id=None):
+ permissions,permission_grant_ref=_current_permission_grant(
+  permissions,permission_base,permission_plan_id)
  document,catalog_sha256=_catalog_binding(catalog)
  if action not in {'start','stop'}: raise ValueError('SERVICE_ACTION_INVALID')
  if (not isinstance(service_ids,list) or not service_ids
@@ -152,14 +193,17 @@ def compile_service_plan(catalog,permissions,service_ids,action):
  ready=all(row['state']=='READY_EXISTING_USER_UNIT' for row in rows)
  plan={
   'schema':SCHEMA,'action':action,'catalog_sha256':catalog_sha256,
-  'permission_digest':permissions['permission_digest'],'service_ids':list(service_ids),
+  'permission_digest':permissions['permission_digest'],
+  'permission_plan_id':permission_plan_id,'permission_grant_ref':permission_grant_ref,
+  'service_ids':list(service_ids),
   'services':rows,'effect_authorized':False,'can_apply':ready,
   'can_start':action=='start' and ready,
   'first_red':next((row['state'] for row in rows if row['state']!='READY_EXISTING_USER_UNIT'),None),
   'hard':['CATALOG_ENTRY!=INSTALLED_UNIT','UNIT_PRESENT!=SERVICE_HEALTHY',
           'START_ALLOWED!=START_APPROVED','CENTRAL_REQUEST!=LOCAL_EFFECT_AUTHORITY',
           'SYSTEM_SERVICE!=USER_SERVICE','PLAN_REVIEW!=LIVE_CATALOG',
-          'PLAN_ACTION!=APPLY_ACTION'],
+          'PLAN_ACTION!=APPLY_ACTION','IN_MEMORY_PROFILE!=DURABLE_PERMISSION_GRANT',
+          'PERMISSION_DIGEST!=GRANT_CURRENTNESS'],
  }
  plan['plan_digest']=_plan_digest(plan)
  return plan
@@ -217,35 +261,41 @@ def _validate_apply_plan(source_root,plan,permissions,action):
   live.append(current)
  return live
 
-def apply_service_action(plan,permissions,action,approved,*,catalog_source_root=None):
+def apply_service_action(plan,permissions,action,approved,*,catalog_source_root=None,permission_base=None):
  if action not in {'start','stop'}: raise ValueError('SERVICE_ACTION_INVALID')
  if approved is not True: raise ValueError('EXPLICIT_SERVICE_APPROVAL_REQUIRED')
  if catalog_source_root is None: raise ValueError('SERVICE_CATALOG_SOURCE_REQUIRED')
- rows=_validate_apply_plan(catalog_source_root,plan,permissions,action)
- expected='active' if action=='start' else 'inactive'
- attempts=[]
- try:
-  for row in rows:
-   sid=row['service_id'];unit=row['selected_unit']
-   before=observe_user_unit(unit)
-   if before.get('observed') is not True or before.get('active_state') not in {'active','inactive'}:
-    raise ValueError('SERVICE_PRE_ACTION_STATE_UNVERIFIED:'+sid)
-   attempt={'service_id':sid,'unit':unit,'before':before,'after':None,'returncode':None}
-   attempts.append(attempt)
-   result=_run(['systemctl','--user',action,unit]);attempt['returncode']=result.returncode
-   after=observe_user_unit(unit);attempt['after']=after
-   if result.returncode!=0: raise ValueError('SERVICE_'+action.upper()+'_FAILED:'+sid)
-   if after.get('observed') is not True or after.get('active_state')!=expected:
-    raise ValueError('SERVICE_'+action.upper()+'_READBACK_FAILED:'+sid)
- except Exception:
-  try:_restore_attempts(attempts,permissions)
-  except Exception as compensation:
-   raise ValueError('SERVICE_ACTION_PARTIAL_EFFECT_UNCERTAIN') from compensation
-  raise
- return {
-  'schema':'xiio.hex.user-service-effect/v1','action':action,
-  'state':'READBACK_VERIFIED','results':attempts,
-  'catalog_sha256':plan['catalog_sha256'],'plan_digest':plan['plan_digest'],
-  'permission_digest':permissions['permission_digest'],
-  'effect_authorized':True,'central_authority':False,
- }
+ if not isinstance(plan,dict): raise ValueError('SERVICE_PLAN_SCHEMA_INVALID')
+ with _locked_current_permission_grant(
+  permissions,permission_base,plan.get('permission_plan_id'),
+  plan.get('permission_digest'),plan.get('permission_grant_ref')) as current_permissions:
+  rows=_validate_apply_plan(catalog_source_root,plan,current_permissions,action)
+  expected='active' if action=='start' else 'inactive'
+  attempts=[]
+  try:
+   for row in rows:
+    sid=row['service_id'];unit=row['selected_unit']
+    before=observe_user_unit(unit)
+    if before.get('observed') is not True or before.get('active_state') not in {'active','inactive'}:
+     raise ValueError('SERVICE_PRE_ACTION_STATE_UNVERIFIED:'+sid)
+    attempt={'service_id':sid,'unit':unit,'before':before,'after':None,'returncode':None}
+    attempts.append(attempt)
+    result=_run(['systemctl','--user',action,unit]);attempt['returncode']=result.returncode
+    after=observe_user_unit(unit);attempt['after']=after
+    if result.returncode!=0: raise ValueError('SERVICE_'+action.upper()+'_FAILED:'+sid)
+    if after.get('observed') is not True or after.get('active_state')!=expected:
+     raise ValueError('SERVICE_'+action.upper()+'_READBACK_FAILED:'+sid)
+  except Exception:
+   try:_restore_attempts(attempts,current_permissions)
+   except Exception as compensation:
+    raise ValueError('SERVICE_ACTION_PARTIAL_EFFECT_UNCERTAIN') from compensation
+   raise
+  return {
+   'schema':'xiio.hex.user-service-effect/v1','action':action,
+   'state':'READBACK_VERIFIED','results':attempts,
+   'catalog_sha256':plan['catalog_sha256'],'plan_digest':plan['plan_digest'],
+   'permission_plan_id':plan['permission_plan_id'],
+   'permission_grant_ref':plan['permission_grant_ref'],
+   'permission_digest':current_permissions['permission_digest'],
+   'effect_authorized':True,'central_authority':False,
+  }

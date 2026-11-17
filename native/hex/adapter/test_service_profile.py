@@ -34,6 +34,10 @@ class ServiceProfileTests(unittest.TestCase):
    'profile_id':'service-admin','capabilities':['start_services','stop_services'],
    'service_scopes':['alpha','beta'],'update_policy':'off',
    'central_updates':False,'remote_access':False,'revoked':False})
+  self.permission_base=Path(self.tmp.name)/'authority';self.permission_base.mkdir(mode=0o700)
+  self.permission_plan_id='a'*32
+  permission_profile.save_grant(
+   self.permission_base,self.permission_plan_id,self.permissions,True)
 
  def write_catalog(self):
   self.catalog_path.write_text(json.dumps(self.catalog,indent=2)+'\n')
@@ -60,12 +64,14 @@ class ServiceProfileTests(unittest.TestCase):
  def compile(self,ids=('alpha',),action='start'):
   with patch.object(service_profile,'_run',side_effect=self.fake_run):
    return service_profile.compile_service_plan(
-    service_profile.load_catalog(self.root),self.permissions,list(ids),action)
+    service_profile.load_catalog(self.root),self.permissions,list(ids),action,
+    permission_base=self.permission_base,permission_plan_id=self.permission_plan_id)
 
- def apply(self,plan,action='start'):
+ def apply(self,plan,action='start',permission_base=None):
   with patch.object(service_profile,'_run',side_effect=self.fake_run):
    return service_profile.apply_service_action(
-    plan,self.permissions,action,True,catalog_source_root=self.root)
+    plan,self.permissions,action,True,catalog_source_root=self.root,
+    permission_base=permission_base or self.permission_base)
 
  def test_successful_action_is_catalog_and_plan_bound(self):
   plan=self.compile();effect=self.apply(plan)
@@ -73,7 +79,39 @@ class ServiceProfileTests(unittest.TestCase):
   self.assertEqual(self.states['alpha.service']['active'],'active')
   self.assertEqual(effect['catalog_sha256'],plan['catalog_sha256'])
   self.assertEqual(effect['plan_digest'],plan['plan_digest'])
+  self.assertEqual(effect['permission_plan_id'],self.permission_plan_id)
+  self.assertEqual(effect['permission_grant_ref'],plan['permission_grant_ref'])
   self.assertEqual(effect['results'][0]['after']['active_state'],'active')
+
+ def test_in_memory_profile_without_durable_grant_refuses(self):
+  missing_plan='c'*32
+  with patch.object(service_profile,'_run',side_effect=self.fake_run):
+   with self.assertRaisesRegex(ValueError,'PERMISSION_GRANT_NOT_FOUND'):
+    service_profile.compile_service_plan(
+     service_profile.load_catalog(self.root),self.permissions,['alpha'],'start',
+     permission_base=self.permission_base,permission_plan_id=missing_plan)
+  self.assertEqual(self.events,[])
+
+ def test_replaced_permission_grant_refuses_before_action(self):
+  plan=self.compile()
+  replacement=permission_profile.compile_profile({
+   'profile_id':'replacement','capabilities':['start_services','stop_services'],
+   'service_scopes':['alpha','beta'],'update_policy':'off',
+   'central_updates':False,'remote_access':False,'revoked':False})
+  permission_profile.replace_grant(
+   self.permission_base,self.permission_plan_id,
+   self.permissions['permission_digest'],replacement,True)
+  with self.assertRaisesRegex(ValueError,'SERVICE_PERMISSION_GRANT_CHANGED_SINCE_REVIEW'):
+   self.apply(plan)
+  self.assertEqual(self.events,[])
+
+ def test_equivalent_grant_from_another_custody_root_cannot_substitute(self):
+  plan=self.compile();alternate=Path(self.tmp.name)/'alternate-authority';alternate.mkdir(mode=0o700)
+  permission_profile.save_grant(
+   alternate,self.permission_plan_id,self.permissions,True)
+  with self.assertRaisesRegex(ValueError,'SERVICE_PERMISSION_GRANT_LOCATOR_CHANGED'):
+   self.apply(plan,permission_base=alternate)
+  self.assertEqual(self.events,[])
 
  def test_reviewed_start_cannot_be_substituted_with_stop(self):
   plan=self.compile(action='start')
@@ -122,9 +160,14 @@ class ServiceProfileTests(unittest.TestCase):
    'profile_id':'start-only','capabilities':['start_services'],
    'service_scopes':['alpha'],'update_policy':'off',
    'central_updates':False,'remote_access':False,'revoked':False})
+  start_only_plan='b'*32
+  permission_profile.save_grant(
+   self.permission_base,start_only_plan,start_only,True)
   with patch.object(service_profile,'_run',side_effect=self.fake_run):
    with self.assertRaisesRegex(ValueError,'CAPABILITY_NOT_GRANTED:stop_services'):
-    service_profile.compile_service_plan(service_profile.load_catalog(self.root),start_only,['alpha'],'start')
+    service_profile.compile_service_plan(
+     service_profile.load_catalog(self.root),start_only,['alpha'],'start',
+     permission_base=self.permission_base,permission_plan_id=start_only_plan)
 
  def test_apply_requires_authoritative_catalog_source(self):
   plan=self.compile()
