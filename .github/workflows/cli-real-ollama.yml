@@ -39,6 +39,7 @@ jobs:
           sudo apt-get install -y python3-pexpect
           python3 -B native/hex/cli-source/test_real_ollama_qualification.py
           python3 -B native/hex/cli-source/test_installed_ollama_qualification.py
+          python3 -B native/hex/cli-source/test_installed_evidence_custody.py
           ollama --version
 
       - name: Start Ollama and pull bounded local model
@@ -73,7 +74,10 @@ jobs:
           # installer, then invokes only its generated launcher. Existing benches
           # refuse, so an approved failure cannot be reset into a passing retry.
           XIIO_PROOF_ROOT="$work" python3 -B native/hex/cli-source/qualify_real_ollama.py
+          python3 -B native/hex/cli-source/verify_installed_evidence_custody.py --root "$work"
           test "$(cat "$work/project/NOTE.txt")" = "status: new"
+          test "$(stat -c '%a' "$work/bin/xi-io-cli")" = "755"
+          test "$(stat -c '%a' "$work/evidence-custody.json")" = "600"
           sha256sum "$work/project/NOTE.txt" | tee "$work/note.sha256"
           cp "$RUNNER_TEMP/ollama.log" "$work/ollama.log"
           cp "$work/transcript.txt" "$work/transcript.redacted.txt"
@@ -102,6 +106,8 @@ jobs:
             ${{ runner.temp }}/xiio-real-ollama/*.json
             ${{ runner.temp }}/xiio-real-ollama/*.transcript.txt
             ${{ runner.temp }}/xiio-real-ollama/state/chat/*.json
+            ${{ runner.temp }}/xiio-real-ollama/prefix/current
+            ${{ runner.temp }}/xiio-real-ollama/prefix/previous
             ${{ runner.temp }}/xiio-real-ollama/prefix/versions/**
             ${{ runner.temp }}/xiio-real-ollama/bin/xi-io-cli
             ${{ runner.temp }}/xiio-real-ollama/config/**
