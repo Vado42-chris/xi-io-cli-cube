@@ -31,3 +31,8 @@ test('native package qualification isolates adapter test module state',()=>{
  assert.match(nativePackage,/for\(const name of tests\)/,'ADAPTER_TEST_FILES_NOT_EXECUTED_SEPARATELY');
  assert.doesNotMatch(nativePackage,/'test_\*\.py'/,'SHARED_DISCOVERY_INTERPRETER_REINTRODUCED');
 });
+
+test('isolated adapter tests receive the explicit embedded Installer kernel root',()=>{
+ assert.match(nativePackage,/join\(adapter,'kernel'\)/,'EMBEDDED_KERNEL_ROOT_NOT_BOUND');
+ assert.match(nativePackage,/PYTHONPATH:pythonPath/,'ISOLATED_KERNEL_BOOTSTRAP_NOT_APPLIED');
+});
