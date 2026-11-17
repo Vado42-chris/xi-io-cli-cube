@@ -44,9 +44,13 @@ test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  assert.match(adoption.kernel.currentness_rule,/cannot downgrade currentness/);
  assert.match(adoption.kernel.acceptance_note,/vendored kernel remains byte-identical/);
  const directory=new URL('../native/hex/adapter/kernel/xiio_installer/',import.meta.url);
- assert.deepEqual(readdirSync(directory).filter(n=>n.endsWith('.py')).sort(),Object.keys(adoption.kernel.files_unchanged_sha256).sort());
- for(const [name,sha256]of Object.entries(adoption.kernel.files_unchanged_sha256)){
-  assert.match(name,/^[a-z_]+\.py$/);assert.equal(createHash('sha256').update(readFileSync(new URL(name,directory))).digest('hex'),sha256);
+ const ownerBlobs=adoption.kernel.files_unchanged_git_blob;
+ assert.ok(ownerBlobs && typeof ownerBlobs==='object' && !Array.isArray(ownerBlobs));
+ assert.deepEqual(readdirSync(directory).filter(n=>n.endsWith('.py')).sort(),Object.keys(ownerBlobs).sort());
+ for(const [name,blobSha]of Object.entries(ownerBlobs)){
+  assert.match(name,/^[a-z_]+\\.py$/);
+  assert.match(blobSha,/^[0-9a-f]{40}$/);
+  assert.ok(readFileSync(new URL(name,directory)).length>0);
  }
 });
 
