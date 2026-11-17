@@ -37,6 +37,7 @@ class RuntimeService:
     required:bool
     activation_permission:str|None
     generation_field:str
+    declared_generation:str|None
 
 @dataclass(frozen=True)
 class RuntimeDependency:
@@ -145,7 +146,9 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
         generation_field=_text(row.get("generation_field","generation"),f"SERVICE_{i}_GENERATION_FIELD")
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}",generation_field):
             raise RuntimeProfileError(f"SERVICE_{i}_GENERATION_FIELD_INVALID")
-        services.append(RuntimeService(sid,unit,health,required,bool(row.get("required",False)),activation_permission,generation_field))
+        declared_raw=row.get("declared_generation")
+        declared_generation=_text(declared_raw,f"SERVICE_{i}_DECLARED_GENERATION") if declared_raw is not None else None
+        services.append(RuntimeService(sid,unit,health,required,bool(row.get("required",False)),activation_permission,generation_field,declared_generation))
     return RuntimeProfile(profile_id,generation,product_id,tuple(services),tuple(dependencies),defaults,optional,policy,raw)
 
 def compile_user_consent(profile:RuntimeProfile,*,grants:list[str],update_policy:str|None=None,principal_ref:str="local-user")->dict[str,Any]:
