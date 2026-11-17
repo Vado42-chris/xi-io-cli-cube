@@ -10,6 +10,7 @@ from typing import Any
 from urllib.request import urlopen
 
 from .runtime_profile import RuntimeProfile, RuntimeProfileError, compile_user_consent
+from .running_generation import verify_running_generation, RunningGenerationError
 
 class RuntimeActivationError(RuntimeError):
     pass
@@ -146,11 +147,16 @@ def activate_runtime_profile(
             if state.returncode!=0 or state.stdout.strip()!="active":
                 raise RuntimeActivationError("SERVICE_NOT_ACTIVE:"+service.service_id)
             health=_probe(service.health_url)
+            try:
+                generation_readback=verify_running_generation(declared_generation=profile.generation,health=health)
+            except RunningGenerationError as exc:
+                raise RuntimeActivationError(str(exc)) from exc
             activated.append({
                 "service_id":service.service_id,
                 "unit":service.unit,
                 "health_url":service.health_url,
                 "health":health,
+                "generation_readback":generation_readback,
                 "active":True,
             })
     except Exception:
@@ -169,7 +175,7 @@ def activate_runtime_profile(
         "permissions":consent["permissions"],
         "update_policy":consent["update_policy"],
         "services":activated,
-        "readback_verified":all(row["active"] for row in activated),
+        "readback_verified":all(row["active"] and row["generation_readback"]["state"]=="CURRENT" for row in activated),
         "provider_effect":False,
         "hard":[
             "RUNTIME_PROFILE!=GENERAL_MACHINE_AUTHORITY",
