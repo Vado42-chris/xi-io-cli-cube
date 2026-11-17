@@ -15,6 +15,8 @@ from pathlib import Path
 
 SCHEMA='xiio.hex.permission-profile/v1'
 GRANT_SCHEMA='xiio.hex.permission-grant/v1'
+DECISION_SCHEMA='xiio.hex.central-update-decision/v2'
+EFFECT_SCHEMA='xiio.hex.effect-authorization/v2'
 UPDATE_POLICIES={'off','notify','review_each','auto_security'}
 CAPABILITIES={
  'install_files','configure_services','start_services','stop_services',
@@ -28,12 +30,29 @@ DEFAULT_PROFILE={
 }
 MAX_GRANT_BYTES=64*1024
 SHA256=re.compile(r'^[a-f0-9]{64}$')
+DECISION_HARD=[
+ 'CENTRAL_REQUEST!=LOCAL_AUTHORITY','PROFILE_ALLOW!=EFFECT_AUTHORITY',
+ 'AUTO_ELIGIBLE!=EFFECT_EXECUTED','ROLLBACK_REQUIRED',
+ 'WARD_AUTHORIZATION_MUST_BIND_EXACT_DECISION',
+]
+EFFECT_HARD=[
+ 'CENTRAL_REQUEST!=WARD_AUTHORITY','PROFILE_ALLOW!=EFFECT_AUTHORITY',
+ 'WARD_RECEIPT_REQUIRED','CURRENTNESS_RECEIPT_REQUIRED',
+ 'DECISION_DIGEST_REQUIRED',
+]
 
 def _canon(v):
  return json.dumps(v,sort_keys=True,separators=(',',':')).encode()
 
 def digest(v):
  return hashlib.sha256(_canon(v)).hexdigest()
+
+def _text(value,code,max_length=256):
+ if not isinstance(value,str): raise ValueError(code)
+ value=value.strip()
+ if not value or len(value)>max_length or any(ord(char)<32 for char in value):
+  raise ValueError(code)
+ return value
 
 def compile_profile(raw=None):
  raw=dict(raw or {})
@@ -74,30 +93,73 @@ def require_capability(profile,capability,service_id=None):
   raise ValueError('SERVICE_SCOPE_NOT_GRANTED:'+service_id)
  return p
 
+def _decision_core(decision):
+ return {
+  'schema':decision.get('schema'),'request_id':decision.get('request_id'),
+  'service_id':decision.get('service_id'),'kind':decision.get('kind'),
+  'target_generation':decision.get('target_generation'),'severity':decision.get('severity'),
+  'requires_restart':decision.get('requires_restart'),
+  'allowed_by_profile':decision.get('allowed_by_profile'),
+  'approval_required':decision.get('approval_required'),
+  'effect_authorized':decision.get('effect_authorized'),
+  'auto_eligible':decision.get('auto_eligible'),
+  'permission_digest':decision.get('permission_digest'),
+ }
+
 def authorize_central_request(profile,request):
- """Return an authorization decision only, never perform the patch."""
+ """Compile one non-effect decision bound to the exact provider proposal."""
  p=require_capability(profile,'receive_central_updates')
  if not isinstance(request,dict): raise ValueError('CENTRAL_REQUEST_INVALID')
  allowed={'request_id','kind','service_id','severity','target_generation',
           'signed','rollback_available','requires_restart'}
- if set(request)-allowed: raise ValueError('CENTRAL_REQUEST_FIELDS_INVALID')
+ if set(request)!=allowed: raise ValueError('CENTRAL_REQUEST_FIELDS_INVALID')
+ request_id=_text(request.get('request_id'),'CENTRAL_REQUEST_ID_REQUIRED')
  kind=request.get('kind')
  if kind not in {'update','hotpatch'}: raise ValueError('CENTRAL_REQUEST_KIND_INVALID')
- service=request.get('service_id')
- if not isinstance(service,str) or not service: raise ValueError('CENTRAL_REQUEST_SERVICE_REQUIRED')
+ service=_text(request.get('service_id'),'CENTRAL_REQUEST_SERVICE_REQUIRED',96)
+ target=_text(request.get('target_generation'),'CENTRAL_REQUEST_TARGET_GENERATION_REQUIRED')
+ severity=_text(request.get('severity'),'CENTRAL_REQUEST_SEVERITY_REQUIRED',64)
+ if not isinstance(request.get('requires_restart'),bool):
+  raise ValueError('CENTRAL_REQUEST_RESTART_FLAG_INVALID')
  if service not in p['service_scopes']: raise ValueError('SERVICE_SCOPE_NOT_GRANTED:'+service)
  if request.get('signed') is not True: raise ValueError('CENTRAL_REQUEST_SIGNATURE_REQUIRED')
  if request.get('rollback_available') is not True: raise ValueError('CENTRAL_REQUEST_ROLLBACK_REQUIRED')
  if kind=='hotpatch': require_capability(profile,'apply_hotpatches',service)
- auto=(p['update_policy']=='auto_security' and request.get('severity')=='security' and kind=='hotpatch')
- return {
-  'schema':'xiio.hex.central-update-decision/v1','request_id':request.get('request_id'),
-  'service_id':service,'kind':kind,'allowed_by_profile':True,
+ auto=(p['update_policy']=='auto_security' and severity=='security' and kind=='hotpatch')
+ core={
+  'schema':DECISION_SCHEMA,'request_id':request_id,'service_id':service,'kind':kind,
+  'target_generation':target,'severity':severity,
+  'requires_restart':request['requires_restart'],'allowed_by_profile':True,
   'approval_required':not auto,'effect_authorized':False,'auto_eligible':auto,
   'permission_digest':p['permission_digest'],
-  'hard':['CENTRAL_REQUEST!=LOCAL_AUTHORITY','PROFILE_ALLOW!=EFFECT_AUTHORITY',
-          'AUTO_ELIGIBLE!=EFFECT_EXECUTED','ROLLBACK_REQUIRED'],
  }
+ return {**core,'decision_digest':digest(core),'hard':list(DECISION_HARD)}
+
+def _validated_decision(decision):
+ expected=set(_decision_core({}))|{'decision_digest','hard'}
+ if not isinstance(decision,dict) or set(decision)!=expected:
+  raise ValueError('CENTRAL_DECISION_INVALID')
+ core=_decision_core(decision)
+ if core['schema']!=DECISION_SCHEMA: raise ValueError('CENTRAL_DECISION_INVALID')
+ _text(core['request_id'],'CENTRAL_DECISION_REQUEST_ID_INVALID')
+ _text(core['service_id'],'CENTRAL_DECISION_SERVICE_ID_INVALID',96)
+ if core['kind'] not in {'update','hotpatch'}: raise ValueError('CENTRAL_DECISION_KIND_INVALID')
+ _text(core['target_generation'],'CENTRAL_DECISION_TARGET_GENERATION_INVALID')
+ _text(core['severity'],'CENTRAL_DECISION_SEVERITY_INVALID',64)
+ if not isinstance(core['requires_restart'],bool): raise ValueError('CENTRAL_DECISION_RESTART_FLAG_INVALID')
+ for key in ['allowed_by_profile','approval_required','effect_authorized','auto_eligible']:
+  if not isinstance(core[key],bool): raise ValueError('CENTRAL_DECISION_BOOLEAN_INVALID:'+key)
+ if core['allowed_by_profile'] is not True or core['effect_authorized'] is not False:
+  raise ValueError('CENTRAL_DECISION_NOT_ADMISSIBLE')
+ if core['approval_required'] is core['auto_eligible']:
+  raise ValueError('CENTRAL_DECISION_APPROVAL_STATE_INVALID')
+ if not isinstance(core['permission_digest'],str) or not SHA256.fullmatch(core['permission_digest']):
+  raise ValueError('CENTRAL_DECISION_PERMISSION_DIGEST_INVALID')
+ if decision.get('hard')!=DECISION_HARD: raise ValueError('CENTRAL_DECISION_HARD_RULES_INVALID')
+ observed=decision.get('decision_digest')
+ if not isinstance(observed,str) or not SHA256.fullmatch(observed) or observed!=digest(core):
+  raise ValueError('CENTRAL_DECISION_DIGEST_INVALID')
+ return core
 
 def _plan_name(plan_id):
  if not isinstance(plan_id,str) or len(plan_id)!=32 or any(c not in '0123456789abcdef' for c in plan_id):
@@ -269,30 +331,33 @@ def replace_grant(base,plan_id,current_digest,new_profile,approved):
  finally: os.close(root_fd)
 
 def require_effect_authorization(decision,authorization,approved=False):
- """Join provider proposal to local XI-IO authority. Refs are receipts, not secrets."""
- if not isinstance(decision,dict) or decision.get('schema')!='xiio.hex.central-update-decision/v1':
-  raise ValueError('CENTRAL_DECISION_INVALID')
- if decision.get('allowed_by_profile') is not True or decision.get('effect_authorized') is not False:
-  raise ValueError('CENTRAL_DECISION_NOT_ADMISSIBLE')
+ """Join one exact central proposal to one exact Ward authorization."""
+ core=_validated_decision(decision)
  if not isinstance(authorization,dict): raise ValueError('EFFECT_AUTHORIZATION_REQUIRED')
- allowed={'ward_admission','ward_admission_ref','work_ref','assignment_ref','attempt_ref',
-          'generation_ref','currentness_ref','effect_authorization_ref','permission_digest'}
- if set(authorization)-allowed: raise ValueError('EFFECT_AUTHORIZATION_FIELDS_INVALID')
- required=['ward_admission_ref','work_ref','assignment_ref','attempt_ref','generation_ref',
-           'currentness_ref','effect_authorization_ref','permission_digest']
- for key in required:
-  value=authorization.get(key)
-  if not isinstance(value,str) or not value.strip():
-   raise ValueError('EFFECT_AUTHORIZATION_REF_REQUIRED:'+key)
+ allowed={
+  'ward_admission','ward_admission_ref','work_ref','assignment_ref','attempt_ref',
+  'generation_ref','currentness_ref','effect_authorization_ref','permission_digest',
+  'central_request_id','service_id','kind','target_generation','decision_digest',
+ }
+ if set(authorization)!=allowed: raise ValueError('EFFECT_AUTHORIZATION_FIELDS_INVALID')
+ for key in allowed-{'ward_admission'}:
+  _text(authorization.get(key),'EFFECT_AUTHORIZATION_REF_REQUIRED:'+key)
  if authorization.get('ward_admission') is not True: raise ValueError('WARD_ADMISSION_REQUIRED')
- if authorization['permission_digest']!=decision.get('permission_digest'):
-  raise ValueError('EFFECT_PERMISSION_DIGEST_MISMATCH')
- if decision.get('approval_required') is True and approved is not True:
+ comparisons={
+  'permission_digest':('EFFECT_PERMISSION_DIGEST_MISMATCH','permission_digest'),
+  'central_request_id':('EFFECT_REQUEST_ID_MISMATCH','request_id'),
+  'service_id':('EFFECT_SERVICE_ID_MISMATCH','service_id'),
+  'kind':('EFFECT_KIND_MISMATCH','kind'),
+  'target_generation':('EFFECT_TARGET_GENERATION_MISMATCH','target_generation'),
+  'decision_digest':('EFFECT_DECISION_DIGEST_MISMATCH','decision_digest'),
+ }
+ for field,(code,decision_field) in comparisons.items():
+  expected=decision.get(decision_field)
+  if authorization[field]!=expected: raise ValueError(code)
+ if core['approval_required'] is True and approved is not True:
   raise ValueError('EXPLICIT_HOTPATCH_APPROVAL_REQUIRED')
  return {
-  'schema':'xiio.hex.effect-authorization/v1',**authorization,
-  'central_request_id':decision.get('request_id'),'service_id':decision.get('service_id'),
-  'kind':decision.get('kind'),'authorized':True,
-  'hard':['CENTRAL_REQUEST!=WARD_AUTHORITY','PROFILE_ALLOW!=EFFECT_AUTHORITY',
-          'WARD_RECEIPT_REQUIRED','CURRENTNESS_RECEIPT_REQUIRED'],
+  'schema':EFFECT_SCHEMA,**authorization,'authorized':True,
+  'requires_restart':core['requires_restart'],'severity':core['severity'],
+  'hard':list(EFFECT_HARD),
  }
