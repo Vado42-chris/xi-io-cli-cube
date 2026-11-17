@@ -211,7 +211,7 @@ class ServerProductApiBindingTests(unittest.TestCase):
         self.active = False
         self.events = []
 
-    def run(self, args):
+    def systemctl(self, args):
         if args[:3] == ["systemctl", "--user", "show"]:
             state = "active" if self.active else "inactive"
             return SimpleNamespace(
@@ -245,7 +245,7 @@ class ServerProductApiBindingTests(unittest.TestCase):
         reader = FakeFrameworkProductApiReader()
         receipt = self.receipts / "install.json"
         with self.context(reader), \
-             patch.object(server_profile.service_profile, "_run", side_effect=self.run), \
+             patch.object(server_profile.service_profile, "_run", side_effect=self.systemctl), \
              patch.object(server_profile, "_probe", return_value={"state": "PASS", "status": 200}):
             plan = server_profile.prepare_server_package(self.root, self.home, self.permissions)
             self.assertEqual(plan["product_api_binding"]["state"],
@@ -274,7 +274,7 @@ class ServerProductApiBindingTests(unittest.TestCase):
         self.assertGreaterEqual(reader.compile_calls, 3)
         self.assertEqual(reader.reopen_calls, 1)
 
-        with patch.object(server_profile.service_profile, "_run", side_effect=self.run):
+        with patch.object(server_profile.service_profile, "_run", side_effect=self.systemctl):
             rolled = server_profile.rollback_server_package(
                 self.home, self.permissions, plan, receipt, True)
         self.assertFalse(rolled["service_advertisement_eligible"])
@@ -294,7 +294,7 @@ class ServerProductApiBindingTests(unittest.TestCase):
         reader = FakeFrameworkProductApiReader(substitute_on_reopen=True)
         receipt = self.receipts / "substitution.json"
         with self.context(reader), \
-             patch.object(server_profile.service_profile, "_run", side_effect=self.run), \
+             patch.object(server_profile.service_profile, "_run", side_effect=self.systemctl), \
              patch.object(server_profile, "_probe", return_value={"state": "PASS", "status": 200}):
             plan = server_profile.prepare_server_package(self.root, self.home, self.permissions)
             with self.assertRaisesRegex(ValueError, "BINDING_FAILED_ROLLED_BACK"):
