@@ -124,8 +124,21 @@ def _open_release_receipt_lock(state_fd: int, name: str):
         lock_raw=os.open(lock_name,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
     except OSError as exc:
         raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED") from exc
+    try:
+        lock_stat=os.fstat(lock_raw)
+        _require(stat.S_ISREG(lock_stat.st_mode)
+                 and (lock_stat.st_mode & 0o777)==0o600
+                 and lock_stat.st_nlink==1,
+                 "BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED")
+    except Exception:
+        os.close(lock_raw)
+        raise
     receipt_lock=os.fdopen(lock_raw,"a+b",closefd=True)
-    fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
+    try:
+        fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
+    except OSError as exc:
+        receipt_lock.close()
+        raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED") from exc
     return receipt_lock
 
 
