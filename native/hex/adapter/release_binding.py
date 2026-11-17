@@ -119,11 +119,37 @@ def _pinned_release_root_path(state_fd: int) -> Path:
     return actual
 
 
+def _remove_stale_release_receipt_temp(state_fd: int, tmp: str) -> None:
+    try:
+        fd=os.open(tmp,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
+    except OSError as exc:
+        raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_TEMP_UNTRUSTED") from exc
+    try:
+        st=os.fstat(fd)
+        _require(stat.S_ISREG(st.st_mode)
+                 and (st.st_mode & 0o777)==0o600
+                 and st.st_nlink==1
+                 and st.st_size<=131072,
+                 "BUNDLE_RELEASE_INSTALL_RECEIPT_TEMP_UNTRUSTED")
+    finally:
+        os.close(fd)
+    try:
+        os.unlink(tmp,dir_fd=state_fd)
+    except OSError as exc:
+        raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_TEMP_UNTRUSTED") from exc
+
+
 def _write_release_receipt_locked(state_fd: int, state_root: Path, name: str, receipt: dict) -> str:
     encoded=(json.dumps(receipt,indent=2,sort_keys=True)+"\n").encode()
     tmp="."+name+"."+hashlib.sha256(encoded).hexdigest()[:16]+".tmp"
+    created=False
     try:
-        fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
+        try:
+            fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
+        except FileExistsError:
+            _remove_stale_release_receipt_temp(state_fd,tmp)
+            fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
+        created=True
         try:
             os.write(fd,encoded);os.fsync(fd)
         finally:
@@ -131,8 +157,9 @@ def _write_release_receipt_locked(state_fd: int, state_root: Path, name: str, re
         os.replace(tmp,name,src_dir_fd=state_fd,dst_dir_fd=state_fd)
         os.fsync(state_fd)
     except OSError as exc:
-        try: os.unlink(tmp,dir_fd=state_fd)
-        except OSError: pass
+        if created:
+            try: os.unlink(tmp,dir_fd=state_fd)
+            except OSError: pass
         raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_WRITE_FAILED") from exc
     reread=_read_release_receipt(state_fd,name)
     _require(reread==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_READBACK_MISMATCH")
