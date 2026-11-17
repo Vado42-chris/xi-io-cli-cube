@@ -1,0 +1,24 @@
+name: Temporary installer adapter source export
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/export-installer-adapter-temporary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact PR source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Export exact adapter source
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-adapter-exact-${{ github.event.pull_request.head.sha }}
+          path: native/hex/adapter/installer_adapter.py
+          if-no-files-found: error
+          retention-days: 1
