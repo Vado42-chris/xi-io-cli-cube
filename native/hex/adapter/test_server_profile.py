@@ -121,6 +121,20 @@ class ServerProfileTests(unittest.TestCase):
   self.assertTrue(self.active);self.assertTrue(receipt.exists())
   self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
 
+ def test_start_failure_still_stops_attempt_and_rolls_back(self):
+  def partial_start(args):
+   if args[:3]==['systemctl','--user','start']:
+    self.active=True;return SimpleNamespace(returncode=1,stdout='',stderr='ambiguous')
+   return self.run(args)
+  with patch.object(server_profile.service_profile,'_run',side_effect=partial_start), \
+       patch.object(server_profile,'_probe',return_value={'state':'PASS','status':200}):
+   p=server_profile.prepare_server_package(self.root,self.home,self.permissions)
+   receipt=self.home/'receipt.json'
+   with self.assertRaisesRegex(ValueError,'SERVER_SERVICE_START_FAILED'):
+    server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
+  self.assertFalse(self.active);self.assertFalse(receipt.exists())
+  self.assertFalse((self.home/'.config/systemd/user/xiio-test.service').exists())
+
  def test_failed_required_probe_rolls_back_files_and_service(self):
   with patch.object(server_profile.service_profile,'_run',side_effect=self.run), \
        patch.object(server_profile,'_probe',return_value={'state':'UNREACHABLE'}):
