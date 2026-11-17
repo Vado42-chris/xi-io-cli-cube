@@ -32,6 +32,7 @@ class ReleaseBindingTests(unittest.TestCase):
    ({**r,"product_ref":"product-other"},a,"BUNDLE_RELEASE_PRODUCT_MISMATCH"),
    (r,{**a,"release_generation":"old"},"BUNDLE_RELEASE_ADOPTER_BINDING_MISMATCH"),
    (r,{**a,"provider_hosts":["evil.example.test"]},"BUNDLE_RELEASE_HOST_BINDING_MISMATCH"),
+   (r,{**a,"consumer_ref":""},"BUNDLE_RELEASE_CONSUMER_REF_REQUIRED"),
   ])
   for rr,aa,code in cases:
    with self.subTest(code=code),patch('native.hex.adapter.release_binding.install_bundle') as install:

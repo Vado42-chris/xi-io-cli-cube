@@ -21,6 +21,11 @@ def _require(ok: bool, code: str) -> None:
         raise BundleError(code)
 
 
+def _required_text(value, code: str) -> str:
+    _require(isinstance(value, str) and bool(value.strip()), code)
+    return value.strip()
+
+
 def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
                                  expected_product_ref: str,
                                  env: dict[str, str] | None = None,
@@ -56,30 +61,32 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
     profile = load_bundle_profile(Path(lock), allowed_hosts=allowed)
     product_ids = {manifest.product_id for manifest, _urls, _deps in profile["products"].values()}
     _require(expected_product_ref in product_ids, "BUNDLE_RELEASE_PRODUCT_NOT_IN_LOCK")
-    installed = install_bundle(Path(lock), approved_lock_sha256=approved, env=env,
-                          allowed_hosts=allowed, fetch=fetch)
-    roots_env = env or os.environ
-    state_root = Path(roots_env.get("XDG_STATE_HOME") or (Path.home()/".local/state"))/"xi-io"/"installer"/"release-distributions"
+    return _install_bound_release(lock, binding={
+        "product_ref": expected_product_ref,
+        "consumer_ref": _required_text(adopter.get("consumer_ref"), "BUNDLE_RELEASE_CONSUMER_REF_REQUIRED"),
+        "release_ref": release.get("release_ref"),
+        "release_generation": release.get("release_generation"),
+        "approved_lock_sha256": approved,
+        "provider_hosts": list(release_hosts),
+    }, env=env, fetch=fetch)
+
+def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
+    product_ref=binding["product_ref"];consumer_ref=binding["consumer_ref"]
+    approved=binding["approved_lock_sha256"];allowed=frozenset(binding["provider_hosts"])
+    installed=install_bundle(Path(lock),approved_lock_sha256=approved,env=env,allowed_hosts=allowed,fetch=fetch)
+    roots_env=env or os.environ
+    state_root=Path(roots_env.get("XDG_STATE_HOME") or (Path.home()/".local/state"))/"xi-io"/"installer"/"release-distributions"
     state_root.mkdir(parents=True,exist_ok=True,mode=0o700)
-    receipt = {
-        "schema":"xiio.installer.release-distribution-install-receipt/v1",
-        "product_ref":product_ref,"consumer_ref":consumer_ref,
+    receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":product_ref,"consumer_ref":consumer_ref,
         "release_ref":binding.get("release_ref"),"release_generation":binding.get("release_generation"),
-        "approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),
-        "bundle_state":installed.get("state"),"installed_role_count":len(installed.get("roles") or []),
-        "readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED",
-        "effect_authority":False,
-    }
-    name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json"
-    target=state_root/name
+        "approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),"bundle_state":installed.get("state"),
+        "installed_role_count":len(installed.get("roles") or []),"readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED","effect_authority":False}
+    name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json";target=state_root/name
     if target.exists():
-        reopened=json.loads(target.read_text(encoding="utf-8"))
-        _require(reopened==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
+        _require(json.loads(target.read_text(encoding="utf-8"))==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
         return {**installed,"release_distribution_receipt":str(target)}
-    fd,tmp=tempfile.mkstemp(prefix="."+name+".",suffix=".tmp",dir=state_root);os.close(fd)
-    p=Path(tmp)
-    try:
-        p.write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n",encoding="utf-8");os.chmod(p,0o600);os.replace(p,target)
+    fd,tmp=tempfile.mkstemp(prefix="."+name+".",suffix=".tmp",dir=state_root);os.close(fd);p=Path(tmp)
+    try:p.write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n",encoding="utf-8");os.chmod(p,0o600);os.replace(p,target)
     finally:
         if p.exists():p.unlink()
     _require(json.loads(target.read_text(encoding="utf-8"))==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_READBACK_MISMATCH")
@@ -124,5 +131,4 @@ def install_from_distribution_reader(lock: Path, *, product_ref: str, consumer_r
     profile = load_bundle_profile(Path(lock), allowed_hosts=allowed)
     product_ids = {manifest.product_id for manifest, _urls, _deps in profile["products"].values()}
     _require(product_ref in product_ids, "BUNDLE_RELEASE_PRODUCT_NOT_IN_LOCK")
-    return install_bundle(Path(lock), approved_lock_sha256=approved, env=env,
-                          allowed_hosts=allowed, fetch=fetch)
+    return _install_bound_release(Path(lock),binding=binding,env=env,fetch=fetch)
