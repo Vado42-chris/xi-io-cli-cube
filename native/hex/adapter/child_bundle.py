@@ -502,7 +502,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                     if release_value is not None: release_receipts[role]={"path":str(release_path),"receipt":release_value}
                     if manifest.raw.get("runtime_exports"):
                         tx=json.loads(receipt.read_text(encoding="utf-8"))
-                        binding=compile_dependency_binding_receipt(manifest,tx,env)
+                        binding=compile_dependency_binding_receipt(manifest,tx,env,release_path if release_value is not None else None)
                         binding_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".binding.json")
                         _atomic_private_json(binding_path,binding)
                         dependency_binding_receipts[role]={"path":str(binding_path),"receipt":binding}
