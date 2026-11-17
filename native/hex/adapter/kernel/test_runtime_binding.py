@@ -22,7 +22,7 @@ class T(unittest.TestCase):
   p=load_runtime_profile(self.rp);self.assertIsNone(p.dependencies[0].expected_unit)
  def test_materializes_private_exact_receipt_value(self):
   p=load_runtime_profile(self.rp);b=load_runtime_binding_profile(self.bp);r=materialize_runtime_bindings(p,b,{"node-authority":self.receipt()},self.env)
-  self.assertEqual(self.env.read_text(),"PRODUCT_NODE_MODULE=/installed/node/provider.mjs\n");self.assertEqual(os.stat(self.env).st_mode&0o777,0o600);self.assertEqual(r["effect_authority"],False)
+  self.assertEqual(self.env.read_text(),f"PRODUCT_NODE_MODULE={self.d / 'provider.mjs'}\n");self.assertEqual(os.stat(self.env).st_mode&0o777,0o600);self.assertEqual(r["effect_authority"],False)
  def test_substituted_generation_refuses_before_write(self):
   p=load_runtime_profile(self.rp);b=load_runtime_binding_profile(self.bp)
   with self.assertRaisesRegex(RuntimeBindingError,"RUNTIME_BINDING_RECEIPT_UNVERIFIED"): materialize_runtime_bindings(p,b,{"node-authority":self.receipt(accepted_generation="b"*40)},self.env)
