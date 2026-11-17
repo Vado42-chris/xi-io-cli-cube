@@ -9,6 +9,8 @@ const nativePackage=readFileSync(new URL('scripts/native-package.mjs',root),'utf
 const installerAdapter=readFileSync(new URL('native/hex/adapter/installer_adapter.py',root),'utf8');
 const serverProfile=readFileSync(new URL('native/hex/adapter/server_profile.py',root),'utf8');
 const protocol=readFileSync(new URL('native/hex/carrier/src-tauri/src/protocol.rs',root),'utf8');
+const installerWorkflow=readFileSync(new URL('.github/workflows/installer-contract.yml',root),'utf8');
+const frameworkFixture=JSON.parse(readFileSync(new URL('native/hex/fixtures/framework-runtime-cfe2776/SOURCE.json',root),'utf8'));
 
 test('authority and installed-consumer regressions stay in the hosted denominator',()=>{
  for(const module of [
@@ -17,6 +19,7 @@ test('authority and installed-consumer regressions stay in the hosted denominato
   'native.hex.adapter.test_installer_service_consumer',
   'native.hex.adapter.test_installer_hotpatch_consumer',
   'native.hex.adapter.test_framework_product_api_reader',
+  'native.hex.adapter.test_framework_physical_chain_fixture',
   'native.hex.adapter.test_server_product_api_binding',
   'native.hex.adapter.test_installer_product_api_consumer',
  ]) assert.ok(sourceCommand.includes(module),`UNEXECUTED_CONSUMER_REGRESSION:${module}`);
@@ -71,4 +74,27 @@ test('native protocol carries exact service action and paired Framework custody 
  }
  assert.match(protocol,/framework_binding\(framework_binding_receipt,framework_generation\)/,
   'FRAMEWORK_COORDINATES_NOT_PAIRED');
+});
+
+test('physical Framework consumer chain stays executable without private sibling checkout',()=>{
+ assert.match(installerWorkflow,/^  framework-release-physical-chain:/m,
+  'FRAMEWORK_PHYSICAL_CHAIN_JOB_MISSING');
+ assert.doesNotMatch(installerWorkflow,/repository:\s*Vado42-chris\/xi-io\.net/,
+  'PRIVATE_SIBLING_CHECKOUT_REINTRODUCED');
+ for(const token of [
+  'native/hex/fixtures/framework-runtime-cfe2776',
+  'bind_dependency_manifest',
+  'verify_dependency_binding_receipt',
+  'resolve_framework_release_distribution_module',
+  'FRAMEWORK_PHYSICAL_RELEASE_READER_PASS',
+  'framework-physical-chain-${{ github.sha }}',
+ ]) assert.ok(installerWorkflow.includes(token),`FRAMEWORK_PHYSICAL_JOIN_MISSING:${token}`);
+ assert.equal(frameworkFixture.schema,'xiio.hex.framework-runtime-source-adoption/v1');
+ assert.equal(frameworkFixture.state,'ACCEPTED_OWNER_BYTES_PACKAGED_FOR_PHYSICAL_CONSUMER_TEST');
+ assert.equal(frameworkFixture.owner_repository,'Vado42-chris/xi-io.net');
+ assert.equal(frameworkFixture.owner_ref,'cfe2776b08e1768882f95884fd52576e48f0550c');
+ assert.equal(frameworkFixture.classification,'TEST_DISTRIBUTION_FIXTURE_NOT_RUNTIME_AUTHORITY');
+ assert.equal(frameworkFixture.effect_authority,false);
+ assert.equal(frameworkFixture.provider_effect,false);
+ assert.equal(frameworkFixture.billing_effect_authority,false);
 });
