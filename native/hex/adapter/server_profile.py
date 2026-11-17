@@ -113,10 +113,14 @@ def _reviewed_services(reviewed_plan,permissions):
   raise ValueError('SERVER_PACKAGE_PERMISSION_DIGEST_CHANGED')
  services=reviewed_plan.get('services')
  if not isinstance(services,list) or not services: raise ValueError('SERVER_ROLLBACK_SERVICES_REQUIRED')
+ seen=set();seen_units=set()
  for row in services:
   if (not isinstance(row,dict) or not isinstance(row.get('service_id'),str)
       or not isinstance(row.get('unit'),str) or not UNIT.fullmatch(row['unit'])):
    raise ValueError('SERVER_ROLLBACK_SERVICE_IDENTITY_INVALID')
+  if row['service_id'] in seen or row['unit'] in seen_units:
+   raise ValueError('SERVER_ROLLBACK_SERVICE_IDENTITY_DUPLICATE')
+  seen.add(row['service_id']);seen_units.add(row['unit'])
  return services
 
 def _stop_services(rows,permissions):
@@ -163,13 +167,15 @@ def apply_server_package(package_root,home,permissions,reviewed_plan,receipt_pat
    sid=row['service_id'];unit=row['unit']
    permission_profile.require_capability(permissions,'start_services',sid)
    before=service_profile.observe_user_unit(unit)
+   attempt={'service_id':sid,'unit':unit,'before':before,'after':None,'probe':None}
+   # Once a start command is issued, the unit belongs to rollback custody even
+   # when the command or immediate active-state readback reports failure.
+   started.append(attempt)
    r=service_profile._run(['systemctl','--user','start',unit])
    if r.returncode!=0: raise ValueError('SERVER_SERVICE_START_FAILED:'+sid)
-   after=service_profile.observe_user_unit(unit)
+   after=service_profile.observe_user_unit(unit);attempt['after']=after
    if after['active_state']!='active': raise ValueError('SERVER_SERVICE_ACTIVE_READBACK_FAILED:'+sid)
-   started.append({'service_id':sid,'unit':unit,'before':before,'after':after,'probe':None})
-   probe=_probe(row.get('probe'))
-   started[-1]['probe']=probe
+   probe=_probe(row.get('probe'));attempt['probe']=probe
    if row.get('required',True) is not False and row.get('probe') and probe['state']!='PASS':
     raise ValueError('SERVER_SERVICE_PROBE_FAILED:'+sid)
   return {'schema':'xiio.hex.server-package-effect/v1','state':'INSTALLED_STARTED_READBACK_VERIFIED',
