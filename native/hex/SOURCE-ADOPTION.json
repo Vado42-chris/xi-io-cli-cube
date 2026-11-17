@@ -11,10 +11,10 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "c150a23891f30a48cc162c1244935c370c9df215",
+    "ref": "49848b4abc08fcd51e2e7ace9222d08b8ed1f68f",
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 40,
-    "acceptance_note": "Latest accepted Installer main generation through verifier-compatible dependency receipts, dependency-to-running-service generation conservation, and unique dependency service identity; HEX consumes owner bytes exactly.",
+    "owner_pr": 43,
+    "acceptance_note": "Latest accepted Installer main generation through strict product manifests with separate dependency descriptors, unique dependency service identity, canonical persisted receipt custody, and consume-time export verification before runtime activation; HEX consumes owner bytes exactly.",
     "accepted_generation_history": [
       {
         "owner_pr": 18,
@@ -74,15 +74,25 @@
       {
         "owner_pr": 40,
         "merge_ref": "c150a23891f30a48cc162c1244935c370c9df215",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 42,
+        "merge_ref": "1014046898ed33713207ac3ef0d1a34ea205a257",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 43,
+        "merge_ref": "49848b4abc08fcd51e2e7ace9222d08b8ed1f68f",
         "status": "CURRENT_ACCEPTED_MAIN"
       }
     ],
     "currentness_rule": "Vendored kernel must match latest accepted Installer main generation; a newer lane report about an older merged PR cannot downgrade currentness.",
     "files_unchanged_git_blob": {
       "__init__.py": "8638a08518d86ef0fd48933d4b0174c026c59136",
-      "cli.py": "13e024cf0ea41d2603f7a84d75447e977fef83d6",
+      "cli.py": "5f59fa8925824771416c107a7ea7ba29b040b774",
       "consent.py": "52e6adfbd15da70dc6d18ded1f9025266ac9c2b7",
-      "dependency_binding.py": "37838adc2b9fe022faf25be974245b1261f3c2a6",
+      "dependency_binding.py": "3ba0adf7fd5b161f18f77adb4a74569e9f448347",
       "diagnostics.py": "e173b12fb42b7e33f9e7dd7379491d7048e8e520",
       "discovery.py": "6b84520098dea4cef3cbf6249fc2437b2184dd14",
       "managed_update.py": "9b1a9965a54472af9d635b08cfb94fdbbe201caf",
@@ -90,8 +100,8 @@
       "manifest.py": "f49286944b78f158a1eddf9745782929c9fa9571",
       "observability.py": "27478747baf903ae13d7c3fb0cde862d4ff08287",
       "redaction.py": "11372bf25339d76d56fc230f7ae1548e8d79a145",
-      "runtime_activation.py": "849727659f0b049477457c19eebe4852d923c620",
-      "runtime_profile.py": "77cc76ab7ff123a3cb1a90f3101e529c10d47ced",
+      "runtime_activation.py": "1ecba55d479d2c2f9a4d22035f83c5d01f5bc3ee",
+      "runtime_profile.py": "b59f7ed1c89d62e4adb1c137bac890a7c84be759",
       "service_profile.py": "41f932e0d90027a3332c33dc9a5d6db04fd3039e",
       "transaction.py": "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2",
       "update_request.py": "abe3b7944d061603142f8ca01b180dcc877d1869",

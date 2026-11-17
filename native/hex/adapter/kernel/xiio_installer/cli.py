@@ -163,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     bp.add_argument("expected_dependency_id")
     bp.add_argument("expected_owner_repo")
     bp.add_argument("expected_generation")
+    bp.add_argument("--descriptor", type=Path, help="separate dependency/runtime descriptor for strict product manifests")
     bp.add_argument("--approve", action="store_true", help="required for dependency installation")
     rp = sub.add_parser("rollback")
     rp.add_argument("receipt", type=Path)
@@ -202,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     ar.add_argument("--grant", action="append", default=[])
     ar.add_argument("--update-policy", choices=["MANUAL","SECURITY_AUTO","MANAGED"])
     ar.add_argument("--principal-ref", default="local-user")
+    ar.add_argument("--release-generation", help="exact accepted release generation for RESOLVE_FROM_RELEASE_LOCK profiles")
     ar.add_argument("--approve", action="store_true", help="required for runtime activation")
     rr = sub.add_parser("revoke-runtime-consent")
     rr.add_argument("consent_receipt", type=Path)
@@ -210,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     qu.add_argument("runtime_profile", type=Path)
     qu.add_argument("consent_receipt", type=Path)
     qu.add_argument("update_request", type=Path)
+    qu.add_argument("--release-generation", help="exact accepted release generation for RESOLVE_FROM_RELEASE_LOCK profiles")
     sub.add_parser("operations")
     sub.add_parser("evidence-status")
     ip = sub.add_parser("inspect-operation")
@@ -369,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
             return 0 if result["state"]=="AUTHORIZED_FOR_WARD_ADMISSION" else 3
         if args.cmd == "activate-runtime":
-            profile = load_runtime_profile(args.runtime_profile)
+            profile = load_runtime_profile(args.runtime_profile, release_generation=args.release_generation)
             result = activate_runtime_profile(
                 profile,
                 grants=args.grant,
@@ -399,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
             return 0
         if args.cmd == "qualify-update":
-            profile = load_runtime_profile(args.runtime_profile)
+            profile = load_runtime_profile(args.runtime_profile, release_generation=args.release_generation)
             consent = json.loads(args.consent_receipt.read_text(encoding="utf-8"))
             request = json.loads(args.update_request.read_text(encoding="utf-8"))
             result = qualify_update_request(profile, consent, request)
@@ -478,8 +481,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "bind-dependency-manifest":
             m = load_manifest(args.manifest)
+            descriptor = json.loads(args.descriptor.read_text(encoding="utf-8")) if args.descriptor is not None else None
             receipt = bind_dependency_manifest(m,args.payload_root,args.install_receipt,args.binding_receipt,
-                expected_dependency_id=args.expected_dependency_id,expected_owner_repo=args.expected_owner_repo,expected_generation=args.expected_generation)
+                expected_dependency_id=args.expected_dependency_id,expected_owner_repo=args.expected_owner_repo,expected_generation=args.expected_generation,
+                descriptor=descriptor)
             finalized = _finish_terminal_or_report_unknown(journal,"passed","dependency manifest installed and runtime exports independently rebound",
                 expected_action=expected,execution_result="succeeded",do_not_retry_before_reconcile=True,
                 changed_resources=[{"kind":"dependency_binding_receipt","path":redact_text(str(args.binding_receipt))}],rollback_eligible=True,

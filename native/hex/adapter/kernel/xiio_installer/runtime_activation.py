@@ -11,6 +11,7 @@ from urllib.request import urlopen
 
 from .runtime_profile import RuntimeProfile, RuntimeProfileError, compile_user_consent
 from .running_generation import verify_running_generation, RunningGenerationError
+from .dependency_receipt_verification import verify_dependency_binding_receipt, DependencyReceiptVerificationError
 
 class RuntimeActivationError(RuntimeError):
     pass
@@ -101,10 +102,17 @@ def activate_runtime_profile(
             continue
         if dep.materializer=="xiio.installer-dependency-binding-receipt/v1":
             receipt_path=state_home/"xi-io/installer/dependencies"/(dep.dependency_id+".binding.json")
-            try: receipt=json.loads(receipt_path.read_text(encoding="utf-8"))
-            except Exception as exc: raise RuntimeActivationError("RUNTIME_DEPENDENCY_BINDING_MISSING:"+dep.dependency_id) from exc
-            if receipt.get("schema")!=dep.materializer or receipt.get("state")!="BOUND" or receipt.get("dependency_id")!=dep.dependency_id or receipt.get("owner_repo")!=dep.owner_repo or receipt.get("accepted_generation")!=dep.accepted_generation or not isinstance(receipt.get("runtime_exports"),dict) or not receipt["runtime_exports"]:
-                raise RuntimeActivationError("RUNTIME_DEPENDENCY_BINDING_MISMATCH:"+dep.dependency_id)
+            try:
+                receipt=verify_dependency_binding_receipt(
+                    receipt_path,
+                    expected_dependency_id=dep.dependency_id,
+                    expected_owner_repo=dep.owner_repo,
+                    expected_generation=dep.accepted_generation,
+                )
+            except (DependencyReceiptVerificationError,OSError,ValueError) as exc:
+                raise RuntimeActivationError("RUNTIME_DEPENDENCY_BINDING_UNVERIFIED:"+dep.dependency_id) from exc
+            if receipt.get("state")!="VERIFIED" or receipt.get("custody_verified") is not True:
+                raise RuntimeActivationError("RUNTIME_DEPENDENCY_BINDING_UNVERIFIED:"+dep.dependency_id)
             continue
         if dep.expected_unit is None:
             raise RuntimeActivationError("RUNTIME_DEPENDENCY_UNIT_REQUIRED:"+dep.dependency_id)

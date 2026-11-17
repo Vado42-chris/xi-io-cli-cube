@@ -8,8 +8,12 @@ from .transaction import apply_install,TransactionError
 from .transaction import xdg_roots as transaction_xdg_roots
 SHA1=re.compile(r"^[0-9a-f]{40}$");SHA256=re.compile(r"^[0-9a-f]{64}$")
 class DependencyBindingError(RuntimeError): pass
-def _dep(manifest:ProductManifest)->tuple[str,str,str,dict[str,Any]]:
- raw=manifest.raw;dependency_id=str(raw.get("dependency_id","")).strip();owner_repo=str(raw.get("owner_repo","")).strip();generation=str(raw.get("accepted_generation","")).strip();exports=raw.get("runtime_exports")
+def _dep(manifest:ProductManifest,descriptor:dict[str,Any]|None=None)->tuple[str,str,str,dict[str,Any]]:
+ raw=descriptor if descriptor is not None else manifest.raw
+ if descriptor is not None:
+  if raw.get("schema")!="xiio.installer-dependency-descriptor/v1": raise DependencyBindingError("DEPENDENCY_DESCRIPTOR_SCHEMA_INVALID")
+  if str(raw.get("product_id","")).strip()!=manifest.product_id: raise DependencyBindingError("DEPENDENCY_DESCRIPTOR_PRODUCT_MISMATCH")
+ dependency_id=str(raw.get("dependency_id","")).strip();owner_repo=str(raw.get("owner_repo","")).strip();generation=str(raw.get("accepted_generation","")).strip();exports=raw.get("runtime_exports")
  if not dependency_id or not re.fullmatch(r"[A-Za-z0-9_.-]+",dependency_id): raise DependencyBindingError("DEPENDENCY_ID_INVALID")
  if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",owner_repo): raise DependencyBindingError("DEPENDENCY_OWNER_REPO_INVALID")
  if not (SHA1.fullmatch(generation) or SHA256.fullmatch(generation)): raise DependencyBindingError("DEPENDENCY_ACCEPTED_GENERATION_INVALID")
@@ -20,8 +24,8 @@ def _dep(manifest:ProductManifest)->tuple[str,str,str,dict[str,Any]]:
   key=(str(value.get("destination_scope","")),str(value.get("destination","")))
   if key not in payload: raise DependencyBindingError("DEPENDENCY_RUNTIME_EXPORT_NOT_IN_PAYLOAD")
  return dependency_id,owner_repo,generation,exports
-def bind_dependency_manifest(manifest:ProductManifest,payload_root:Path,install_receipt:Path,binding_receipt:Path,*,expected_dependency_id:str,expected_owner_repo:str,expected_generation:str,env:dict[str,str]|None=None)->dict[str,Any]:
- dep,owner,generation,exports=_dep(manifest)
+def bind_dependency_manifest(manifest:ProductManifest,payload_root:Path,install_receipt:Path,binding_receipt:Path,*,expected_dependency_id:str,expected_owner_repo:str,expected_generation:str,env:dict[str,str]|None=None,descriptor:dict[str,Any]|None=None)->dict[str,Any]:
+ dep,owner,generation,exports=_dep(manifest,descriptor)
  if dep!=expected_dependency_id or owner!=expected_owner_repo or generation!=expected_generation: raise DependencyBindingError("DEPENDENCY_BINDING_EXPECTATION_MISMATCH")
  if binding_receipt.exists() or binding_receipt.is_symlink(): raise DependencyBindingError("DEPENDENCY_BINDING_RECEIPT_OCCUPIED")
  install=apply_install(manifest,payload_root,install_receipt,env)
@@ -39,8 +43,8 @@ def bind_dependency_manifest(manifest:ProductManifest,payload_root:Path,install_
  return receipt
 
 
-def compile_dependency_binding_receipt(manifest:ProductManifest,install_receipt:dict[str,Any],env:dict[str,str]|None=None,release_receipt_path:Path|None=None,*,binding_receipt_path:Path|None=None)->dict[str,Any]:
-    dependency_id,owner,generation,exports=_dep(manifest)
+def compile_dependency_binding_receipt(manifest:ProductManifest,install_receipt:dict[str,Any],env:dict[str,str]|None=None,release_receipt_path:Path|None=None,*,binding_receipt_path:Path|None=None,descriptor:dict[str,Any]|None=None)->dict[str,Any]:
+    dependency_id,owner,generation,exports=_dep(manifest,descriptor)
     if binding_receipt_path is None: raise DependencyBindingError("DEPENDENCY_BINDING_RECEIPT_PATH_REQUIRED")
     binding_path=Path(binding_receipt_path).resolve()
     if install_receipt.get("schema_version")!="xiio-installer-receipt-v1" or install_receipt.get("product_id")!=manifest.product_id or install_receipt.get("version")!=manifest.version:
