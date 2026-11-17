@@ -50,6 +50,12 @@ class ServerProfileTests(unittest.TestCase):
    return SimpleNamespace(returncode=1,stdout='',stderr='unexpected')
   self.run=fake_run
 
+ def test_server_descriptor_is_read_once_per_load(self):
+  original=server_profile._read
+  with patch.object(server_profile,'_read',wraps=original) as read:
+   server_profile.load_server_package(self.root)
+  self.assertEqual(read.call_count,1)
+
  def test_two_service_ids_cannot_claim_one_unit(self):
   package_path=self.root/'server-package.json'
   package=json.loads(package_path.read_text())
@@ -82,6 +88,18 @@ class ServerProfileTests(unittest.TestCase):
   with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
    p=server_profile.prepare_server_package(self.root,self.home,self.permissions)
   self.assertFalse(p['effect_authorized']);self.assertEqual(p['payload_files'],2)
+
+ def test_apply_uses_one_loaded_package_generation(self):
+  p=server_profile.prepare_server_package(self.root,self.home,self.permissions)
+  receipt=self.home/'receipt.json';original=server_profile.load_server_package
+  with patch.object(server_profile,'load_server_package',wraps=original) as load, \
+       patch.object(server_profile.service_profile,'_run',side_effect=self.run), \
+       patch.object(server_profile,'_probe',return_value={'state':'PASS','status':200}):
+   result=server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
+  self.assertEqual(load.call_count,1)
+  self.assertEqual(result['package_sha256'],p['package_sha256'])
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
 
  def test_changed_package_after_review_refuses(self):
   with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
