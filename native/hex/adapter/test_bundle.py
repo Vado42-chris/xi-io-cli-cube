@@ -544,6 +544,22 @@ class BundleTests(unittest.TestCase):
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/ward/ward.bin").exists())
 
+    def test_conflicting_derived_receipt_is_not_overwritten(self):
+        f = self.fixture()
+        generation = "a"*40
+        f.child("sdk", fixture=False, accepted_generation=generation)
+        lock, digest = f.lock(fixture=False)
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        state_root.mkdir(parents=True)
+        derived = state_root / ("sdk-0.0.1-"+digest[:12]+".release.json")
+        prior = {"schema":"foreign-prior-custody/v1"}
+        derived.write_text(json.dumps(prior))
+        derived.chmod(0o600)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_FAILED_ROLLED_BACK"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        self.assertEqual(json.loads(derived.read_text()), prior)
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/sdk/sdk.bin").exists())
+
     def test_mid_bundle_rollback_removes_derived_generation_and_binding_receipts(self):
         f = self.fixture()
         generation = "a"*40
