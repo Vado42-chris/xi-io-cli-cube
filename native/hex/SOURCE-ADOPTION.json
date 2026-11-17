@@ -11,10 +11,10 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "8ba47176df46491e486063616bde319b2cb2098b",
+    "ref": "6567f0b135d7a08971c6fa48fde1c6045dc037d1",
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 35,
-    "acceptance_note": "Latest accepted Installer main generation through generic service generation-field declaration; HEX consumes the owner byte-for-byte and preserves exact Git blob identity.",
+    "owner_pr": 36,
+    "acceptance_note": "Latest accepted Installer main generation through distinct composition/profile generation and per-service declared component generation; HEX consumes changed owner bytes byte-for-byte and preserves exact Git blob identity.",
     "accepted_generation_history": [
       {
         "owner_pr": 18,
@@ -49,6 +49,11 @@
       {
         "owner_pr": 35,
         "merge_ref": "8ba47176df46491e486063616bde319b2cb2098b",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 36,
+        "merge_ref": "6567f0b135d7a08971c6fa48fde1c6045dc037d1",
         "status": "CURRENT_ACCEPTED_MAIN"
       }
     ],
@@ -65,8 +70,8 @@
       "manifest.py": "f49286944b78f158a1eddf9745782929c9fa9571",
       "observability.py": "27478747baf903ae13d7c3fb0cde862d4ff08287",
       "redaction.py": "11372bf25339d76d56fc230f7ae1548e8d79a145",
-      "runtime_activation.py": "5e08ba71c8c3a3ad1285e285d3e197eebcaa55dc",
-      "runtime_profile.py": "886bb0abdc988ab7da8d406bed4bbd210bcc7a80",
+      "runtime_activation.py": "849727659f0b049477457c19eebe4852d923c620",
+      "runtime_profile.py": "b4880b1333c9207aa8341a20555a253ed1d9b5c1",
       "service_profile.py": "41f932e0d90027a3332c33dc9a5d6db04fd3039e",
       "transaction.py": "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2",
       "update_request.py": "abe3b7944d061603142f8ca01b180dcc877d1869",
