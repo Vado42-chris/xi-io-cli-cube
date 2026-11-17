@@ -209,6 +209,8 @@ def _stop_services(rows,permissions):
   try:
    permission_profile.require_capability(permissions,'stop_services',sid)
    before=service_profile.observe_user_unit(unit)
+   if before.get('observed') is not True or before.get('active_state') not in {'active','inactive'}:
+    raise ValueError('SERVER_SERVICE_PRE_ROLLBACK_STATE_UNVERIFIED:'+sid)
    attempt={'service_id':sid,'unit':unit,'before':before,'after':None,'stop_returncode':None}
    attempts.append(attempt)
    r=service_profile._run(['systemctl','--user','stop',unit]);attempt['stop_returncode']=r.returncode
@@ -224,16 +226,41 @@ def _stop_services(rows,permissions):
   raise ValueError('SERVER_SERVICE_STOP_OR_READBACK_FAILED:'+','.join(x[0] for x in failures)) from failures[0][1]
  return attempts
 
+def _service_unit_plan_action(reviewed_plan,unit):
+ file_plan=reviewed_plan.get('file_plan')
+ if not isinstance(file_plan,list): raise ValueError('SERVER_ROLLBACK_FILE_PLAN_INVALID')
+ target='systemd/user/'+unit
+ matches=[row for row in file_plan if isinstance(row,dict)
+          and row.get('destination_scope')=='xdg_config' and row.get('destination')==target]
+ if len(matches)!=1: raise ValueError('SERVER_ROLLBACK_UNIT_PLAN_NOT_UNIQUE:'+unit)
+ action=matches[0].get('action')
+ if action not in {'create','backup_replace','noop_same_hash'}:
+  raise ValueError('SERVER_ROLLBACK_UNIT_PLAN_ACTION_INVALID:'+unit)
+ return action
+
 def _rollback_with_readback(home,permissions,reviewed_plan,services,receipt_path):
- # Receipt identity and exact file plan are verified before any service or file effect.
+ # Receipt identity, unit actions and exact file plan are verified before effects.
  _bound_installer_receipt(reviewed_plan,receipt_path)
+ unit_actions={row['unit']:_service_unit_plan_action(reviewed_plan,row['unit']) for row in services}
  stopped=_stop_services(services,permissions)
  rollback(Path(receipt_path),_roots(home))
  r=service_profile._run(['systemctl','--user','daemon-reload'])
  if r.returncode!=0: raise ValueError('SYSTEMD_USER_DAEMON_RELOAD_FAILED')
  for row in stopped:
-  final=service_profile.observe_user_unit(row['unit'])
-  if final['active_state']!='inactive': raise ValueError('SERVER_SERVICE_ROLLBACK_READBACK_FAILED:'+row['service_id'])
+  sid=row['service_id'];unit=row['unit'];action=unit_actions[unit]
+  restore_active=row['before']['active_state']=='active' and action!='create'
+  if restore_active:
+   permission_profile.require_capability(permissions,'start_services',sid)
+   r=service_profile._run(['systemctl','--user','start',unit])
+   if r.returncode!=0: raise ValueError('SERVER_SERVICE_ROLLBACK_RESTART_FAILED:'+sid)
+  final=service_profile.observe_user_unit(unit)
+  expected='active' if restore_active else 'inactive'
+  if action!='create' and final.get('observed') is not True:
+   raise ValueError('SERVER_SERVICE_ROLLBACK_UNIT_NOT_OBSERVED:'+sid)
+  if final.get('active_state')!=expected:
+   raise ValueError('SERVER_SERVICE_ROLLBACK_READBACK_FAILED:'+sid)
+  row['unit_plan_action']=action
+  row['restored_previous_active_state']=restore_active
   row['final']=final
  return stopped
 
