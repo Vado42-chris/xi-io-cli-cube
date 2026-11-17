@@ -21,11 +21,24 @@ function pruneBytecode(directory){
   if(row.isDirectory()){if(row.name==='__pycache__')rmSync(p,{recursive:true});else pruneBytecode(p);}
  }
 }
+function testAdapterInIsolation(){
+ const tests=readdirSync(adapter,{withFileTypes:true})
+  .filter(row=>row.isFile()&&/^test_.*\.py$/.test(row.name))
+  .map(row=>row.name).sort();
+ if(tests.length===0)throw Error('Adapter regression denominator is empty');
+ // Each legacy adapter suite imports owner modules by short name and may patch
+ // process-global module state. One shared unittest-discovery interpreter makes
+ // qualification depend on file order. Preserve the full denominator while
+ // giving every file a fresh module registry and patch lifecycle.
+ for(const name of tests){
+  run('/usr/bin/python3',['-B','-m','unittest','discover','-s',adapter,'-p',name]);
+ }
+}
 if(mode==='build')run('npm',['run','build']);
 stage();
 if(mode!=='stage'){
  if(process.platform!=='linux')throw Error('Native candidate checks are Linux-qualified only');
- run('/usr/bin/python3',['-B','-m','unittest','discover','-s',adapter,'-p','test_*.py']);
+ testAdapterInIsolation();
  run('/usr/bin/python3',['-I','-B',join(carrier,'tests/check_contract.py')]);
  run('cargo',['test','--locked','--manifest-path',join(carrier,'src-tauri/Cargo.toml')],carrier);
  // Isolated adapter subprocesses can ignore PYTHONDONTWRITEBYTECODE; caches are not payloads.
