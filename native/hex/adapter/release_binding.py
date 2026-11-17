@@ -89,7 +89,9 @@ def _read_release_receipt(state_fd: int, name: str) -> dict | None:
         raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
     try:
         st=os.fstat(fd)
-        _require(stat.S_ISREG(st.st_mode) and (st.st_mode & 0o777)==0o600,
+        _require(stat.S_ISREG(st.st_mode)
+                 and (st.st_mode & 0o777)==0o600
+                 and st.st_nlink==1,
                  "BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED")
         try:
             return json.loads(os.read(fd,131072).decode())
@@ -109,6 +111,7 @@ def _write_release_receipt_locked(state_fd: int, state_root: Path, name: str, re
         finally:
             os.close(fd)
         os.replace(tmp,name,src_dir_fd=state_fd,dst_dir_fd=state_fd)
+        os.fsync(state_fd)
     except OSError as exc:
         try: os.unlink(tmp,dir_fd=state_fd)
         except OSError: pass
