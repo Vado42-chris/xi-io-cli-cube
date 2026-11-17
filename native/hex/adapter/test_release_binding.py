@@ -68,6 +68,25 @@ class ReleaseBindingTests(unittest.TestCase):
    self.assertEqual(reads,[{"product_ref":"product-demo","consumer_ref":"consumer:hex"}])
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
 
+ def test_existing_release_receipt_requires_private_regular_file_custody(self):
+  td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
+  binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
+   "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
+   "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
+   "adopter_current":True,"entrypoint_qualification_ref":"entrypoint:proof:g1","effect_authority":False,"installed":False}
+  env={"XDG_STATE_HOME":str(lock.parent/"state"),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
+  state=Path(env["XDG_STATE_HOME"])/"xi-io/installer/release-distributions";state.mkdir(parents=True)
+  name=hashlib.sha256(("product-demo|consumer:hex|g1").encode()).hexdigest()+".json";target=state/name
+  expected={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":"product-demo","consumer_ref":"consumer:hex",
+   "release_ref":r["release_ref"],"release_generation":"g1","entrypoint_qualification_ref":"entrypoint:proof:g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"bundle_profile_id":"demo","bundle_state":"INSTALLED_BYTES_VERIFIED",
+   "installed_role_count":1,"readback_verified":True,"effect_authority":False}
+  target.write_text(json.dumps(expected));target.chmod(0o644)
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}):
+   with self.assertRaisesRegex(BundleError,"BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED"):
+    install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
+
  def test_framework_distribution_substitution_refuses_before_install(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
   base={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],

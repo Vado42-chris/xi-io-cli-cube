@@ -89,14 +89,24 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
         "entrypoint_qualification_ref":binding.get("entrypoint_qualification_ref"),"approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),"bundle_state":installed.get("state"),
         "installed_role_count":len(installed.get("roles") or []),"readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED","effect_authority":False}
     name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json";target=state_root/name
-    if target.exists():
-        _require(json.loads(target.read_text(encoding="utf-8"))==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
+    if target.exists() or target.is_symlink():
+        _require(not target.is_symlink() and target.is_file()
+                 and (target.stat().st_mode & 0o777)==0o600,
+                 "BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED")
+        try:
+            existing=json.loads(target.read_text(encoding="utf-8"))
+        except (OSError,ValueError,UnicodeError) as exc:
+            raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
+        _require(existing==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
         return {**installed,"release_distribution_receipt":str(target)}
     fd,tmp=tempfile.mkstemp(prefix="."+name+".",suffix=".tmp",dir=state_root);os.close(fd);p=Path(tmp)
     try:p.write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n",encoding="utf-8");os.chmod(p,0o600);os.replace(p,target)
     finally:
         if p.exists():p.unlink()
-    _require(json.loads(target.read_text(encoding="utf-8"))==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_READBACK_MISMATCH")
+    _require(not target.is_symlink() and target.is_file()
+             and (target.stat().st_mode & 0o777)==0o600
+             and json.loads(target.read_text(encoding="utf-8"))==receipt,
+             "BUNDLE_RELEASE_INSTALL_RECEIPT_READBACK_MISMATCH")
     return {**installed,"release_distribution_receipt":str(target)}
 
 
