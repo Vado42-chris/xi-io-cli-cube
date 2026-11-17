@@ -179,6 +179,26 @@ class ServerProfileTests(unittest.TestCase):
     server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
   self.assertTrue(self.active);self.assertTrue(receipt.exists())
   self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+
+ def test_ambiguous_stop_restores_preexisting_active_service_before_refusal(self):
+  p,receipt,_effect=self.install();events=[]
+  def ambiguous_stop(args):
+   if args[:3]==['systemctl','--user','stop']:
+    events.append('stop');self.active=False
+    return SimpleNamespace(returncode=1,stdout='',stderr='ambiguous')
+   if args[:3]==['systemctl','--user','start']:
+    events.append('start');self.active=True
+    return SimpleNamespace(returncode=0,stdout='',stderr='')
+   return self.run(args)
+  with patch.object(server_profile.service_profile,'_run',side_effect=ambiguous_stop):
+   with self.assertRaisesRegex(ValueError,'SERVER_PACKAGE_ROLLBACK_FAILED_OR_UNVERIFIED'):
+    server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+  self.assertEqual(events,['stop','start']);self.assertTrue(self.active)
+  self.assertTrue(receipt.exists());self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
 
  def test_start_failure_still_stops_attempt_and_rolls_back(self):
   def partial_start(args):
