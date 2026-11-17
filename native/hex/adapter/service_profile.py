@@ -30,7 +30,7 @@ def _validate_catalog_document(doc):
   if not isinstance(sid,str) or not sid or len(sid)>96 or sid in seen_ids:
    raise ValueError('SERVICE_CATALOG_ID_INVALID:'+str(sid))
   seen_ids.add(sid)
-  candidates=row.get('systemd_candidates') or []
+  candidates=row['systemd_candidates'] if 'systemd_candidates' in row else []
   if (not isinstance(candidates,list) or len(candidates)!=len(set(candidates))
       or any(not isinstance(unit,str) or not UNIT.fullmatch(unit) for unit in candidates)):
    raise ValueError('SERVICE_CATALOG_UNITS_INVALID:'+sid)
@@ -84,7 +84,7 @@ def observe_user_unit(unit):
 
 def _compile_service_row(catalog,service_id):
  svc=_service(catalog,service_id)
- candidates=svc.get('systemd_candidates') or []
+ candidates=svc['systemd_candidates'] if 'systemd_candidates' in svc else []
  if not candidates:
   return {'service_id':service_id,'state':'NO_DECLARED_UNIT','candidate_units':[],
           'selected_unit':None,'declared_probe':svc.get('probe')}
