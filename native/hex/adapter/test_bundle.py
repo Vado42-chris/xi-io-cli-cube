@@ -544,6 +544,28 @@ class BundleTests(unittest.TestCase):
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/ward/ward.bin").exists())
 
+    def test_rollback_preserves_matching_preexisting_derived_custody(self):
+        f = self.fixture()
+        generation = "a"*40
+        f.child("sdk", fixture=False, accepted_generation=generation)
+        f.child("consumer", depends_on=("sdk",), fixture=False)
+        lock, digest = f.lock(fixture=False)
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        state_root.mkdir(parents=True)
+        tx_name = "sdk-0.0.1-"+digest[:12]+".receipt.json"
+        derived = state_root / ("sdk-0.0.1-"+digest[:12]+".release.json")
+        prior = {"schema":"xiio.installer.child-generation-receipt/v1","product_ref":"xi-io-sdk",
+                 "release_generation":generation,"bundle_state":"INSTALLED_BYTES_VERIFIED",
+                 "readback_verified":True,"transaction_receipt":tx_name,
+                 "effect_authority":False,"provider_effect":False}
+        derived.write_text(json.dumps(prior,indent=2,sort_keys=True)+"\n")
+        derived.chmod(0o600)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_FAILED_ROLLED_BACK"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch, fail_after_product=1)
+        self.assertTrue(derived.exists())
+        self.assertEqual(json.loads(derived.read_text()), prior)
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/sdk/sdk.bin").exists())
+
     def test_conflicting_derived_receipt_is_not_overwritten(self):
         f = self.fixture()
         generation = "a"*40
