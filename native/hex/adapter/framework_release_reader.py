@@ -27,57 +27,24 @@ def _installed_module(path: Path) -> Path:
     return path
 
 
-def build_framework_release_distribution_reader(
-    *, framework_release_distribution_module: Path,
-    read_accepted_release, read_current_adopter, read_entrypoint_qualification,
-    node_binary: str = "node",
-):
-    """Return the reader expected by release_binding.install_from_distribution_reader.
+def build_framework_release_distribution_reader(*, framework_release_distribution_module: Path, node_binary: str = "node"):
+    """Invoke the installed Framework-owned composed distribution reader.
 
-    The two host readers provide authoritative projections. The installed
-    Framework module compiles and validates them. Python never reproduces the
-    Framework release rules.
+    HEX supplies only product/consumer coordinates. Framework owns all release,
+    adopter and entrypoint authority readback.
     """
-    module = _installed_module(framework_release_distribution_module)
-    _require(callable(read_accepted_release), "BUNDLE_ACCEPTED_RELEASE_READER_UNBOUND")
-    _require(callable(read_current_adopter), "BUNDLE_CURRENT_ADOPTER_READER_UNBOUND")
-    _require(callable(read_entrypoint_qualification), "BUNDLE_ENTRYPOINT_QUALIFICATION_READER_UNBOUND")
-    _require(isinstance(node_binary, str) and bool(node_binary.strip()),
-             "BUNDLE_NODE_RUNTIME_UNBOUND")
-    bridge = Path(__file__).with_name("framework_release_compiler_bridge.mjs")
-    _require(not bridge.is_symlink() and bridge.is_file(),
-             "BUNDLE_FRAMEWORK_RELEASE_BRIDGE_UNTRUSTED")
-
-    def read_release_distribution(*, product_ref: str, consumer_ref: str):
-        release = read_accepted_release(product_ref=product_ref)
-        adopter = read_current_adopter(consumer_ref=consumer_ref, product_ref=product_ref)
-        release_generation = release.get("release_generation") if isinstance(release, dict) else None
-        entrypoint_qualification = read_entrypoint_qualification(product_ref=product_ref, release_generation=release_generation)
-        request = {
-            "product_ref": product_ref,
-            "consumer_ref": consumer_ref,
-            "release": release,
-            "adopter": adopter,
-            "entrypoint_qualification": entrypoint_qualification,
-        }
+    module=_installed_module(framework_release_distribution_module)
+    _require(isinstance(node_binary,str) and bool(node_binary.strip()),"BUNDLE_NODE_RUNTIME_UNBOUND")
+    bridge=Path(__file__).with_name("framework_release_compiler_bridge.mjs")
+    _require(not bridge.is_symlink() and bridge.is_file(),"BUNDLE_FRAMEWORK_RELEASE_BRIDGE_UNTRUSTED")
+    def read_release_distribution(*,product_ref:str,consumer_ref:str):
+        request={"product_ref":product_ref,"consumer_ref":consumer_ref}
         try:
-            completed = subprocess.run(
-                [node_binary, str(bridge), str(module)],
-                input=json.dumps(request, separators=(",", ":")),
-                text=True, capture_output=True, check=False,
-                env={"PATH": os.environ.get("PATH", "")},
-                timeout=15,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise BundleError("BUNDLE_FRAMEWORK_RELEASE_COMPILER_UNAVAILABLE") from exc
-        _require(completed.returncode == 0,
-                 "BUNDLE_FRAMEWORK_RELEASE_COMPILATION_REFUSED")
-        try:
-            result = json.loads(completed.stdout)
-        except (TypeError, ValueError) as exc:
-            raise BundleError("BUNDLE_FRAMEWORK_RELEASE_COMPILER_INVALID_RESULT") from exc
-        _require(isinstance(result, dict),
-                 "BUNDLE_FRAMEWORK_RELEASE_COMPILER_INVALID_RESULT")
+            completed=subprocess.run([node_binary,str(bridge),str(module)],input=json.dumps(request,separators=(",",":")),text=True,capture_output=True,check=False,env={"PATH":os.environ.get("PATH","")},timeout=15)
+        except (OSError,subprocess.TimeoutExpired) as exc: raise BundleError("BUNDLE_FRAMEWORK_RELEASE_READER_UNAVAILABLE") from exc
+        _require(completed.returncode==0,"BUNDLE_FRAMEWORK_RELEASE_READER_REFUSED")
+        try: result=json.loads(completed.stdout)
+        except (TypeError,ValueError) as exc: raise BundleError("BUNDLE_FRAMEWORK_RELEASE_READER_INVALID_RESULT") from exc
+        _require(isinstance(result,dict),"BUNDLE_FRAMEWORK_RELEASE_READER_INVALID_RESULT")
         return result
-
     return read_release_distribution
