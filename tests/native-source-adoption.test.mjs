@@ -35,10 +35,10 @@ test('CLI payload manifest still verifies exact adopted bytes',()=>{
 test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  const adoption=json('native/hex/SOURCE-ADOPTION.json');
  assert.equal(adoption.kernel.repository,'Vado42-chris/xi-io_installer');
- assert.equal(adoption.kernel.ref,'78646554ad6cd3de12b126b1a6ce020e8fc17b06');
+ assert.equal(adoption.kernel.ref,'8bd35c6c8de9e1bc29fccb89a8ebd027e92f288c');
  assert.equal(adoption.kernel.acceptance_state,'ACCEPTED_MAIN');
- assert.equal(adoption.kernel.owner_pr,30);
- assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21,30]);
+ assert.equal(adoption.kernel.owner_pr,31);
+ assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21,30,31]);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).merge_ref,adoption.kernel.ref);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).status,'CURRENT_ACCEPTED_MAIN');
  assert.match(adoption.kernel.currentness_rule,/cannot downgrade currentness/);
