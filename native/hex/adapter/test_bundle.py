@@ -544,6 +544,27 @@ class BundleTests(unittest.TestCase):
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/cli/cli.bin").exists())
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/ward/ward.bin").exists())
 
+    def test_mid_bundle_rollback_removes_derived_generation_and_binding_receipts(self):
+        f = self.fixture()
+        generation = "a"*40
+        f.child("provider", fixture=False, accepted_generation=generation)
+        manifest_path = f.root / "provider.manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["dependency_id"] = "provider"
+        manifest["owner_repo"] = "owner/provider"
+        manifest["runtime_exports"] = {"provider_bin":{"destination_scope":"xdg_data","destination":"xi-io/provider/provider.bin"}}
+        raw = json.dumps(manifest, sort_keys=True).encode()
+        manifest_path.write_bytes(raw)
+        f.rows[-1]["manifest_sha256"] = sha(raw)
+        f.child("consumer", depends_on=("provider",), fixture=False)
+        lock, digest = f.lock(fixture=False)
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_FAILED_ROLLED_BACK"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch, fail_after_product=1)
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        self.assertEqual(list(state_root.glob("*.release.json")), [])
+        self.assertEqual(list(state_root.glob("*.binding.json")), [])
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/provider/provider.bin").exists())
+
     def test_existing_user_file_is_not_overwritten(self):
         f = self.fixture()
         f.child("cli")
