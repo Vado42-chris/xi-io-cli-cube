@@ -12,7 +12,10 @@ import re
 import subprocess
 from pathlib import Path
 
-from .child_bundle import BundleError
+try:
+    from .child_bundle import BundleError
+except ImportError:
+    from child_bundle import BundleError
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
