@@ -1,5 +1,6 @@
-import hashlib,json,tempfile,unittest
+import hashlib,json,tempfile,unittest,threading
 from pathlib import Path
+import os
 from unittest.mock import patch
 import sys
 HERE=Path(__file__).resolve().parent
@@ -67,6 +68,21 @@ class ReleaseBindingTests(unittest.TestCase):
    self.assertTrue(receipt["readback_verified"])
    self.assertEqual(reads,[{"product_ref":"product-demo","consumer_ref":"consumer:hex"}])
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
+
+ def test_identical_concurrent_release_receipt_writers_converge(self):
+  from native.hex.adapter.release_binding import _persist_release_receipt
+  td=tempfile.TemporaryDirectory();self.addCleanup(td.cleanup);root=Path(td.name);fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+  self.addCleanup(lambda: os.close(fd))
+  receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":"p","consumer_ref":"c","release_generation":"g"}
+  results=[];errors=[]
+  def writer():
+   try: results.append(_persist_release_receipt(fd,root,"same.json",receipt))
+   except Exception as exc: errors.append(exc)
+  threads=[threading.Thread(target=writer) for _ in range(2)]
+  for thread in threads: thread.start()
+  for thread in threads: thread.join()
+  self.assertEqual(errors,[]);self.assertEqual(len(results),2)
+  self.assertEqual(json.loads((root/"same.json").read_text()),receipt)
 
  def test_release_receipt_write_stays_on_verified_directory_after_path_swap(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
