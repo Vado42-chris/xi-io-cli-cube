@@ -78,6 +78,59 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
         "provider_hosts": list(release_hosts),
     }, env=env, fetch=fetch)
 
+
+def _persist_release_receipt(state_fd: int, state_root: Path, name: str, receipt: dict) -> str:
+    encoded=(json.dumps(receipt,indent=2,sort_keys=True)+"\n").encode()
+    lock_name="."+name+".lock"
+    try:
+        lock_raw=os.open(lock_name,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
+    except OSError as exc:
+        raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED") from exc
+    with os.fdopen(lock_raw,"a+b",closefd=True) as receipt_lock:
+        fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
+        try:
+            try:
+                fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
+            except FileNotFoundError:
+                fd=None
+            except OSError as exc:
+                raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
+            if fd is not None:
+                try:
+                    st=os.fstat(fd)
+                    _require(stat.S_ISREG(st.st_mode) and (st.st_mode & 0o777)==0o600,
+                             "BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED")
+                    existing=json.loads(os.read(fd,131072).decode())
+                except (OSError,ValueError,UnicodeError) as exc:
+                    raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
+                finally:
+                    os.close(fd)
+                _require(existing==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
+                return str(state_root/name)
+            tmp="."+name+"."+hashlib.sha256(encoded).hexdigest()[:16]+".tmp"
+            try:
+                fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
+                try:
+                    os.write(fd,encoded);os.fsync(fd)
+                finally:
+                    os.close(fd)
+                os.replace(tmp,name,src_dir_fd=state_fd,dst_dir_fd=state_fd)
+            except OSError as exc:
+                try: os.unlink(tmp,dir_fd=state_fd)
+                except OSError: pass
+                raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_WRITE_FAILED") from exc
+            fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
+            try:
+                st=os.fstat(fd);reread=json.loads(os.read(fd,131072).decode())
+                _require(stat.S_ISREG(st.st_mode) and (st.st_mode & 0o777)==0o600 and reread==receipt,
+                         "BUNDLE_RELEASE_INSTALL_RECEIPT_READBACK_MISMATCH")
+            finally:
+                os.close(fd)
+            return str(state_root/name)
+        finally:
+            fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_UN)
+
+
 def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
     product_ref=binding["product_ref"];consumer_ref=binding["consumer_ref"]
     approved=binding["approved_lock_sha256"];allowed=frozenset(binding["provider_hosts"])
@@ -95,56 +148,8 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
             "entrypoint_qualification_ref":binding.get("entrypoint_qualification_ref"),"approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),"bundle_state":installed.get("state"),
             "installed_role_count":len(installed.get("roles") or []),"readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED","effect_authority":False}
         name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json"
-        encoded=(json.dumps(receipt,indent=2,sort_keys=True)+"\n").encode()
-        lock_name="."+name+".lock"
-        try:
-            lock_raw=os.open(lock_name,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
-        except OSError as exc:
-            raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED") from exc
-        receipt_lock=os.fdopen(lock_raw,"a+b",closefd=True)
-        try:
-            fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
-        try:
-            fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
-        except FileNotFoundError:
-            fd=None
-        except OSError as exc:
-            raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
-        if fd is not None:
-            try:
-                st=os.fstat(fd)
-                _require(stat.S_ISREG(st.st_mode) and (st.st_mode & 0o777)==0o600,
-                         "BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED")
-                existing=json.loads(os.read(fd,131072).decode())
-            except (OSError,ValueError,UnicodeError) as exc:
-                raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
-            finally:
-                os.close(fd)
-            _require(existing==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
-            return {**installed,"release_distribution_receipt":str(state_root/name)}
-        tmp="."+name+"."+hashlib.sha256(encoded).hexdigest()[:16]+".tmp"
-        try:
-            fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
-            try:
-                os.write(fd,encoded);os.fsync(fd)
-            finally:
-                os.close(fd)
-            os.replace(tmp,name,src_dir_fd=state_fd,dst_dir_fd=state_fd)
-        except OSError as exc:
-            try: os.unlink(tmp,dir_fd=state_fd)
-            except OSError: pass
-            raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_WRITE_FAILED") from exc
-        fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
-        try:
-            st=os.fstat(fd);reread=json.loads(os.read(fd,131072).decode())
-            _require(stat.S_ISREG(st.st_mode) and (st.st_mode & 0o777)==0o600 and reread==receipt,
-                     "BUNDLE_RELEASE_INSTALL_RECEIPT_READBACK_MISMATCH")
-        finally:
-            os.close(fd)
-        return {**installed,"release_distribution_receipt":str(state_root/name)}
-        finally:
-            try: fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_UN)
-            finally: receipt_lock.close()
+        receipt_path=_persist_release_receipt(state_fd,state_root,name,receipt)
+        return {**installed,"release_distribution_receipt":receipt_path}
     finally:
         os.close(state_fd)
 
