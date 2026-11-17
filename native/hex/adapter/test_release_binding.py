@@ -119,7 +119,11 @@ class ReleaseBindingTests(unittest.TestCase):
    out=install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
   self.assertEqual(list(outside.iterdir()),[])
   pinned=release_dir.with_name("release-distributions-pinned")
-  self.assertEqual(len(list(pinned.glob("*.json"))),1)
+  receipts=list(pinned.glob("*.json"));self.assertEqual(len(receipts),1)
+  returned=Path(out["release_distribution_receipt"])
+  self.assertEqual(returned,receipts[0])
+  self.assertTrue(returned.is_file())
+  self.assertEqual(json.loads(returned.read_text())["release_generation"],"g1")
 
  def test_symlinked_release_state_root_refuses_before_bundle_install(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
