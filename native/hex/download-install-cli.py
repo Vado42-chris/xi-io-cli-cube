@@ -2,8 +2,8 @@
 """Pinned downloader for the EXISTING HEX offline CLI installer. No new installer."""
 import argparse,base64,hashlib,importlib.util,json,os,pathlib,re,shutil,subprocess,sys,tempfile
 SOURCE_SHA="f2626cae872f191e980ecdfb681485f2d9e67198"
-INSTALLER_SHA="25825d3b1017cb42b7c9e39250c6f520816ac80ea491765db9f6088c5c3a57dd"
-MANIFEST_SHA="114ead69aa3ebe27d5c2776a06601064a92603d0f40815a1bc62468bb4f266ab"
+INSTALLER_SHA="03da74c49c385906a25ba02698610ee1ab61378dd51b06a540048645450b1b48"
+MANIFEST_SHA="b74fd64570170077a387439f00e5397ec70c0ab5555609861af89e21068a6e86"
 FILES=["src/xiio.mjs", "src/file-edit-cas.mjs", "src/local-ops.mjs", "src/sdk-provider-state.mjs", "src/sdk/audhd-command.mjs", "src/sdk/tool-verb-fidelity.mjs", "src/sdk/local-work-packet.mjs", "src/sdk/qualified-command-executor.mjs", "src/sdk/local-worker-host.mjs", "src/runtime-integrity.mjs", "config/service-catalog.json", "scripts/service-inventory.mjs", "scripts/reconcile-service-inventory.mjs", "config/batches/starter-regression-20261031.json"]
 
 def digest(data):return hashlib.sha256(data).hexdigest()
@@ -31,7 +31,7 @@ def verify(root):
   if len(data)!=expected['size'] or digest(data)!=expected['sha256']:raise RuntimeError('PAYLOAD_HASH_MISMATCH:'+name)
  return manifest
 
-DISCOVERY_FILES = {'native/hex/adapter/install_preflight.py': '7290a9d02870332009f4dd984203aa9aabb093a135adae97643c60aa1ab6f9a2', 'native/hex/adapter/kernel/xiio_installer/__init__.py': '1cfa18cf7a7ce811c262f715af968d50db2efb237fc44f95f0e593f30a3e2c95', 'native/hex/adapter/kernel/xiio_installer/discovery.py': 'c1c6096189c03b593707f7c440b8727ea0aff49135f9d8d26afd5d10e5ee60a8'}
+DISCOVERY_FILES = {'native/hex/adapter/install_preflight.py': '7290a9d02870332009f4dd984203aa9aabb093a135adae97643c60aa1ab6f9a2', 'native/hex/adapter/kernel/xiio_installer/__init__.py': '06f35e9d4b5de30b7b32f4aa56ee4ccbfb995c0c26a459db6ada3a31cf689509', 'native/hex/adapter/kernel/xiio_installer/discovery.py': '968f0d80029a61d3b027e0d5a84f32b0da5e7757956e55205e6e5ba1c1f59671'}
 
 def resolve_existing_node(carrier,cache,home=None):
  node=shutil.which('node')
