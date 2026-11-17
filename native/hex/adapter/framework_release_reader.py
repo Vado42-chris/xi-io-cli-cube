@@ -40,7 +40,7 @@ def build_framework_release_distribution_reader(*, framework_release_distributio
     def read_release_distribution(*,product_ref:str,consumer_ref:str):
         request={"product_ref":product_ref,"consumer_ref":consumer_ref}
         try:
-            completed=subprocess.run([node_binary,str(bridge),str(module)],input=json.dumps(request,separators=(",",":")),text=True,capture_output=True,check=False,env={"PATH":os.environ.get("PATH","")},timeout=15)
+            completed=subprocess.run([node_binary,str(bridge),str(module)],input=json.dumps(request,separators=(",",":")),text=True,capture_output=True,check=False,env={k:v for k,v in os.environ.items() if k in {"PATH","HOME","XDG_STATE_HOME"}},timeout=15)
         except (OSError,subprocess.TimeoutExpired) as exc: raise BundleError("BUNDLE_FRAMEWORK_RELEASE_READER_UNAVAILABLE") from exc
         _require(completed.returncode==0,"BUNDLE_FRAMEWORK_RELEASE_READER_REFUSED")
         try: result=json.loads(completed.stdout)
