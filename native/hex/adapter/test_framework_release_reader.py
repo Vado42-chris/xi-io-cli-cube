@@ -1,10 +1,13 @@
 from pathlib import Path
-import json
+import sys
 import tempfile
 import unittest
 
-from framework_release_reader import build_framework_release_distribution_reader
-from child_bundle import BundleError
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "native/hex/adapter/kernel"))
+
+from native.hex.adapter.framework_release_reader import build_framework_release_distribution_reader
+from native.hex.adapter.child_bundle import BundleError
 
 
 MODULE = r"""
