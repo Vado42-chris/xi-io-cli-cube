@@ -102,6 +102,31 @@ class ReleaseBindingTests(unittest.TestCase):
      os.close(fd)
     self.assertFalse((root/"same.json").exists())
 
+ def test_release_receipt_requires_single_link_custody(self):
+  from native.hex.adapter.release_binding import _read_release_receipt
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);target=root/"same.json";target.write_text(json.dumps({"schema":"receipt"}));target.chmod(0o600)
+   os.link(target,root/"receipt-alias.json")
+   fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+   try:
+    with self.assertRaisesRegex(BundleError,"BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED"):
+     _read_release_receipt(fd,"same.json")
+   finally:
+    os.close(fd)
+
+ def test_release_receipt_write_fsyncs_state_directory(self):
+  from native.hex.adapter.release_binding import _persist_release_receipt
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+   receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":"p","consumer_ref":"c","release_generation":"g"}
+   real_fsync=os.fsync
+   try:
+    with patch('native.hex.adapter.release_binding.os.fsync',side_effect=real_fsync) as sync:
+     _persist_release_receipt(fd,root,"same.json",receipt)
+    self.assertIn(fd,[call.args[0] for call in sync.call_args_list])
+   finally:
+    os.close(fd)
+
  def test_release_receipt_write_stays_on_verified_directory_after_path_swap(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
   binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
