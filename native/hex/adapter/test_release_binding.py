@@ -46,7 +46,7 @@ class ReleaseBindingTests(unittest.TestCase):
    "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
    "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
    "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
-   "adopter_current":True,"effect_authority":False,"installed":False}
+   "adopter_current":True,"entrypoint_qualification_ref":"entrypoint:proof:g1","effect_authority":False,"installed":False}
   reads=[]
   def reader(**coords): reads.append(coords); return binding
   env={"XDG_STATE_HOME":str(lock.parent/"state"),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
@@ -59,6 +59,7 @@ class ReleaseBindingTests(unittest.TestCase):
    self.assertEqual(receipt["product_ref"],"product-demo")
    self.assertEqual(receipt["consumer_ref"],"consumer:hex")
    self.assertEqual(receipt["approved_lock_sha256"],r["approved_lock_sha256"])
+   self.assertEqual(receipt["entrypoint_qualification_ref"],"entrypoint:proof:g1")
    self.assertTrue(receipt["readback_verified"])
    self.assertEqual(reads,[{"product_ref":"product-demo","consumer_ref":"consumer:hex"}])
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
@@ -76,6 +77,7 @@ class ReleaseBindingTests(unittest.TestCase):
          ({"adopter_current":False},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
          ({"effect_authority":True},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
          ({"installed":True},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
+         ({"entrypoint_qualification_ref":""},"BUNDLE_ENTRYPOINT_QUALIFICATION_REF_REQUIRED"),
          ({"approved_lock_sha256":"a"*64},"BUNDLE_RELEASE_LOCK_DIGEST_MISMATCH"),
          ({"provider_hosts":["evil.example.test"]},"BUNDLE_URL_NOT_APPROVED")]
   for patching,code in cases:
