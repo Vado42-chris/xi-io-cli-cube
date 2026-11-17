@@ -281,7 +281,10 @@ jobs:
               expected_dependency_id='framework-runtime',
               expected_owner_repo='Vado42-chris/xi-io.net',
               expected_generation=generation)
-          assert receipt==reopened and reopened['state']=='BOUND'
+          assert receipt['state']=='BOUND'
+          assert reopened['state']=='VERIFIED' and reopened['custody_verified'] is True
+          for key in ('dependency_id','owner_repo','accepted_generation','binding_receipt_path','runtime_exports','fields','provider_effect','effect_authority'):
+              assert receipt[key]==reopened[key]
           assert set(reopened['runtime_exports'])=={'current_assignment_module','release_distribution_module'}
           PY
       - name: Produce durable authority using the installed Framework runtime
