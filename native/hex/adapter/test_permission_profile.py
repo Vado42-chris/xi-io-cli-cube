@@ -18,6 +18,29 @@ class PermissionProfileTests(unittest.TestCase):
    'service_scopes':['inbox'],
    'update_policy':'off','central_updates':False,'remote_access':False,'revoked':False})
 
+ def central_profile(self,auto=False):
+  return mod.compile_profile({
+   'profile_id':'managed-auto' if auto else 'managed-review',
+   'capabilities':['install_files','receive_central_updates','apply_hotpatches'],
+   'service_scopes':['inbox'],'update_policy':'auto_security' if auto else 'review_each',
+   'central_updates':True,'remote_access':False,'revoked':False})
+
+ def request(self,request_id='req:1',target='g2',**overrides):
+  value={'request_id':request_id,'kind':'hotpatch','service_id':'inbox',
+         'severity':'security','target_generation':target,'signed':True,
+         'rollback_available':True,'requires_restart':True}
+  value.update(overrides);return value
+
+ def authority(self,decision,profile,**overrides):
+  value={'ward_admission':True,'ward_admission_ref':'ward:1','work_ref':'work:1',
+         'assignment_ref':'assignment:1','attempt_ref':'attempt:1','generation_ref':'auth:g1',
+         'currentness_ref':'current:1','effect_authorization_ref':'effect:1',
+         'permission_digest':profile['permission_digest'],
+         'central_request_id':decision['request_id'],'service_id':decision['service_id'],
+         'kind':decision['kind'],'target_generation':decision['target_generation'],
+         'decision_digest':decision['decision_digest']}
+  value.update(overrides);return value
+
  def test_default_is_file_install_only(self):
   p=mod.compile_profile()
   self.assertEqual(p['capabilities'],['install_files'])
@@ -38,25 +61,27 @@ class PermissionProfileTests(unittest.TestCase):
    mod.require_capability(p,'start_services','crm')
 
  def test_central_request_never_directly_authorizes_effect(self):
-  p=mod.compile_profile({
-   'profile_id':'managed-review','capabilities':['install_files','receive_central_updates','apply_hotpatches'],
-   'service_scopes':['inbox'],'update_policy':'review_each','central_updates':True,
-   'remote_access':False,'revoked':False})
-  d=mod.authorize_central_request(p,{
-   'request_id':'req:1','kind':'hotpatch','service_id':'inbox','severity':'security',
-   'target_generation':'g2','signed':True,'rollback_available':True,'requires_restart':True})
+  p=self.central_profile();d=mod.authorize_central_request(p,self.request())
+  self.assertEqual(d['schema'],mod.DECISION_SCHEMA)
   self.assertTrue(d['allowed_by_profile']);self.assertTrue(d['approval_required'])
-  self.assertFalse(d['effect_authorized'])
+  self.assertFalse(d['effect_authorized']);self.assertFalse(d['auto_eligible'])
+  self.assertEqual(d['target_generation'],'g2')
+  self.assertRegex(d['decision_digest'],r'^[a-f0-9]{64}$')
+
+ def test_central_request_requires_complete_identity_and_boolean_restart(self):
+  p=self.central_profile()
+  missing=self.request();missing.pop('target_generation')
+  with self.assertRaisesRegex(ValueError,'CENTRAL_REQUEST_FIELDS_INVALID'):
+   mod.authorize_central_request(p,missing)
+  with self.assertRaisesRegex(ValueError,'CENTRAL_REQUEST_ID_REQUIRED'):
+   mod.authorize_central_request(p,self.request(request_id=' '))
+  with self.assertRaisesRegex(ValueError,'CENTRAL_REQUEST_RESTART_FLAG_INVALID'):
+   mod.authorize_central_request(p,self.request(requires_restart='yes'))
 
  def test_auto_security_is_only_eligible_not_executed(self):
-  p=mod.compile_profile({
-   'profile_id':'managed-security-auto','capabilities':['install_files','receive_central_updates','apply_hotpatches'],
-   'service_scopes':['api-glass-private'],'update_policy':'auto_security','central_updates':True,
-   'remote_access':False,'revoked':False})
-  d=mod.authorize_central_request(p,{
-   'request_id':'req:2','kind':'hotpatch','service_id':'api-glass-private','severity':'security',
-   'target_generation':'g3','signed':True,'rollback_available':True,'requires_restart':False})
-  self.assertTrue(d['auto_eligible']);self.assertFalse(d['effect_authorized'])
+  p=self.central_profile(auto=True);d=mod.authorize_central_request(p,self.request('req:2','g3'))
+  self.assertTrue(d['auto_eligible']);self.assertFalse(d['approval_required'])
+  self.assertFalse(d['effect_authorized'])
 
  def test_revocation_is_zero_capability(self):
   p=mod.compile_profile({'profile_id':'revoked','capabilities':[],'service_scopes':[],
@@ -64,33 +89,47 @@ class PermissionProfileTests(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'PERMISSION_PROFILE_REVOKED'):
    mod.require_capability(p,'install_files')
 
- def test_effect_authorization_requires_ward_and_currentness(self):
-  profile=mod.compile_profile({
-   'profile_id':'managed-review','capabilities':['install_files','receive_central_updates','apply_hotpatches'],
-   'service_scopes':['inbox'],'update_policy':'review_each','central_updates':True,
-   'remote_access':False,'revoked':False})
-  d=mod.authorize_central_request(profile,{'request_id':'req:3','kind':'hotpatch','service_id':'inbox',
-   'severity':'security','target_generation':'g4','signed':True,'rollback_available':True,'requires_restart':True})
-  auth={'ward_admission':True,'ward_admission_ref':'ward:1','work_ref':'work:1',
-   'assignment_ref':'assignment:1','attempt_ref':'attempt:1','generation_ref':'g:1',
-   'currentness_ref':'current:1','effect_authorization_ref':'effect:1',
-   'permission_digest':profile['permission_digest']}
+ def test_effect_authorization_requires_exact_ward_binding_and_approval(self):
+  profile=self.central_profile();decision=mod.authorize_central_request(profile,self.request('req:3','g4'))
+  auth=self.authority(decision,profile)
   with self.assertRaisesRegex(ValueError,'EXPLICIT_HOTPATCH_APPROVAL_REQUIRED'):
-   mod.require_effect_authorization(d,auth,False)
-  self.assertTrue(mod.require_effect_authorization(d,auth,True)['authorized'])
-  with self.assertRaisesRegex(ValueError,'EFFECT_AUTHORIZATION_REF_REQUIRED'):
-   mod.require_effect_authorization(d,{**auth,'work_ref':''},True)
+   mod.require_effect_authorization(decision,auth,False)
+  result=mod.require_effect_authorization(decision,auth,True)
+  self.assertTrue(result['authorized']);self.assertEqual(result['schema'],mod.EFFECT_SCHEMA)
+  self.assertEqual(result['decision_digest'],decision['decision_digest'])
+  with self.assertRaisesRegex(ValueError,'EFFECT_AUTHORIZATION_REF_REQUIRED:work_ref'):
+   mod.require_effect_authorization(decision,{**auth,'work_ref':''},True)
 
- def test_auto_security_still_requires_ward_receipt(self):
-  profile=mod.compile_profile({
-   'profile_id':'managed-auto','capabilities':['install_files','receive_central_updates','apply_hotpatches'],
-   'service_scopes':['inbox'],'update_policy':'auto_security','central_updates':True,
-   'remote_access':False,'revoked':False})
-  d=mod.authorize_central_request(profile,{'request_id':'req:4','kind':'hotpatch','service_id':'inbox',
-   'severity':'security','target_generation':'g5','signed':True,'rollback_available':True,'requires_restart':True})
-  self.assertTrue(d['auto_eligible'])
+ def test_effect_authorization_cannot_replay_across_proposals(self):
+  profile=self.central_profile()
+  first=mod.authorize_central_request(profile,self.request('req:first','generation:first'))
+  second=mod.authorize_central_request(profile,self.request('req:second','generation:second'))
+  first_auth=self.authority(first,profile)
+  with self.assertRaisesRegex(ValueError,'EFFECT_REQUEST_ID_MISMATCH'):
+   mod.require_effect_authorization(second,first_auth,True)
+  exact=self.authority(second,profile)
+  cases=[('service_id','other','EFFECT_SERVICE_ID_MISMATCH'),
+         ('kind','update','EFFECT_KIND_MISMATCH'),
+         ('target_generation','other-generation','EFFECT_TARGET_GENERATION_MISMATCH'),
+         ('decision_digest','0'*64,'EFFECT_DECISION_DIGEST_MISMATCH')]
+  for field,value,code in cases:
+   with self.subTest(field=field):
+    with self.assertRaisesRegex(ValueError,code):
+     mod.require_effect_authorization(second,{**exact,field:value},True)
+
+ def test_tampered_decision_digest_refuses_before_ward_join(self):
+  profile=self.central_profile();decision=mod.authorize_central_request(profile,self.request())
+  tampered={**decision,'target_generation':'substituted'}
+  with self.assertRaisesRegex(ValueError,'CENTRAL_DECISION_DIGEST_INVALID'):
+   mod.require_effect_authorization(tampered,self.authority(decision,profile),True)
+
+ def test_auto_security_still_requires_exact_ward_receipt(self):
+  profile=self.central_profile(auto=True)
+  decision=mod.authorize_central_request(profile,self.request('req:auto','g:auto'))
   with self.assertRaisesRegex(ValueError,'EFFECT_AUTHORIZATION_REQUIRED'):
-   mod.require_effect_authorization(d,None,False)
+   mod.require_effect_authorization(decision,None,False)
+  result=mod.require_effect_authorization(decision,self.authority(decision,profile),False)
+  self.assertTrue(result['authorized']);self.assertFalse(decision['approval_required'])
 
  def test_initial_grant_requires_explicit_approval_before_custody_creation(self):
   with tempfile.TemporaryDirectory() as td:
@@ -126,8 +165,7 @@ class PermissionProfileTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as td:
    base=Path(td);first_plan='2'*32;second_plan='3'*32
    mod.save_grant(base,first_plan,self.profile('first'),True)
-   source=base/'permissions'/f'{first_plan}.json'
-   target=base/'permissions'/f'{second_plan}.json'
+   source=base/'permissions'/f'{first_plan}.json';target=base/'permissions'/f'{second_plan}.json'
    shutil.copyfile(source,target);target.chmod(0o600)
    with self.assertRaisesRegex(ValueError,'PERMISSION_GRANT_PLAN_MISMATCH'):
     mod.load_grant(base,second_plan)
