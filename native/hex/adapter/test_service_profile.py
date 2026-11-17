@@ -57,10 +57,10 @@ class ServiceProfileTests(unittest.TestCase):
    return SimpleNamespace(returncode=0,stdout='',stderr='')
   return SimpleNamespace(returncode=1,stdout='',stderr='unexpected')
 
- def compile(self,ids=('alpha',)):
+ def compile(self,ids=('alpha',),action='start'):
   with patch.object(service_profile,'_run',side_effect=self.fake_run):
    return service_profile.compile_service_plan(
-    service_profile.load_catalog(self.root),self.permissions,list(ids))
+    service_profile.load_catalog(self.root),self.permissions,list(ids),action)
 
  def apply(self,plan,action='start'):
   with patch.object(service_profile,'_run',side_effect=self.fake_run):
@@ -69,10 +69,17 @@ class ServiceProfileTests(unittest.TestCase):
 
  def test_successful_action_is_catalog_and_plan_bound(self):
   plan=self.compile();effect=self.apply(plan)
+  self.assertEqual(plan['action'],'start')
   self.assertEqual(self.states['alpha.service']['active'],'active')
   self.assertEqual(effect['catalog_sha256'],plan['catalog_sha256'])
   self.assertEqual(effect['plan_digest'],plan['plan_digest'])
   self.assertEqual(effect['results'][0]['after']['active_state'],'active')
+
+ def test_reviewed_start_cannot_be_substituted_with_stop(self):
+  plan=self.compile(action='start')
+  with self.assertRaisesRegex(ValueError,'SERVICE_PLAN_ACTION_MISMATCH'):
+   self.apply(plan,action='stop')
+  self.assertEqual(self.events,[])
 
  def test_forged_selected_unit_refuses_before_action_even_with_recomputed_digest(self):
   plan=self.compile();forged=copy.deepcopy(plan)
@@ -117,7 +124,7 @@ class ServiceProfileTests(unittest.TestCase):
    'central_updates':False,'remote_access':False,'revoked':False})
   with patch.object(service_profile,'_run',side_effect=self.fake_run):
    with self.assertRaisesRegex(ValueError,'CAPABILITY_NOT_GRANTED:stop_services'):
-    service_profile.compile_service_plan(service_profile.load_catalog(self.root),start_only,['alpha'])
+    service_profile.compile_service_plan(service_profile.load_catalog(self.root),start_only,['alpha'],'start')
 
  def test_apply_requires_authoritative_catalog_source(self):
   plan=self.compile()
