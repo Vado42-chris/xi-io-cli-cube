@@ -1,4 +1,4 @@
-import hashlib, importlib.util, json, sys, tempfile, unittest
+import hashlib, importlib.util, json, os, sys, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
