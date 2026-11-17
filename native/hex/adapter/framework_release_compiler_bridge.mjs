@@ -25,6 +25,11 @@ try {
         throw new Error('ADOPTER_REBIND_REFUSED');
       return request.adopter;
     },
+    readEntrypointQualification: async ({product_ref, release_generation}) => {
+      if (product_ref !== request.product_ref || release_generation !== request.release?.release_generation)
+        throw new Error('ENTRYPOINT_QUALIFICATION_REBIND_REFUSED');
+      return request.entrypoint_qualification;
+    },
   });
   process.stdout.write(JSON.stringify(result));
 } catch (error) {

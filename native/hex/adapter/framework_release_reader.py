@@ -29,7 +29,7 @@ def _installed_module(path: Path) -> Path:
 
 def build_framework_release_distribution_reader(
     *, framework_release_distribution_module: Path,
-    read_accepted_release, read_current_adopter,
+    read_accepted_release, read_current_adopter, read_entrypoint_qualification,
     node_binary: str = "node",
 ):
     """Return the reader expected by release_binding.install_from_distribution_reader.
@@ -41,6 +41,7 @@ def build_framework_release_distribution_reader(
     module = _installed_module(framework_release_distribution_module)
     _require(callable(read_accepted_release), "BUNDLE_ACCEPTED_RELEASE_READER_UNBOUND")
     _require(callable(read_current_adopter), "BUNDLE_CURRENT_ADOPTER_READER_UNBOUND")
+    _require(callable(read_entrypoint_qualification), "BUNDLE_ENTRYPOINT_QUALIFICATION_READER_UNBOUND")
     _require(isinstance(node_binary, str) and bool(node_binary.strip()),
              "BUNDLE_NODE_RUNTIME_UNBOUND")
     bridge = Path(__file__).with_name("framework_release_compiler_bridge.mjs")
@@ -50,11 +51,14 @@ def build_framework_release_distribution_reader(
     def read_release_distribution(*, product_ref: str, consumer_ref: str):
         release = read_accepted_release(product_ref=product_ref)
         adopter = read_current_adopter(consumer_ref=consumer_ref, product_ref=product_ref)
+        release_generation = release.get("release_generation") if isinstance(release, dict) else None
+        entrypoint_qualification = read_entrypoint_qualification(product_ref=product_ref, release_generation=release_generation)
         request = {
             "product_ref": product_ref,
             "consumer_ref": consumer_ref,
             "release": release,
             "adopter": adopter,
+            "entrypoint_qualification": entrypoint_qualification,
         }
         try:
             completed = subprocess.run(
