@@ -127,6 +127,18 @@ def _open_release_receipt_lock(state_fd: int, name: str):
     receipt_lock=os.fdopen(lock_raw,"a+b",closefd=True)
     fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
     return receipt_lock
+
+
+def _persist_release_receipt(state_fd: int, state_root: Path, name: str, receipt: dict) -> str:
+    with _open_release_receipt_lock(state_fd,name) as receipt_lock:
+        try:
+            existing=_read_release_receipt(state_fd,name)
+            if existing is not None:
+                _require(existing==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
+                return str(state_root/name)
+            return _write_release_receipt_locked(state_fd,state_root,name,receipt)
+        finally:
+            fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_UN)
 def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
     product_ref=binding["product_ref"];consumer_ref=binding["consumer_ref"]
     approved=binding["approved_lock_sha256"];allowed=frozenset(binding["provider_hosts"])
