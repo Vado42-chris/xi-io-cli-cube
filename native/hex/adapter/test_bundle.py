@@ -59,7 +59,7 @@ class BundleFixture:
         self.rows = []
 
     def child(self, role, *, depends_on=(), bytes_=None, destination=None,
-              fixture=True, overwrite="fail", accepted_generation=None):
+              fixture=True, overwrite="fail", accepted_generation=None, runtime_export=False):
         b = bytes_ if bytes_ is not None else (role + " delivered\n").encode()
         url = "https://github.com/xiio-test/releases/" + role + ".bin"
         self.payloads[url] = b
@@ -75,6 +75,7 @@ class BundleFixture:
             "channel": "fixture" if fixture else "alpha",
             "fixture": fixture,
             **({"accepted_generation": accepted_generation} if accepted_generation else {}),
+            **({"dependency_id":role,"owner_repo":"owner/"+role,"runtime_exports":{"module":{"destination_scope":"xdg_data","destination":destination or "xi-io/"+role+"/"+source}}} if runtime_export else {}),
             "payload": [{
                 "source": source,
                 "sha256": sha(b),
@@ -165,6 +166,14 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(receipt["product_ref"],"xi-io-sdk");self.assertEqual(receipt["release_generation"],generation)
         self.assertEqual(receipt["bundle_state"],"INSTALLED_BYTES_VERIFIED");self.assertTrue(receipt["readback_verified"]);self.assertFalse(receipt["effect_authority"])
         self.assertEqual(Path(row["path"]).stat().st_mode & 0o777,0o600)
+
+
+    def test_bundle_emits_dependency_binding_receipt_from_exact_installed_export(self):
+        f=self.fixture();generation="b"*40;f.child("node",fixture=False,accepted_generation=generation,runtime_export=True)
+        lock,digest=f.lock(fixture=False);result=install_bundle(lock,approved_lock_sha256=digest,env=f.env,fetch=f.fetch)
+        row=result["dependency_binding_receipts"]["node"];receipt=json.loads(Path(row["path"]).read_text())
+        self.assertEqual(receipt["schema"],"xiio.installer-dependency-binding-receipt/v1");self.assertEqual(receipt["dependency_id"],"node")
+        self.assertEqual(receipt["accepted_generation"],generation);self.assertTrue(Path(receipt["fields"]["module"]).is_file());self.assertFalse(receipt["effect_authority"])
 
     def test_release_hosts_reject_wildcards_private_local_and_malformed(self):
         f = self.fixture()
