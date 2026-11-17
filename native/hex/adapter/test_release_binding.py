@@ -14,14 +14,16 @@ class ReleaseBindingTests(unittest.TestCase):
   msha=hashlib.sha256(manifest.read_bytes()).hexdigest()
   lock.write_text(json.dumps({"schema_version":"xiio-installer-bundle-profile-v1","profile_id":"demo","fixture":True,"products":[{"role":"demo","product_id":"product-demo","manifest":"manifest.json","manifest_sha256":msha,"depends_on":[],"payload_urls":{"demo.bin":"https://releases.example.test/demo.bin"}}]},separators=(',',':')))
   sha=hashlib.sha256(lock.read_bytes()).hexdigest()
-  release={"schema":"xiio.framework.distributable-release-projection/v1","release_ref":"release:1","product_ref":"product-demo","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE","effect_authority":False}
-  adopter={"schema":"xiio.framework.release-adopter-lock/v1","adopter_lock_ref":"adopter:hex:1","consumer_ref":"consumer:hex","product_ref":"product-demo","release_ref":"release:1","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"state":"ADOPTED_CURRENT","effect_authority":False}
+  release={"schema":"xiio.framework.distributable-release-projection/v1","release_ref":"release:1","product_ref":"product-demo","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"entrypoint_qualification_ref":"entrypoint:proof:g1","lifecycle":"DISTRIBUTABLE","effect_authority":False}
+  adopter={"schema":"xiio.framework.release-adopter-lock/v1","adopter_lock_ref":"adopter:hex:1","consumer_ref":"consumer:hex","product_ref":"product-demo","release_ref":"release:1","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"entrypoint_qualification_ref":"entrypoint:proof:g1","state":"ADOPTED_CURRENT","effect_authority":False}
   return td,lock,release,adopter
  def test_exact_binding_reaches_existing_installer(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
   with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED"}) as install:
    out=install_from_release_binding(lock,release=r,adopter=a,expected_product_ref="product-demo")
    self.assertEqual(out["state"],"INSTALLED")
+   receipt=json.loads(Path(out["release_distribution_receipt"]).read_text())
+   self.assertEqual(receipt["entrypoint_qualification_ref"],"entrypoint:proof:g1")
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
  def test_refuses_missing_stale_wrong_or_substituted_binding_before_install(self):
   cases=[]
@@ -33,6 +35,8 @@ class ReleaseBindingTests(unittest.TestCase):
    (r,{**a,"release_generation":"old"},"BUNDLE_RELEASE_ADOPTER_BINDING_MISMATCH"),
    (r,{**a,"provider_hosts":["evil.example.test"]},"BUNDLE_RELEASE_HOST_BINDING_MISMATCH"),
    (r,{**a,"consumer_ref":""},"BUNDLE_RELEASE_CONSUMER_REF_REQUIRED"),
+   ({**r,"entrypoint_qualification_ref":""},{**a,"entrypoint_qualification_ref":""},"BUNDLE_ENTRYPOINT_QUALIFICATION_REF_REQUIRED"),
+   (r,{**a,"entrypoint_qualification_ref":"entrypoint:other"},"BUNDLE_RELEASE_ADOPTER_BINDING_MISMATCH"),
   ])
   for rr,aa,code in cases:
    with self.subTest(code=code),patch('native.hex.adapter.release_binding.install_bundle') as install:
