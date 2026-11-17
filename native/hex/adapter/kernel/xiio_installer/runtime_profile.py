@@ -149,6 +149,17 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
         declared_raw=row.get("declared_generation")
         declared_generation=_text(declared_raw,f"SERVICE_{i}_DECLARED_GENERATION") if declared_raw is not None else None
         services.append(RuntimeService(sid,unit,health,required,bool(row.get("required",False)),activation_permission,generation_field,declared_generation))
+    service_by_unit={service.unit:service for service in services}
+    for dep in dependencies:
+        if dep.expected_unit is None:
+            continue
+        service=service_by_unit.get(dep.expected_unit)
+        if service is None:
+            raise RuntimeProfileError("DEPENDENCY_SERVICE_UNIT_UNDECLARED:"+dep.dependency_id)
+        if service.declared_generation is None:
+            raise RuntimeProfileError("DEPENDENCY_SERVICE_GENERATION_UNDECLARED:"+dep.dependency_id)
+        if service.declared_generation!=dep.accepted_generation:
+            raise RuntimeProfileError("DEPENDENCY_SERVICE_GENERATION_MISMATCH:"+dep.dependency_id)
     return RuntimeProfile(profile_id,generation,product_id,tuple(services),tuple(dependencies),defaults,optional,policy,raw)
 
 def compile_user_consent(profile:RuntimeProfile,*,grants:list[str],update_policy:str|None=None,principal_ref:str="local-user")->dict[str,Any]:
