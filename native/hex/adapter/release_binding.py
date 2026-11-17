@@ -175,8 +175,8 @@ def install_from_distribution_reader(lock: Path, *, product_ref: str, consumer_r
              "BUNDLE_RELEASE_PRODUCT_REF_REQUIRED")
     _require(isinstance(consumer_ref, str) and bool(consumer_ref),
              "BUNDLE_RELEASE_CONSUMER_REF_REQUIRED")
-    _require(callable(read_release_distribution,
-             "BUNDLE_RELEASE_DISTRIBUTION_READER_UNBOUND"))
+    _require(callable(read_release_distribution),
+             "BUNDLE_RELEASE_DISTRIBUTION_READER_UNBOUND")
     binding = read_release_distribution(product_ref=product_ref, consumer_ref=consumer_ref)
     _require(isinstance(binding, dict) and binding.get("schema") == DISTRIBUTION_SCHEMA,
              "BUNDLE_RELEASE_DISTRIBUTION_INVALID")
