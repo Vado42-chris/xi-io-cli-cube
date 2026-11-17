@@ -127,7 +127,7 @@ class ReleaseBindingTests(unittest.TestCase):
    "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
    "adopter_current":True,"entrypoint_qualification_ref":"entrypoint:proof:g1","effect_authority":False,"installed":False}
   env={"XDG_STATE_HOME":str(lock.parent/"state"),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
-  state=Path(env["XDG_STATE_HOME"])/"xi-io/installer/release-distributions";state.mkdir(parents=True)
+  state=Path(env["XDG_STATE_HOME"])/"xi-io/installer/release-distributions";state.mkdir(parents=True,mode=0o700);state.chmod(0o700)
   name=hashlib.sha256(("product-demo|consumer:hex|g1").encode()).hexdigest()+".json";target=state/name
   expected={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":"product-demo","consumer_ref":"consumer:hex",
    "release_ref":r["release_ref"],"release_generation":"g1","entrypoint_qualification_ref":"entrypoint:proof:g1",
