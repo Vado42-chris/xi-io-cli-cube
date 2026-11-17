@@ -15,10 +15,12 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -400,6 +402,105 @@ class JoinedLifecycleTests(unittest.TestCase):
                 self.assertRegex(str(failure), "LIFECYCLE_CHANGED_PRESERVED_FILE")
                 self.assertEqual(len(proofs), expected_proofs)
                 self.assertEqual(sum("--packaged-source" in c for c in commands), 1)
+
+
+REAL_WORKFLOW = HERE.parents[2] / ".github/workflows/cli-real-ollama.yml"
+
+
+class WorkflowOllamaProcessTests(unittest.TestCase):
+    @staticmethod
+    def startup_body():
+        workflow = REAL_WORKFLOW.read_text()
+        step = workflow.split("      - name: Start Ollama and pull bounded local model\n", 1)[1].split("\n      - name: ", 1)[0]
+        body = step.split("        run: |\n", 1)[1]
+        lines = body.rstrip().splitlines()
+        if any(line.strip() and not line.startswith("          ") for line in lines):
+            raise AssertionError("unexpected startup shell indentation")
+        return "\n".join(line[10:] for line in lines)
+
+    def run_startup(self, mode="healthy", runner="github-hosted"):
+        # Real Bash/nohup, but every service, model and HTTP command resolves to
+        # an inert stub. Even sudo is a Python logger, never a privilege change.
+        with tempfile.TemporaryDirectory(prefix="xiio-inert-server-start-") as temp:
+            root = Path(temp)
+            bins = root / "bin"
+            bins.mkdir()
+            stub = "#!" + sys.executable + "\n" + '''import json, os, pathlib, sys, time
+name = pathlib.Path(sys.argv[0]).name
+with open(os.environ["INERT_EVENTS"], "a") as output:
+    output.write(json.dumps({"command": name, "args": sys.argv[1:], "pid": os.getpid()}) + "\\n")
+if name == "sudo":
+    raise SystemExit(0 if sys.argv[1:] == ["systemctl", "stop", "ollama.service"] else 8)
+if name == "curl":
+    time.sleep(0.15)
+    raise SystemExit(0)  # An unrelated listener can always look healthy.
+if name == "ollama" and sys.argv[1:] == ["serve"]:
+    pathlib.Path(os.environ["INERT_SERVER_PID"]).write_text(str(os.getpid()))
+    time.sleep(0.02 if os.environ["INERT_MODE"] == "dead" else 10)
+    raise SystemExit(7)
+if name == "ollama" and sys.argv[1:] in (["pull", "qwen2.5:1.5b"], ["list"]):
+    raise SystemExit(0)
+raise SystemExit(9)
+'''
+            for name in ["sudo", "curl", "ollama"]:
+                file = bins / name
+                file.write_text(stub)
+                file.chmod(0o700)
+            env = {**os.environ, "PATH": str(bins) + os.pathsep + os.environ["PATH"],
+                   "RUNNER_TEMP": str(root), "RUNNER_ENVIRONMENT": runner,
+                   "INERT_EVENTS": str(root / "events.jsonl"), "INERT_MODE": mode,
+                   "INERT_SERVER_PID": str(root / "owned-server.pid")}
+            try:
+                result = subprocess.run([shutil.which("bash"), "-c", self.startup_body()],
+                                        cwd=root, env=env, text=True, capture_output=True, timeout=5)
+                events_file = root / "events.jsonl"
+                events = [json.loads(line) for line in events_file.read_text().splitlines()] if events_file.exists() else []
+                return result, events
+            finally:
+                # Kill only this fixture's confirmed Python stub PID. Never use
+                # a port, process-name match, systemctl, broad group or shell.
+                pid_file = root / "owned-server.pid"
+                if pid_file.exists():
+                    pid = int(pid_file.read_text())
+                    try:
+                        command = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+                        if str(bins / "ollama").encode() in command:
+                            os.kill(pid, signal.SIGTERM)
+                            deadline = time.monotonic() + 1
+                            while time.monotonic() < deadline:
+                                try:
+                                    if not Path(f"/proc/{pid}/cmdline").read_bytes():
+                                        break
+                                except FileNotFoundError:
+                                    break
+                                time.sleep(0.01)
+                    except (FileNotFoundError, ProcessLookupError):
+                        pass
+
+    def test_actual_startup_body_accepts_live_owned_server(self):
+        result, events = self.run_startup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn({"command": "sudo", "args": ["systemctl", "stop", "ollama.service"]},
+                      [{"command": e["command"], "args": e["args"]} for e in events])
+        self.assertEqual(sum(e["command"] == "ollama" and e["args"] == ["serve"] for e in events), 1)
+        self.assertTrue(any(e["command"] == "ollama" and e["args"] == ["list"] for e in events))
+
+    def test_dead_owned_server_refuses_even_when_unrelated_health_is_ready(self):
+        result, events = self.run_startup("dead")
+        self.assertNotEqual(result.returncode, 0, "startup accepted a dead proof server using unrelated readiness")
+        self.assertFalse(any(e["command"] == "ollama" and e["args"][0] == "pull" for e in events))
+
+    def test_nonhosted_runner_refuses_before_service_or_process_effects(self):
+        result, events = self.run_startup(runner="self-hosted")
+        self.assertNotEqual(result.returncode, 0, "startup modified a non-disposable runner")
+        self.assertEqual(events, [])
+
+    def test_artifact_retains_physical_install_and_owned_server_evidence(self):
+        artifact = REAL_WORKFLOW.read_text().split("      - name: Preserve real-inference evidence\n", 1)[1]
+        for path in ["xiio-real-ollama/prefix/versions/**", "xiio-real-ollama/bin/xi-io-cli",
+                     "xiio-real-ollama/config/**", "xiio-real-ollama/project/NOTE.txt", "ollama.pid"]:
+            with self.subTest(path=path):
+                self.assertIn("${{ runner.temp }}/" + path, artifact)
 
 
 if __name__ == "__main__":

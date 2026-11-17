@@ -44,14 +44,22 @@ jobs:
       - name: Start Ollama and pull bounded local model
         run: |
           set -euo pipefail
+          # The official installer starts this service. Stop only that disposable
+          # runner service before owning the proof server and its request log.
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo systemctl stop ollama.service
           nohup ollama serve >"$RUNNER_TEMP/ollama.log" 2>&1 &
-          echo $! >"$RUNNER_TEMP/ollama.pid"
+          ollama_pid=$!
+          echo "$ollama_pid" >"$RUNNER_TEMP/ollama.pid"
           for i in $(seq 1 60); do
+            kill -0 "$ollama_pid"
             curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break
             sleep 1
           done
+          kill -0 "$ollama_pid"
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5:1.5b
+          kill -0 "$ollama_pid"
           ollama list
 
       - name: Installed Ollama transaction, saved-chat restart, and rollback reopen
@@ -94,9 +102,13 @@ jobs:
             ${{ runner.temp }}/xiio-real-ollama/*.json
             ${{ runner.temp }}/xiio-real-ollama/*.transcript.txt
             ${{ runner.temp }}/xiio-real-ollama/state/chat/*.json
-            ${{ runner.temp }}/xiio-real-ollama/prefix/versions/*/install-receipt.json
+            ${{ runner.temp }}/xiio-real-ollama/prefix/versions/**
+            ${{ runner.temp }}/xiio-real-ollama/bin/xi-io-cli
+            ${{ runner.temp }}/xiio-real-ollama/config/**
+            ${{ runner.temp }}/xiio-real-ollama/project/NOTE.txt
             ${{ runner.temp }}/xiio-real-ollama/proposal-*.txt
             ${{ runner.temp }}/ollama.log
+            ${{ runner.temp }}/ollama.pid
             ${{ runner.temp }}/xiio-real-ollama/ollama.log
           if-no-files-found: warn
           retention-days: 14
