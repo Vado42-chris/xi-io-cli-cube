@@ -99,6 +99,24 @@ def _read_release_receipt(state_fd: int, name: str) -> dict | None:
         os.close(fd)
 
 
+def _pinned_release_root_path(state_fd: int) -> Path:
+    try:
+        raw=os.readlink(f"/proc/self/fd/{state_fd}")
+    except OSError as exc:
+        raise BundleError("BUNDLE_RELEASE_STATE_ROOT_PATH_UNAVAILABLE") from exc
+    _require(raw.startswith("/") and not raw.endswith(" (deleted)"),
+             "BUNDLE_RELEASE_STATE_ROOT_PATH_UNAVAILABLE")
+    actual=Path(raw)
+    try:
+        st_path=actual.stat();st_desc=os.fstat(state_fd)
+    except OSError as exc:
+        raise BundleError("BUNDLE_RELEASE_STATE_ROOT_PATH_UNAVAILABLE") from exc
+    _require(st_path.st_ino==st_desc.st_ino and st_path.st_dev==st_desc.st_dev
+             and stat.S_ISDIR(st_path.st_mode) and (st_desc.st_mode & 0o777)==0o700,
+             "BUNDLE_RELEASE_STATE_ROOT_PATH_UNAVAILABLE")
+    return actual
+
+
 def _write_release_receipt_locked(state_fd: int, state_root: Path, name: str, receipt: dict) -> str:
     encoded=(json.dumps(receipt,indent=2,sort_keys=True)+"\n").encode()
     tmp="."+name+"."+hashlib.sha256(encoded).hexdigest()[:16]+".tmp"
@@ -180,10 +198,11 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
                          and installed.get("state")==receipt["bundle_state"]
                          and len(installed.get("roles") or [])==receipt["installed_role_count"],
                          "BUNDLE_RELEASE_INSTALL_RESULT_MISMATCH")
+                receipt_root=_pinned_release_root_path(state_fd)
                 if existing is None:
-                    receipt_path=_write_release_receipt_locked(state_fd,state_root,name,receipt)
+                    receipt_path=_write_release_receipt_locked(state_fd,receipt_root,name,receipt)
                 else:
-                    receipt_path=str(state_root/name)
+                    receipt_path=str(receipt_root/name)
                 return {**installed,"release_distribution_receipt":receipt_path}
             finally:
                 fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_UN)
