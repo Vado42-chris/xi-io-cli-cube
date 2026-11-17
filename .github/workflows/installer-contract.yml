@@ -233,3 +233,103 @@ jobs:
             maths-deb.contents
           if-no-files-found: warn
           retention-days: 14
+
+  framework-release-physical-chain:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact HEX consumer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Use qualified Node 24.22.1
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Fetch exact accepted Framework producer generation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Vado42-chris/xi-io.net
+          ref: cfe2776b08e1768882f95884fd52576e48f0550c
+          path: framework-source
+          persist-credentials: false
+      - name: Verify exact Framework producer generation
+        run: |
+          set -euo pipefail
+          test "$(git -C "$GITHUB_WORKSPACE/framework-source" rev-parse HEAD)" = cfe2776b08e1768882f95884fd52576e48f0550c
+          rm -rf "$RUNNER_TEMP/framework"
+          mv "$GITHUB_WORKSPACE/framework-source" "$RUNNER_TEMP/framework"
+      - name: Build and physically bind exact framework-runtime bytes
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/framework-physical"
+          mkdir -p "$work"/{config,data,state,cache,receipts}
+          chmod 0700 "$work"/{config,data,state,cache,receipts}
+          export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache"
+          cd "$RUNNER_TEMP/framework"
+          node --input-type=module - <<'NODE' > "$work/framework-runtime.manifest.json"
+          import {buildFrameworkRuntimeInstallerManifest} from './scripts/build-framework-runtime-installer-manifest.mjs';
+          console.log(JSON.stringify(await buildFrameworkRuntimeInstallerManifest({
+            profileId:'hosted-framework-physical',
+            version:'cfe2776b',
+            acceptedGeneration:'cfe2776b08e1768882f95884fd52576e48f0550c'
+          }),null,2));
+          NODE
+          cd "$GITHUB_WORKSPACE"
+          PYTHONDONTWRITEBYTECODE=1 python3 -B - <<'PY'
+          import os,sys
+          from pathlib import Path
+          sys.path.insert(0,str(Path('native/hex/adapter/kernel').resolve()))
+          from xiio_installer.manifest import load_manifest
+          from xiio_installer.dependency_binding import bind_dependency_manifest
+          work=Path(os.environ['RUNNER_TEMP'])/'framework-physical'
+          manifest=load_manifest(work/'framework-runtime.manifest.json')
+          receipt=bind_dependency_manifest(
+            manifest,Path(os.environ['RUNNER_TEMP'])/'framework',
+            work/'receipts/install.json',work/'receipts/binding.json',
+            expected_dependency_id='framework-runtime',
+            expected_owner_repo='Vado42-chris/xi-io.net',
+            expected_generation='cfe2776b08e1768882f95884fd52576e48f0550c',
+            env={k:os.environ[k] for k in ['XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME']})
+          assert receipt['state']=='BOUND'
+          assert receipt['accepted_generation']=='cfe2776b08e1768882f95884fd52576e48f0550c'
+          PY
+      - name: Produce durable authority and invoke installed Framework reader through HEX
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/framework-physical"
+          export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache"
+          lock="$work/product.lock"
+          printf 'hosted physical release lock\n' > "$lock"
+          lock_sha="$(sha256sum "$lock" | awk '{print $1}')"
+          cd "$RUNNER_TEMP/framework"
+          LOCK_SHA="$lock_sha" node --input-type=module - <<'NODE'
+          import path from 'node:path';
+          import {produceDurableReleaseAuthority} from './scripts/lib/release-authority-producer.mjs';
+          const gen='cfe2776b08e1768882f95884fd52576e48f0550c',product='product:hosted-framework-canary',consumer='consumer:hex-hosted';
+          const out=await produceDurableReleaseAuthority({
+            release:{lifecycle:'DISTRIBUTABLE',release_ref:'release:hosted:1',product_ref:product,release_generation:gen,approved_lock_sha256:process.env.LOCK_SHA,provider_hosts:['releases.example.com'],artifact_refs:['artifact:framework-runtime'],manifest_refs:['manifest:framework-runtime']},
+            release_qualification:{current:true,qualified:true,qualification_ref:'release-qual:hosted:1',product_ref:product,release_generation:gen,approved_lock_sha256:process.env.LOCK_SHA},
+            adopter:{adopter_lock_ref:'adopter:hex-hosted:1',consumer_ref:consumer,product_ref:product,release_ref:'release:hosted:1',release_generation:gen,approved_lock_sha256:process.env.LOCK_SHA},
+            currentness:{current:true,adopter_lock_ref:'adopter:hex-hosted:1',release_ref:'release:hosted:1',release_generation:gen,consumer_ref:consumer,currentness_ref:'current:hosted:1'},
+            artifact_root:process.cwd(),artifact_generation:gen,
+            entrypoints:[{path:'scripts/lib/release-distribution-reader.mjs',runtime:'node'}],
+            product_ref:product,observed_at:'2026-11-17T09:00:00Z'
+          });
+          if(out.state!=='DURABLE_REOPEN_VERIFIED')process.exit(41);
+          NODE
+          cd "$GITHUB_WORKSPACE"
+          PYTHONDONTWRITEBYTECODE=1 python3 -B - <<'PY'
+          import os,sys
+          from pathlib import Path
+          sys.path.insert(0,str(Path('.').resolve()))
+          sys.path.insert(0,str(Path('native/hex/adapter/kernel').resolve()))
+          from native.hex.adapter.framework_release_export import resolve_framework_release_distribution_module
+          from native.hex.adapter.framework_release_reader import build_framework_release_distribution_reader
+          work=Path(os.environ['RUNNER_TEMP'])/'framework-physical'
+          export=resolve_framework_release_distribution_module(work/'receipts/binding.json',expected_framework_generation='cfe2776b08e1768882f95884fd52576e48f0550c')
+          reader=build_framework_release_distribution_reader(framework_release_distribution_module=Path(export['release_distribution_module']))
+          out=reader(product_ref='product:hosted-framework-canary',consumer_ref='consumer:hex-hosted')
+          assert out['schema']=='xiio.release-distribution-lock/v1'
+          assert out['release_generation']=='cfe2776b08e1768882f95884fd52576e48f0550c'
+          assert out['adopter_current'] is True and out['effect_authority'] is False and out['installed'] is False
+          print('FRAMEWORK_PHYSICAL_RELEASE_READER_PASS')
+          PY
