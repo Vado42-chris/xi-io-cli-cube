@@ -87,6 +87,15 @@ def _persist_release_receipt(state_fd: int, state_root: Path, name: str, receipt
         lock_raw=os.open(lock_name,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
     except OSError as exc:
         raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED") from exc
+    try:
+        lock_stat=os.fstat(lock_raw)
+        _require(stat.S_ISREG(lock_stat.st_mode)
+                 and (lock_stat.st_mode & 0o777)==0o600
+                 and lock_stat.st_nlink==1,
+                 "BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED")
+    except Exception:
+        os.close(lock_raw)
+        raise
     with os.fdopen(lock_raw,"a+b",closefd=True) as receipt_lock:
         fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
         try:
@@ -166,8 +175,8 @@ def install_from_distribution_reader(lock: Path, *, product_ref: str, consumer_r
              "BUNDLE_RELEASE_PRODUCT_REF_REQUIRED")
     _require(isinstance(consumer_ref, str) and bool(consumer_ref),
              "BUNDLE_RELEASE_CONSUMER_REF_REQUIRED")
-    _require(callable(read_release_distribution),
-             "BUNDLE_RELEASE_DISTRIBUTION_READER_UNBOUND")
+    _require(callable(read_release_distribution,
+             "BUNDLE_RELEASE_DISTRIBUTION_READER_UNBOUND"))
     binding = read_release_distribution(product_ref=product_ref, consumer_ref=consumer_ref)
     _require(isinstance(binding, dict) and binding.get("schema") == DISTRIBUTION_SCHEMA,
              "BUNDLE_RELEASE_DISTRIBUTION_INVALID")
