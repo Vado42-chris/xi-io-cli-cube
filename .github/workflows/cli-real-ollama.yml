@@ -40,6 +40,7 @@ jobs:
           python3 -B native/hex/cli-source/test_real_ollama_qualification.py
           python3 -B native/hex/cli-source/test_installed_ollama_qualification.py
           python3 -B native/hex/cli-source/test_installed_evidence_custody.py
+          python3 -B native/hex/cli-source/test_ollama_model_identity.py
           ollama --version
 
       - name: Start Ollama and pull bounded local model
@@ -62,6 +63,9 @@ jobs:
           ollama pull qwen2.5:1.5b
           kill -0 "$ollama_pid"
           ollama list
+          python3 -B native/hex/cli-source/capture_ollama_model_identity.py capture \
+            --model qwen2.5:1.5b \
+            --output "$RUNNER_TEMP/ollama-model-identity.json"
 
       - name: Installed Ollama transaction, saved-chat restart, and rollback reopen
         env:
@@ -74,10 +78,17 @@ jobs:
           # installer, then invokes only its generated launcher. Existing benches
           # refuse, so an approved failure cannot be reset into a passing retry.
           XIIO_PROOF_ROOT="$work" python3 -B native/hex/cli-source/qualify_real_ollama.py
+          install -m 600 "$RUNNER_TEMP/ollama-model-identity.json" "$work/model-identity.json"
+          python3 -B native/hex/cli-source/capture_ollama_model_identity.py reopen \
+            --model qwen2.5:1.5b \
+            --record "$work/model-identity.json" \
+            --output "$work/model-identity-readback.json"
           python3 -B native/hex/cli-source/verify_installed_evidence_custody.py --root "$work"
           test "$(cat "$work/project/NOTE.txt")" = "status: new"
           test "$(stat -c '%a' "$work/bin/xi-io-cli")" = "755"
           test "$(stat -c '%a' "$work/evidence-custody.json")" = "600"
+          test "$(stat -c '%a' "$work/model-identity.json")" = "600"
+          test "$(stat -c '%a' "$work/model-identity-readback.json")" = "600"
           sha256sum "$work/project/NOTE.txt" | tee "$work/note.sha256"
           cp "$RUNNER_TEMP/ollama.log" "$work/ollama.log"
           cp "$work/transcript.txt" "$work/transcript.redacted.txt"
