@@ -1,0 +1,87 @@
+{
+  "accepted_generation": "cfe2776b08e1768882f95884fd52576e48f0550c",
+  "channel": "stable",
+  "dependency_id": "framework-runtime",
+  "display_name": "XI-IO Framework Runtime",
+  "fixture": false,
+  "owner_repo": "Vado42-chris/xi-io.net",
+  "payload": [
+    {
+      "destination": "xi-io/framework/runtime/release-authority-producer.mjs",
+      "destination_scope": "xdg_data",
+      "mode": "0644",
+      "overwrite": "same_hash_ok",
+      "sha256": "872a6769f3ec6637434721fce97d6177341fee0395ed698757e99cc5c36caffc",
+      "size": 2344,
+      "source": "scripts/lib/release-authority-producer.mjs"
+    },
+    {
+      "destination": "xi-io/framework/runtime/distributable-release-projection.mjs",
+      "destination_scope": "xdg_data",
+      "mode": "0644",
+      "overwrite": "same_hash_ok",
+      "sha256": "1094870909fa855e1e9e8beafafcb0aa0aa6a1645ee8a9643b06cde4de537d5f",
+      "size": 4040,
+      "source": "scripts/lib/distributable-release-projection.mjs"
+    },
+    {
+      "destination": "xi-io/framework/runtime/executable-entrypoint-qualification.mjs",
+      "destination_scope": "xdg_data",
+      "mode": "0644",
+      "overwrite": "same_hash_ok",
+      "sha256": "ec17d1fef10e6718d38eccf1614f00c97cbbd00311ca5f656e8496d1d30f9b65",
+      "size": 3034,
+      "source": "scripts/lib/executable-entrypoint-qualification.mjs"
+    },
+    {
+      "destination": "xi-io/framework/runtime/release-authoritative-readback.mjs",
+      "destination_scope": "xdg_data",
+      "mode": "0644",
+      "overwrite": "same_hash_ok",
+      "sha256": "ae1f0aa2fe95a3b2ce610f6f90b740c42ebde9ed6d0b9ced6fdf95cc6b219ce9",
+      "size": 5906,
+      "source": "scripts/lib/release-authoritative-readback.mjs"
+    },
+    {
+      "destination": "xi-io/framework/runtime/release-distribution-lock.mjs",
+      "destination_scope": "xdg_data",
+      "mode": "0644",
+      "overwrite": "same_hash_ok",
+      "sha256": "8da32236abf70961979b4782959a214bbcf7266094c3633a05a57243ac992e0f",
+      "size": 6243,
+      "source": "scripts/lib/release-distribution-lock.mjs"
+    },
+    {
+      "destination": "xi-io/framework/runtime/release-distribution-reader.mjs",
+      "destination_scope": "xdg_data",
+      "mode": "0644",
+      "overwrite": "same_hash_ok",
+      "sha256": "770b1c9f2617834457980d8f360e82a1fd33902b6aa8567b7af2754ce31586cc",
+      "size": 390,
+      "source": "scripts/lib/release-distribution-reader.mjs"
+    },
+    {
+      "destination": "xi-io/framework/runtime/current-worker-assignment-reader.mjs",
+      "destination_scope": "xdg_data",
+      "mode": "0644",
+      "overwrite": "same_hash_ok",
+      "sha256": "62458a02fa1a603ef208eed16f64061432c7b3a53787674d8215c15045af21d8",
+      "size": 2374,
+      "source": "tools/hex-operator/rc/bin/current-worker-assignment-reader.mjs"
+    }
+  ],
+  "product_id": "xiio-framework-runtime",
+  "profile_id": "hosted-framework-physical",
+  "runtime_exports": {
+    "current_assignment_module": {
+      "destination": "xi-io/framework/runtime/current-worker-assignment-reader.mjs",
+      "destination_scope": "xdg_data"
+    },
+    "release_distribution_module": {
+      "destination": "xi-io/framework/runtime/release-distribution-reader.mjs",
+      "destination_scope": "xdg_data"
+    }
+  },
+  "schema_version": "xiio-installer-product-manifest-v1",
+  "version": "cfe2776b"
+}

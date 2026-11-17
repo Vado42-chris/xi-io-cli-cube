@@ -35,23 +35,23 @@ test('CLI payload manifest still verifies exact adopted bytes',()=>{
 test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  const adoption=json('native/hex/SOURCE-ADOPTION.json');
  assert.equal(adoption.kernel.repository,'Vado42-chris/xi-io_installer');
- assert.equal(adoption.kernel.ref,'e094b27471fdde5789a3f5c6cbc8d800a4d6673b');
+ assert.equal(adoption.kernel.ref,'c150a23891f30a48cc162c1244935c370c9df215');
  assert.equal(adoption.kernel.acceptance_state,'ACCEPTED_MAIN');
- assert.equal(adoption.kernel.owner_pr,37);
- assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21,30,31,32,34,35,36,37]);
+ assert.equal(adoption.kernel.owner_pr,40);
+ assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21,30,31,32,34,35,36,37,38,39,40]);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).merge_ref,adoption.kernel.ref);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).status,'CURRENT_ACCEPTED_MAIN');
  assert.match(adoption.kernel.currentness_rule,/cannot downgrade currentness/);
- assert.match(adoption.kernel.acceptance_note,/service-unit materialization/);
+ assert.match(adoption.kernel.acceptance_note,/unique dependency service identity/);
  const directory=new URL('../native/hex/adapter/kernel/xiio_installer/',import.meta.url);
  const ownerBlobs=adoption.kernel.files_unchanged_git_blob;
  assert.ok(ownerBlobs && typeof ownerBlobs==='object' && !Array.isArray(ownerBlobs));
  assert.deepEqual(readdirSync(directory).filter(n=>n.endsWith('.py')).sort(),Object.keys(ownerBlobs).sort());
  for(const [name,blobSha]of Object.entries(ownerBlobs)){
-  assert.match(name,/^[a-z_]+\\.py$/);
+  assert.match(name,/^[a-z_]+\.py$/);
   assert.match(blobSha,/^[0-9a-f]{40}$/);
   const bytes=readFileSync(new URL(name,directory));
-  const gitBlob=createHash('sha1').update(Buffer.from('blob '+bytes.length+'\\0')).update(bytes).digest('hex');
+  const gitBlob=createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');
   assert.equal(gitBlob,blobSha);
 
  }

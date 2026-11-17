@@ -346,8 +346,16 @@ def _secure_ensure_state_root(state_root: Path) -> int:
 
 
 
-def _atomic_private_json(path: Path, value: dict) -> None:
+def _atomic_private_json(path: Path, value: dict) -> bool:
     _require(not path.is_symlink(), "BUNDLE_RELEASE_RECEIPT_SYMLINK_FORBIDDEN")
+    if path.exists():
+        try:
+            existing=json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise BundleError("BUNDLE_DERIVED_RECEIPT_CONFLICT") from exc
+        _require(existing==value and (path.stat().st_mode & 0o777)==0o600,
+                 "BUNDLE_DERIVED_RECEIPT_CONFLICT")
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix="."+path.name+".", suffix=".tmp", dir=path.parent)
     os.close(fd); p=Path(tmp)
@@ -356,8 +364,9 @@ def _atomic_private_json(path: Path, value: dict) -> None:
         os.chmod(p, 0o600); os.replace(p, path)
     finally:
         if p.exists(): p.unlink()
+    return True
 
-def _release_distribution_receipt(manifest, transaction_receipt: Path, output: Path) -> dict | None:
+def _release_distribution_receipt(manifest, transaction_receipt: Path, output: Path) -> tuple[dict, bool] | None:
     generation=str(manifest.raw.get("accepted_generation") or "").strip()
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", generation):
         return None
@@ -366,16 +375,16 @@ def _release_distribution_receipt(manifest, transaction_receipt: Path, output: P
              and tx.get("product_id")==manifest.product_id
              and len(tx.get("entries") or [])==len(manifest.entries),
              "BUNDLE_RELEASE_TRANSACTION_RECEIPT_INVALID")
-    value={"schema":"xiio.installer.release-distribution-install-receipt/v1",
+    value={"schema":"xiio.installer.child-generation-receipt/v1",
            "product_ref":manifest.product_id,"release_generation":generation,
            "bundle_state":"INSTALLED_BYTES_VERIFIED","readback_verified":True,
            "transaction_receipt":transaction_receipt.name,
            "effect_authority":False,"provider_effect":False}
-    _atomic_private_json(output,value)
+    created=_atomic_private_json(output,value)
     reread=json.loads(output.read_text(encoding="utf-8"))
     _require(reread==value and (output.stat().st_mode & 0o777)==0o600,
              "BUNDLE_RELEASE_RECEIPT_READBACK_FAILED")
-    return value
+    return value,created
 
 
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
@@ -487,6 +496,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             except (TransactionError, OSError) as exc:
                 raise BundleError("BUNDLE_FILESYSTEM_CHANGED_BEFORE_APPLY") from exc
             applied = []
+            derived_receipts = []
             release_receipts = {}
             dependency_binding_receipts = {}
             try:
@@ -498,18 +508,30 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                     apply_install(manifest, staged[role], receipt, env)
                     applied.append(receipt)
                     release_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".release.json")
-                    release_value=_release_distribution_receipt(manifest,receipt,release_path)
-                    if release_value is not None: release_receipts[role]={"path":str(release_path),"receipt":release_value}
+                    release_result=_release_distribution_receipt(manifest,receipt,release_path)
+                    release_value=None
+                    if release_result is not None:
+                        release_value,release_created=release_result
+                        if release_created:
+                            derived_receipts.append(release_path)
+                        release_receipts[role]={"path":str(release_path),"receipt":release_value}
                     if manifest.raw.get("runtime_exports"):
                         tx=json.loads(receipt.read_text(encoding="utf-8"))
-                        binding=compile_dependency_binding_receipt(manifest,tx,env,release_path if release_value is not None else None)
                         binding_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".binding.json")
-                        _atomic_private_json(binding_path,binding)
+                        binding=compile_dependency_binding_receipt(manifest,tx,env,release_path if release_value is not None else None,binding_receipt_path=binding_path)
+                        binding_created=_atomic_private_json(binding_path,binding)
+                        if binding_created:
+                            derived_receipts.append(binding_path)
                         dependency_binding_receipts[role]={"path":str(binding_path),"receipt":binding}
                     if fail_after_product is not None and len(applied) == fail_after_product:
                         raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
             except Exception as cause:
                 failures = []
+                for derived in reversed(derived_receipts):
+                    try:
+                        derived.unlink(missing_ok=True)
+                    except Exception:
+                        failures.append(derived.name)
                 for receipt in reversed(applied):
                     try:
                         rollback(receipt, env)

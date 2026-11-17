@@ -1,4 +1,4 @@
-import hashlib, importlib.util, json, sys, tempfile, unittest
+import hashlib, importlib.util, json, os, sys, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -50,15 +50,67 @@ class ServerProfileTests(unittest.TestCase):
    return SimpleNamespace(returncode=1,stdout='',stderr='unexpected')
   self.run=fake_run
 
+ def install(self):
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run), \
+       patch.object(server_profile,'_probe',return_value={'state':'PASS','status':200}):
+   plan=server_profile.prepare_server_package(self.root,self.home,self.permissions)
+   receipt=self.home/'receipt.json'
+   effect=server_profile.apply_server_package(self.root,self.home,self.permissions,plan,receipt,True)
+  return plan,receipt,effect
+
+ def test_server_descriptor_is_read_once_per_load(self):
+  original=server_profile._read
+  with patch.object(server_profile,'_read',wraps=original) as read:
+   server_profile.load_server_package(self.root)
+  self.assertEqual(read.call_count,1)
+
+ def test_two_service_ids_cannot_claim_one_unit(self):
+  package_path=self.root/'server-package.json'
+  package=json.loads(package_path.read_text())
+  package['services'].append({'service_id':'second-logical-service','unit':'xiio-test.service','probe':None,'required':True})
+  package_path.write_text(json.dumps(package))
+  with self.assertRaisesRegex(ValueError,'SERVER_USER_UNIT_IDENTITY_DUPLICATE:xiio-test.service'):
+   server_profile.load_server_package(self.root)
+
+ def test_required_flag_must_be_boolean(self):
+  package_path=self.root/'server-package.json'
+  package=json.loads(package_path.read_text());package['services'][0]['required']='false'
+  package_path.write_text(json.dumps(package))
+  with self.assertRaisesRegex(ValueError,'SERVER_SERVICE_REQUIRED_FLAG_INVALID'):
+   server_profile.load_server_package(self.root)
+
  def test_prepare_requires_service_grant(self):
   denied=permission_profile.compile_profile()
   with self.assertRaisesRegex(ValueError,'CAPABILITY_NOT_GRANTED'):
    server_profile.prepare_server_package(self.root,self.home,denied)
 
+ def test_prepare_requires_stop_authority_before_start_is_admissible(self):
+  no_stop=permission_profile.compile_profile({
+   'profile_id':'no-stop','capabilities':['configure_services','start_services'],
+   'service_scopes':['api-glass-private'],'update_policy':'review_each',
+   'central_updates':False,'remote_access':False,'revoked':False})
+  with self.assertRaisesRegex(ValueError,'CAPABILITY_NOT_GRANTED:stop_services'):
+   server_profile.prepare_server_package(self.root,self.home,no_stop)
+
  def test_prepare_is_review_only(self):
   with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
    p=server_profile.prepare_server_package(self.root,self.home,self.permissions)
   self.assertFalse(p['effect_authorized']);self.assertEqual(p['payload_files'],2)
+  self.assertEqual(p['installer_identity'],{
+   'product_id':'xiio-test-server','profile_id':'fixture-server','version':'1','channel':'fixture','fixture':True})
+
+ def test_apply_uses_one_loaded_package_generation(self):
+  p=server_profile.prepare_server_package(self.root,self.home,self.permissions)
+  receipt=self.home/'receipt.json';original=server_profile.load_server_package
+  with patch.object(server_profile,'load_server_package',wraps=original) as load, \
+       patch.object(server_profile.service_profile,'_run',side_effect=self.run), \
+       patch.object(server_profile,'_probe',return_value={'state':'PASS','status':200}):
+   result=server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
+  self.assertEqual(load.call_count,1)
+  self.assertEqual(result['package_sha256'],p['package_sha256'])
+  self.assertEqual(result['installer_identity'],p['installer_identity'])
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
 
  def test_changed_package_after_review_refuses(self):
   with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
@@ -68,18 +120,99 @@ class ServerProfileTests(unittest.TestCase):
     server_profile.apply_server_package(self.root,self.home,self.permissions,p,self.home/'receipt.json',True)
 
  def test_apply_starts_and_reads_back_then_rollback(self):
-  with patch.object(server_profile.service_profile,'_run',side_effect=self.run), \
+  p,receipt,result=self.install()
+  self.assertEqual(result['state'],'INSTALLED_STARTED_READBACK_VERIFIED')
+  self.assertEqual(result['installer_identity'],p['installer_identity'])
+  self.assertTrue(self.active);self.assertTrue(receipt.exists())
+  self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   rb=server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+  self.assertEqual(rb['state'],'ROLLED_BACK_READBACK_VERIFIED')
+  self.assertEqual(rb['installer_identity'],p['installer_identity'])
+  self.assertEqual(rb['services'][0]['final']['active_state'],'inactive')
+  self.assertFalse(self.active);self.assertTrue(receipt.exists())
+  self.assertEqual(json.loads(receipt.read_text())['schema_version'],'xiio-installer-receipt-v1')
+  self.assertFalse((self.home/'.config/systemd/user/xiio-test.service').exists())
+
+ def test_unrelated_installer_receipt_refuses_before_service_stop(self):
+  p,receipt,_effect=self.install();original=receipt.read_text();row=json.loads(original)
+  row['product_id']='unrelated-product';receipt.write_text(json.dumps(row));receipt.chmod(0o600)
+  with self.assertRaisesRegex(ValueError,'SERVER_ROLLBACK_RECEIPT_IDENTITY_MISMATCH:product_id'):
+   server_profile._bound_installer_receipt(p,receipt)
+  with patch.object(server_profile.service_profile,'_run',side_effect=AssertionError('STOP_BEFORE_RECEIPT_BINDING')):
+   with self.assertRaisesRegex(ValueError,'SERVER_PACKAGE_ROLLBACK_FAILED_OR_UNVERIFIED'):
+    server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+  self.assertTrue(self.active);self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
+  receipt.write_text(original);receipt.chmod(0o600)
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+
+ def test_installer_receipt_file_plan_mismatch_refuses(self):
+  p,receipt,_effect=self.install();original=receipt.read_text();row=json.loads(original)
+  row['entries'][0]['destination']='systemd/user/unrelated.service';receipt.write_text(json.dumps(row));receipt.chmod(0o600)
+  with self.assertRaisesRegex(ValueError,'SERVER_ROLLBACK_RECEIPT_PLAN_MISMATCH:destination'):
+   server_profile._bound_installer_receipt(p,receipt)
+  with patch.object(server_profile.service_profile,'_run',side_effect=AssertionError('STOP_BEFORE_RECEIPT_BINDING')):
+   with self.assertRaisesRegex(ValueError,'SERVER_PACKAGE_ROLLBACK_FAILED_OR_UNVERIFIED'):
+    server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+  self.assertTrue(self.active);self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
+  receipt.write_text(original);receipt.chmod(0o600)
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+
+ def test_hard_linked_installer_receipt_is_untrusted(self):
+  p,receipt,_effect=self.install();alias=self.home/'receipt-alias.json';os.link(receipt,alias)
+  with self.assertRaisesRegex(ValueError,'SERVER_ROLLBACK_RECEIPT_UNTRUSTED'):
+   server_profile._bound_installer_receipt(p,receipt)
+  alias.unlink()
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+
+ def test_stop_failure_refuses_file_rollback(self):
+  p,receipt,_effect=self.install()
+  def fail_stop(args):
+   if args[:3]==['systemctl','--user','stop']:
+    return SimpleNamespace(returncode=1,stdout='',stderr='refused')
+   return self.run(args)
+  with patch.object(server_profile.service_profile,'_run',side_effect=fail_stop):
+   with self.assertRaisesRegex(ValueError,'SERVER_PACKAGE_ROLLBACK_FAILED_OR_UNVERIFIED'):
+    server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+  self.assertTrue(self.active);self.assertTrue(receipt.exists())
+  self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+
+ def test_ambiguous_stop_restores_preexisting_active_service_before_refusal(self):
+  p,receipt,_effect=self.install();events=[]
+  def ambiguous_stop(args):
+   if args[:3]==['systemctl','--user','stop']:
+    events.append('stop');self.active=False
+    return SimpleNamespace(returncode=1,stdout='',stderr='ambiguous')
+   if args[:3]==['systemctl','--user','start']:
+    events.append('start');self.active=True
+    return SimpleNamespace(returncode=0,stdout='',stderr='')
+   return self.run(args)
+  with patch.object(server_profile.service_profile,'_run',side_effect=ambiguous_stop):
+   with self.assertRaisesRegex(ValueError,'SERVER_PACKAGE_ROLLBACK_FAILED_OR_UNVERIFIED'):
+    server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+  self.assertEqual(events,['stop','start']);self.assertTrue(self.active)
+  self.assertTrue(receipt.exists());self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
+
+ def test_start_failure_still_stops_attempt_and_rolls_back(self):
+  def partial_start(args):
+   if args[:3]==['systemctl','--user','start']:
+    self.active=True;return SimpleNamespace(returncode=1,stdout='',stderr='ambiguous')
+   return self.run(args)
+  with patch.object(server_profile.service_profile,'_run',side_effect=partial_start), \
        patch.object(server_profile,'_probe',return_value={'state':'PASS','status':200}):
    p=server_profile.prepare_server_package(self.root,self.home,self.permissions)
    receipt=self.home/'receipt.json'
-   result=server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
-   self.assertEqual(result['state'],'INSTALLED_STARTED_READBACK_VERIFIED')
-   self.assertTrue(self.active);self.assertTrue(receipt.exists())
-   self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
-   rb=server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
-   self.assertEqual(rb['state'],'ROLLED_BACK_READBACK_REQUIRED')
-   self.assertFalse(self.active)
-   self.assertFalse((self.home/'config/systemd/user/xiio-test.service').exists())
+   with self.assertRaisesRegex(ValueError,'SERVER_SERVICE_START_FAILED'):
+    server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
+  self.assertFalse(self.active);self.assertTrue(receipt.exists())
+  self.assertFalse((self.home/'.config/systemd/user/xiio-test.service').exists())
 
  def test_failed_required_probe_rolls_back_files_and_service(self):
   with patch.object(server_profile.service_profile,'_run',side_effect=self.run), \
@@ -88,8 +221,35 @@ class ServerProfileTests(unittest.TestCase):
    receipt=self.home/'receipt.json'
    with self.assertRaisesRegex(ValueError,'SERVER_SERVICE_PROBE_FAILED'):
     server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
-  self.assertFalse(self.active)
-  self.assertFalse((self.home/'config/systemd/user/xiio-test.service').exists())
+  self.assertFalse(self.active);self.assertTrue(receipt.exists())
+  self.assertFalse((self.home/'.config/systemd/user/xiio-test.service').exists())
+
+ def test_failed_probe_with_stop_failure_is_rollback_uncertain_and_keeps_files(self):
+  def fail_stop(args):
+   if args[:3]==['systemctl','--user','stop']:
+    return SimpleNamespace(returncode=1,stdout='',stderr='refused')
+   return self.run(args)
+  with patch.object(server_profile.service_profile,'_run',side_effect=fail_stop), \
+       patch.object(server_profile,'_probe',return_value={'state':'UNREACHABLE'}):
+   p=server_profile.prepare_server_package(self.root,self.home,self.permissions)
+   receipt=self.home/'receipt.json'
+   with self.assertRaisesRegex(ValueError,'SERVER_PACKAGE_APPLY_FAILED_ROLLBACK_UNCERTAIN'):
+    server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
+  self.assertTrue(self.active);self.assertTrue(receipt.exists())
+  self.assertTrue((self.home/'.config/systemd/user/xiio-test.service').exists())
+
+ def test_rollback_rejects_changed_permission_digest_before_stop(self):
+  p,receipt,_effect=self.install()
+  changed=permission_profile.compile_profile({
+   'profile_id':'changed','capabilities':['configure_services','start_services','stop_services'],
+   'service_scopes':['api-glass-private'],'update_policy':'review_each',
+   'central_updates':False,'remote_access':False,'revoked':False})
+  with patch.object(server_profile.service_profile,'_run',side_effect=AssertionError('STOP_BEFORE_PLAN_CURRENTNESS')):
+   with self.assertRaisesRegex(ValueError,'SERVER_PACKAGE_PERMISSION_DIGEST_CHANGED'):
+    server_profile.rollback_server_package(self.home,changed,p,receipt,True)
+  self.assertTrue(self.active);self.assertTrue(receipt.exists())
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.run):
+   server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
 
  def test_revoked_grant_blocks_start(self):
   revoked=permission_profile.compile_profile({'profile_id':'revoked','capabilities':[],'service_scopes':[],

@@ -1,0 +1,47 @@
+import { createHash } from 'node:crypto';
+const REF=/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
+const SHA256=/^[a-f0-9]{64}$/;
+const HOST=/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const required=(value,code)=>{if(typeof value!=='string'||!value.trim()||!REF.test(value.trim()))throw new TypeError(code);return value.trim();};
+const data=(object,key,code)=>{if(!object||typeof object!=='object'||Array.isArray(object))throw new TypeError(code);const d=Object.getOwnPropertyDescriptor(object,key);if(!d||!Object.hasOwn(d,'value'))throw new TypeError(code);return d.value;};
+const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+export async function compileReleaseDistributionLock({product_ref,consumer_ref,readAcceptedRelease,readCurrentAdopter,readEntrypointQualification}={}){
+  const productRef=required(product_ref,'RELEASE_PRODUCT_REF_REQUIRED');
+  const consumerRef=required(consumer_ref,'RELEASE_CONSUMER_REF_REQUIRED');
+  if(typeof readAcceptedRelease!=='function')throw new TypeError('RELEASE_PRODUCER_READBACK_UNBOUND');
+  if(typeof readCurrentAdopter!=='function')throw new TypeError('ADOPTER_CURRENTNESS_READBACK_UNBOUND');
+  if(typeof readEntrypointQualification!=='function')throw new TypeError('ENTRYPOINT_QUALIFICATION_READBACK_UNBOUND');
+  const release=await readAcceptedRelease({product_ref:productRef});
+  const schema=data(release,'schema','RELEASE_PROJECTION_INVALID');
+  const lifecycle=data(release,'lifecycle','RELEASE_PROJECTION_INVALID');
+  const releaseRef=required(data(release,'release_ref','RELEASE_PROJECTION_INVALID'),'RELEASE_REF_INVALID');
+  const authoritativeProduct=required(data(release,'product_ref','RELEASE_PROJECTION_INVALID'),'RELEASE_PRODUCT_REF_INVALID');
+  const generation=required(data(release,'release_generation','RELEASE_PROJECTION_INVALID'),'RELEASE_GENERATION_INVALID');
+  const lockSha=data(release,'approved_lock_sha256','RELEASE_PROJECTION_INVALID');
+  const manifestRefs=data(release,'manifest_refs','RELEASE_PROJECTION_INVALID');
+  const artifactRefs=data(release,'artifact_refs','RELEASE_PROJECTION_INVALID');
+  const qualificationRef=required(data(release,'qualification_ref','RELEASE_PROJECTION_INVALID'),'RELEASE_QUALIFICATION_REF_INVALID');
+  const providerHosts=data(release,'provider_hosts','RELEASE_PROJECTION_INVALID');
+  if(schema!=='xiio.framework.distributable-release-projection/v1')throw new TypeError('RELEASE_PROJECTION_SCHEMA_INVALID');
+  if(lifecycle!=='DISTRIBUTABLE')throw new TypeError('RELEASE_NOT_DISTRIBUTABLE');
+  if(authoritativeProduct!==productRef)throw new TypeError('RELEASE_PRODUCT_MISMATCH');
+  if(typeof lockSha!=='string'||!SHA256.test(lockSha))throw new TypeError('RELEASE_LOCK_DIGEST_INVALID');
+  if(!Array.isArray(manifestRefs)||!manifestRefs.length||!Array.isArray(artifactRefs)||!artifactRefs.length)throw new TypeError('RELEASE_PUBLISHED_REFS_INVALID');
+  if(!Array.isArray(providerHosts)||!providerHosts.length)throw new TypeError('RELEASE_PROVIDER_HOSTS_UNBOUND');
+  const hosts=providerHosts.map(host=>{if(typeof host!=='string'||host!==host.toLowerCase()||!HOST.test(host)||host==='localhost'||host.endsWith('.local'))throw new TypeError('RELEASE_PROVIDER_HOST_INVALID');return host;});
+  if(new Set(hosts).size!==hosts.length)throw new TypeError('RELEASE_PROVIDER_HOST_DUPLICATE');
+  const adopter=await readCurrentAdopter({consumer_ref:consumerRef,product_ref:productRef});
+  if(data(adopter,'schema','ADOPTER_LOCK_INVALID')!=='xiio.framework.release-adopter-lock/v1')throw new TypeError('ADOPTER_LOCK_SCHEMA_INVALID');
+  if(required(data(adopter,'consumer_ref','ADOPTER_LOCK_INVALID'),'ADOPTER_CONSUMER_REF_INVALID')!==consumerRef)throw new TypeError('ADOPTER_CONSUMER_MISMATCH');
+  if(required(data(adopter,'product_ref','ADOPTER_LOCK_INVALID'),'ADOPTER_PRODUCT_REF_INVALID')!==productRef)throw new TypeError('ADOPTER_PRODUCT_MISMATCH');
+  if(required(data(adopter,'release_ref','ADOPTER_LOCK_INVALID'),'ADOPTER_RELEASE_REF_INVALID')!==releaseRef)throw new TypeError('ADOPTER_RELEASE_MISMATCH');
+  if(required(data(adopter,'release_generation','ADOPTER_LOCK_INVALID'),'ADOPTER_GENERATION_INVALID')!==generation)throw new TypeError('ADOPTER_GENERATION_STALE');
+  if(data(adopter,'state','ADOPTER_LOCK_INVALID')!=='ADOPTED_CURRENT')throw new TypeError('ADOPTER_LOCK_NOT_CURRENT');
+  if(required(data(adopter,'approved_lock_sha256','ADOPTER_LOCK_INVALID'),'ADOPTER_LOCK_SHA_INVALID')!==lockSha)throw new TypeError('ADOPTER_LOCK_SHA_STALE');
+  const currentnessRef=required(data(adopter,'currentness_ref','ADOPTER_LOCK_INVALID'),'ADOPTER_CURRENTNESS_REF_INVALID');
+  const entrypointQualification=await readEntrypointQualification({product_ref:productRef,release_generation:generation});
+  if(data(entrypointQualification,'schema','ENTRYPOINT_QUALIFICATION_INVALID')!=='xiio.framework.entrypoint-qualification/v1'||data(entrypointQualification,'state','ENTRYPOINT_QUALIFICATION_INVALID')!=='QUALIFIED'||required(data(entrypointQualification,'artifact_generation','ENTRYPOINT_QUALIFICATION_INVALID'),'ENTRYPOINT_GENERATION_INVALID')!==generation||data(entrypointQualification,'effect_authority','ENTRYPOINT_QUALIFICATION_INVALID')!==false)throw new TypeError('ENTRYPOINT_QUALIFICATION_NOT_CURRENT');
+  const projection={schema:'xiio.release-distribution-lock/v1',release_ref:releaseRef,product_ref:productRef,consumer_ref:consumerRef,release_generation:generation,approved_lock_sha256:lockSha,manifest_refs:Object.freeze([...manifestRefs]),artifact_refs:Object.freeze([...artifactRefs]),provider_hosts:Object.freeze([...hosts]),lifecycle:'DISTRIBUTABLE',adopter_current:true,release_projection_digest:digest({schema,lifecycle,release_ref:releaseRef,product_ref:authoritativeProduct,release_generation:generation,approved_lock_sha256:lockSha,manifest_refs:manifestRefs,artifact_refs:artifactRefs,qualification_ref:qualificationRef,provider_hosts:hosts}),release_qualification_ref:qualificationRef,adopter_currentness_ref:currentnessRef,entrypoint_qualification_ref:required(data(entrypointQualification,'qualification_digest','ENTRYPOINT_QUALIFICATION_INVALID'),'ENTRYPOINT_QUALIFICATION_REF_INVALID'),effect_authority:false,installed:false};
+  return Object.freeze(projection);
+}

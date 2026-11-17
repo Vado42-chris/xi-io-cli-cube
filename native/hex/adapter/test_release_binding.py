@@ -1,5 +1,6 @@
-import hashlib,json,tempfile,unittest
+import hashlib,json,tempfile,unittest,threading
 from pathlib import Path
+import os
 from unittest.mock import patch
 import sys
 HERE=Path(__file__).resolve().parent
@@ -14,14 +15,16 @@ class ReleaseBindingTests(unittest.TestCase):
   msha=hashlib.sha256(manifest.read_bytes()).hexdigest()
   lock.write_text(json.dumps({"schema_version":"xiio-installer-bundle-profile-v1","profile_id":"demo","fixture":True,"products":[{"role":"demo","product_id":"product-demo","manifest":"manifest.json","manifest_sha256":msha,"depends_on":[],"payload_urls":{"demo.bin":"https://releases.example.test/demo.bin"}}]},separators=(',',':')))
   sha=hashlib.sha256(lock.read_bytes()).hexdigest()
-  release={"schema":"xiio.framework.distributable-release-projection/v1","release_ref":"release:1","product_ref":"product-demo","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE","effect_authority":False}
-  adopter={"schema":"xiio.framework.release-adopter-lock/v1","adopter_lock_ref":"adopter:hex:1","consumer_ref":"consumer:hex","product_ref":"product-demo","release_ref":"release:1","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"state":"ADOPTED_CURRENT","effect_authority":False}
+  release={"schema":"xiio.framework.distributable-release-projection/v1","release_ref":"release:1","product_ref":"product-demo","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"entrypoint_qualification_ref":"entrypoint:proof:g1","lifecycle":"DISTRIBUTABLE","effect_authority":False}
+  adopter={"schema":"xiio.framework.release-adopter-lock/v1","adopter_lock_ref":"adopter:hex:1","consumer_ref":"consumer:hex","product_ref":"product-demo","release_ref":"release:1","release_generation":"g1","approved_lock_sha256":sha,"provider_hosts":["releases.example.test"],"entrypoint_qualification_ref":"entrypoint:proof:g1","state":"ADOPTED_CURRENT","effect_authority":False}
   return td,lock,release,adopter
  def test_exact_binding_reaches_existing_installer(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
-  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED"}) as install:
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}) as install:
    out=install_from_release_binding(lock,release=r,adopter=a,expected_product_ref="product-demo")
-   self.assertEqual(out["state"],"INSTALLED")
+   self.assertEqual(out["state"],"INSTALLED_BYTES_VERIFIED")
+   receipt=json.loads(Path(out["release_distribution_receipt"]).read_text())
+   self.assertEqual(receipt["entrypoint_qualification_ref"],"entrypoint:proof:g1")
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
  def test_refuses_missing_stale_wrong_or_substituted_binding_before_install(self):
   cases=[]
@@ -33,6 +36,8 @@ class ReleaseBindingTests(unittest.TestCase):
    (r,{**a,"release_generation":"old"},"BUNDLE_RELEASE_ADOPTER_BINDING_MISMATCH"),
    (r,{**a,"provider_hosts":["evil.example.test"]},"BUNDLE_RELEASE_HOST_BINDING_MISMATCH"),
    (r,{**a,"consumer_ref":""},"BUNDLE_RELEASE_CONSUMER_REF_REQUIRED"),
+   ({**r,"entrypoint_qualification_ref":""},{**a,"entrypoint_qualification_ref":""},"BUNDLE_ENTRYPOINT_QUALIFICATION_REF_REQUIRED"),
+   (r,{**a,"entrypoint_qualification_ref":"entrypoint:other"},"BUNDLE_RELEASE_ADOPTER_BINDING_MISMATCH"),
   ])
   for rr,aa,code in cases:
    with self.subTest(code=code),patch('native.hex.adapter.release_binding.install_bundle') as install:
@@ -46,7 +51,7 @@ class ReleaseBindingTests(unittest.TestCase):
    "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
    "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
    "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
-   "adopter_current":True,"effect_authority":False,"installed":False}
+   "adopter_current":True,"entrypoint_qualification_ref":"entrypoint:proof:g1","effect_authority":False,"installed":False}
   reads=[]
   def reader(**coords): reads.append(coords); return binding
   env={"XDG_STATE_HOME":str(lock.parent/"state"),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
@@ -59,9 +64,107 @@ class ReleaseBindingTests(unittest.TestCase):
    self.assertEqual(receipt["product_ref"],"product-demo")
    self.assertEqual(receipt["consumer_ref"],"consumer:hex")
    self.assertEqual(receipt["approved_lock_sha256"],r["approved_lock_sha256"])
+   self.assertEqual(receipt["entrypoint_qualification_ref"],"entrypoint:proof:g1")
    self.assertTrue(receipt["readback_verified"])
    self.assertEqual(reads,[{"product_ref":"product-demo","consumer_ref":"consumer:hex"}])
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
+
+ def test_identical_concurrent_release_receipt_writers_converge(self):
+  from native.hex.adapter.release_binding import _persist_release_receipt
+  td=tempfile.TemporaryDirectory();self.addCleanup(td.cleanup);root=Path(td.name);fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+  self.addCleanup(lambda: os.close(fd))
+  receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":"p","consumer_ref":"c","release_generation":"g"}
+  results=[];errors=[]
+  def writer():
+   try: results.append(_persist_release_receipt(fd,root,"same.json",receipt))
+   except Exception as exc: errors.append(exc)
+  threads=[threading.Thread(target=writer) for _ in range(2)]
+  for thread in threads: thread.start()
+  for thread in threads: thread.join()
+  self.assertEqual(errors,[]);self.assertEqual(len(results),2)
+  self.assertEqual(json.loads((root/"same.json").read_text()),receipt)
+
+ def test_release_receipt_lock_requires_private_single_link_regular_file(self):
+  from native.hex.adapter.release_binding import _persist_release_receipt
+  receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":"p","consumer_ref":"c","release_generation":"g"}
+  for kind in ("permissive-mode","hard-link"):
+   with self.subTest(kind=kind),tempfile.TemporaryDirectory() as td:
+    root=Path(td);lock_path=root/".same.json.lock"
+    if kind=="permissive-mode":
+     lock_path.write_text("");lock_path.chmod(0o644)
+    else:
+     source=root/"lock-source";source.write_text("");source.chmod(0o600);os.link(source,lock_path)
+    fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+    try:
+     with self.assertRaisesRegex(BundleError,"BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED"):
+      _persist_release_receipt(fd,root,"same.json",receipt)
+    finally:
+     os.close(fd)
+    self.assertFalse((root/"same.json").exists())
+
+ def test_release_receipt_write_stays_on_verified_directory_after_path_swap(self):
+  td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
+  binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
+   "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
+   "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
+   "adopter_current":True,"entrypoint_qualification_ref":"entrypoint:proof:g1","effect_authority":False,"installed":False}
+  state=lock.parent/"state";outside=lock.parent/"outside";outside.mkdir()
+  env={"XDG_STATE_HOME":str(state),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
+  release_dir=state/"xi-io"/"installer"/"release-distributions"
+  def install_and_swap(*args,**kwargs):
+   moved=release_dir.with_name("release-distributions-pinned");release_dir.rename(moved);release_dir.symlink_to(outside,target_is_directory=True)
+   return {"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}
+  with patch('native.hex.adapter.release_binding.install_bundle',side_effect=install_and_swap):
+   out=install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
+  self.assertEqual(list(outside.iterdir()),[])
+  pinned=release_dir.with_name("release-distributions-pinned")
+  receipts=list(pinned.glob("*.json"));self.assertEqual(len(receipts),1)
+  returned=Path(out["release_distribution_receipt"])
+  self.assertEqual(returned,receipts[0])
+  self.assertTrue(returned.is_file())
+  self.assertEqual(json.loads(returned.read_text())["release_generation"],"g1")
+
+ def test_symlinked_release_state_root_refuses_before_bundle_install(self):
+  td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
+  binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
+   "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
+   "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
+   "adopter_current":True,"entrypoint_qualification_ref":"entrypoint:proof:g1","effect_authority":False,"installed":False}
+  state=lock.parent/"state";outside=lock.parent/"outside";outside.mkdir()
+  parent=state/"xi-io"/"installer";parent.mkdir(parents=True);(parent/"release-distributions").symlink_to(outside,target_is_directory=True)
+  env={"XDG_STATE_HOME":str(state),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
+  with patch('native.hex.adapter.release_binding.install_bundle') as install:
+   with self.assertRaisesRegex(BundleError,"BUNDLE_STATE_ROOT_UNTRUSTED|BUNDLE_RELEASE_STATE_ROOT_UNTRUSTED"):
+    install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
+   install.assert_not_called()
+  self.assertEqual(list(outside.iterdir()),[])
+
+ def test_existing_release_receipt_requires_private_regular_file_custody(self):
+  td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
+  binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
+   "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
+   "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
+   "adopter_current":True,"entrypoint_qualification_ref":"entrypoint:proof:g1","effect_authority":False,"installed":False}
+  env={"XDG_STATE_HOME":str(lock.parent/"state"),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
+  state=Path(env["XDG_STATE_HOME"])/"xi-io/installer/release-distributions";state.mkdir(parents=True,mode=0o700);state.chmod(0o700)
+  name=hashlib.sha256(("product-demo|consumer:hex|g1").encode()).hexdigest()+".json";target=state/name
+  expected={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":"product-demo","consumer_ref":"consumer:hex",
+   "release_ref":r["release_ref"],"release_generation":"g1","entrypoint_qualification_ref":"entrypoint:proof:g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"bundle_profile_id":"demo","bundle_state":"INSTALLED_BYTES_VERIFIED",
+   "installed_role_count":1,"readback_verified":True,"effect_authority":False}
+  target.write_text(json.dumps(expected));target.chmod(0o644)
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}) as install:
+   with self.assertRaisesRegex(BundleError,"BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED"):
+    install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
+   install.assert_not_called()
+  target.chmod(0o600);target.write_text(json.dumps({**expected,"approved_lock_sha256":"f"*64}))
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}) as install:
+   with self.assertRaisesRegex(BundleError,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT"):
+    install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
+   install.assert_not_called()
 
  def test_framework_distribution_substitution_refuses_before_install(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
@@ -76,6 +179,7 @@ class ReleaseBindingTests(unittest.TestCase):
          ({"adopter_current":False},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
          ({"effect_authority":True},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
          ({"installed":True},"BUNDLE_RELEASE_DISTRIBUTION_NOT_CURRENT"),
+         ({"entrypoint_qualification_ref":""},"BUNDLE_ENTRYPOINT_QUALIFICATION_REF_REQUIRED"),
          ({"approved_lock_sha256":"a"*64},"BUNDLE_RELEASE_LOCK_DIGEST_MISMATCH"),
          ({"provider_hosts":["evil.example.test"]},"BUNDLE_URL_NOT_APPROVED")]
   for patching,code in cases:

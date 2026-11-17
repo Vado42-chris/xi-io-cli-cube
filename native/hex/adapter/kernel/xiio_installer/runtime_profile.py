@@ -97,6 +97,7 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
         raise RuntimeProfileError("SERVICES_ARRAY_REQUIRED")
     dependencies=[]
     dep_ids=set()
+    dep_units=set()
     for i,row in enumerate(raw.get("dependencies",[])):
         if not isinstance(row,dict):
             raise RuntimeProfileError(f"DEPENDENCY_{i}_OBJECT_REQUIRED")
@@ -114,7 +115,11 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
             raise RuntimeProfileError(f"DEPENDENCY_{i}_GENERATION_INVALID")
         if expected_unit is not None and not SAFE_UNIT.fullmatch(expected_unit):
             raise RuntimeProfileError(f"DEPENDENCY_{i}_UNIT_INVALID")
+        if expected_unit is not None and expected_unit in dep_units:
+            raise RuntimeProfileError("DUPLICATE_RUNTIME_DEPENDENCY_UNIT:"+expected_unit)
         dep_ids.add(did)
+        if expected_unit is not None:
+            dep_units.add(expected_unit)
         dependencies.append(RuntimeDependency(
             did,owner,dep_generation,materializer,
             _permissions(row.get("required_for_permissions",[]),f"DEPENDENCY_{i}_PERMISSIONS"),
@@ -149,6 +154,17 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
         declared_raw=row.get("declared_generation")
         declared_generation=_text(declared_raw,f"SERVICE_{i}_DECLARED_GENERATION") if declared_raw is not None else None
         services.append(RuntimeService(sid,unit,health,required,bool(row.get("required",False)),activation_permission,generation_field,declared_generation))
+    service_by_unit={service.unit:service for service in services}
+    for dep in dependencies:
+        if dep.expected_unit is None:
+            continue
+        service=service_by_unit.get(dep.expected_unit)
+        if service is None:
+            raise RuntimeProfileError("DEPENDENCY_SERVICE_UNIT_UNDECLARED:"+dep.dependency_id)
+        if service.declared_generation is None:
+            raise RuntimeProfileError("DEPENDENCY_SERVICE_GENERATION_UNDECLARED:"+dep.dependency_id)
+        if service.declared_generation!=dep.accepted_generation:
+            raise RuntimeProfileError("DEPENDENCY_SERVICE_GENERATION_MISMATCH:"+dep.dependency_id)
     return RuntimeProfile(profile_id,generation,product_id,tuple(services),tuple(dependencies),defaults,optional,policy,raw)
 
 def compile_user_consent(profile:RuntimeProfile,*,grants:list[str],update_policy:str|None=None,principal_ref:str="local-user")->dict[str,Any]:
