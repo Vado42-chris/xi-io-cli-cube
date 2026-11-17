@@ -19,9 +19,9 @@ class ReleaseBindingTests(unittest.TestCase):
   return td,lock,release,adopter
  def test_exact_binding_reaches_existing_installer(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
-  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED"}) as install:
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}) as install:
    out=install_from_release_binding(lock,release=r,adopter=a,expected_product_ref="product-demo")
-   self.assertEqual(out["state"],"INSTALLED")
+   self.assertEqual(out["state"],"INSTALLED_BYTES_VERIFIED")
    receipt=json.loads(Path(out["release_distribution_receipt"]).read_text())
    self.assertEqual(receipt["entrypoint_qualification_ref"],"entrypoint:proof:g1")
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
@@ -99,9 +99,15 @@ class ReleaseBindingTests(unittest.TestCase):
    "approved_lock_sha256":r["approved_lock_sha256"],"bundle_profile_id":"demo","bundle_state":"INSTALLED_BYTES_VERIFIED",
    "installed_role_count":1,"readback_verified":True,"effect_authority":False}
   target.write_text(json.dumps(expected));target.chmod(0o644)
-  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}):
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}) as install:
    with self.assertRaisesRegex(BundleError,"BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED"):
     install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
+   install.assert_not_called()
+  target.chmod(0o600);target.write_text(json.dumps({**expected,"approved_lock_sha256":"f"*64}))
+  with patch('native.hex.adapter.release_binding.install_bundle',return_value={"state":"INSTALLED_BYTES_VERIFIED","profile_id":"demo","roles":["demo"]}) as install:
+   with self.assertRaisesRegex(BundleError,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT"):
+    install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
+   install.assert_not_called()
 
  def test_framework_distribution_substitution_refuses_before_install(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
