@@ -35,14 +35,14 @@ test('CLI payload manifest still verifies exact adopted bytes',()=>{
 test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  const adoption=json('native/hex/SOURCE-ADOPTION.json');
  assert.equal(adoption.kernel.repository,'Vado42-chris/xi-io_installer');
- assert.equal(adoption.kernel.ref,'8bd35c6c8de9e1bc29fccb89a8ebd027e92f288c');
+ assert.equal(adoption.kernel.ref,'8ba47176df46491e486063616bde319b2cb2098b');
  assert.equal(adoption.kernel.acceptance_state,'ACCEPTED_MAIN');
- assert.equal(adoption.kernel.owner_pr,31);
- assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21,30,31]);
+ assert.equal(adoption.kernel.owner_pr,35);
+ assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21,30,31,32,34,35]);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).merge_ref,adoption.kernel.ref);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).status,'CURRENT_ACCEPTED_MAIN');
  assert.match(adoption.kernel.currentness_rule,/cannot downgrade currentness/);
- assert.match(adoption.kernel.acceptance_note,/vendored kernel remains byte-identical/);
+ assert.match(adoption.kernel.acceptance_note,/generation-field declaration/);
  const directory=new URL('../native/hex/adapter/kernel/xiio_installer/',import.meta.url);
  const ownerBlobs=adoption.kernel.files_unchanged_git_blob;
  assert.ok(ownerBlobs && typeof ownerBlobs==='object' && !Array.isArray(ownerBlobs));
