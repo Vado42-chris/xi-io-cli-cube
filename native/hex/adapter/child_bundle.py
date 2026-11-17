@@ -348,6 +348,14 @@ def _secure_ensure_state_root(state_root: Path) -> int:
 
 def _atomic_private_json(path: Path, value: dict) -> None:
     _require(not path.is_symlink(), "BUNDLE_RELEASE_RECEIPT_SYMLINK_FORBIDDEN")
+    if path.exists():
+        try:
+            existing=json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise BundleError("BUNDLE_DERIVED_RECEIPT_CONFLICT") from exc
+        _require(existing==value and (path.stat().st_mode & 0o777)==0o600,
+                 "BUNDLE_DERIVED_RECEIPT_CONFLICT")
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix="."+path.name+".", suffix=".tmp", dir=path.parent)
     os.close(fd); p=Path(tmp)
