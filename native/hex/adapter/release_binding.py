@@ -80,61 +80,75 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
     }, env=env, fetch=fetch)
 
 
-def _persist_release_receipt(state_fd: int, state_root: Path, name: str, receipt: dict) -> str:
+def _read_release_receipt(state_fd: int, name: str) -> dict | None:
+    try:
+        fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
+    try:
+        st=os.fstat(fd)
+        _require(stat.S_ISREG(st.st_mode) and (st.st_mode & 0o777)==0o600,
+                 "BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED")
+        try:
+            return json.loads(os.read(fd,131072).decode())
+        except (ValueError,UnicodeError) as exc:
+            raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
+    finally:
+        os.close(fd)
+
+
+def _write_release_receipt_locked(state_fd: int, state_root: Path, name: str, receipt: dict) -> str:
     encoded=(json.dumps(receipt,indent=2,sort_keys=True)+"\n").encode()
+    tmp="."+name+"."+hashlib.sha256(encoded).hexdigest()[:16]+".tmp"
+    try:
+        fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
+        try:
+            os.write(fd,encoded);os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp,name,src_dir_fd=state_fd,dst_dir_fd=state_fd)
+    except OSError as exc:
+        try: os.unlink(tmp,dir_fd=state_fd)
+        except OSError: pass
+        raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_WRITE_FAILED") from exc
+    reread=_read_release_receipt(state_fd,name)
+    _require(reread==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_READBACK_MISMATCH")
+    return str(state_root/name)
+
+
+def _open_release_receipt_lock(state_fd: int, name: str):
     lock_name="."+name+".lock"
     try:
         lock_raw=os.open(lock_name,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
     except OSError as exc:
         raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED") from exc
-    with os.fdopen(lock_raw,"a+b",closefd=True) as receipt_lock:
-        fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
+    receipt_lock=os.fdopen(lock_raw,"a+b",closefd=True)
+    fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
+    return receipt_lock
+
+
+def _persist_release_receipt(state_fd: int, state_root: Path, name: str, receipt: dict) -> str:
+    with _open_release_receipt_lock(state_fd,name) as receipt_lock:
         try:
-            try:
-                fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
-            except FileNotFoundError:
-                fd=None
-            except OSError as exc:
-                raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
-            if fd is not None:
-                try:
-                    st=os.fstat(fd)
-                    _require(stat.S_ISREG(st.st_mode) and (st.st_mode & 0o777)==0o600,
-                             "BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED")
-                    existing=json.loads(os.read(fd,131072).decode())
-                except (OSError,ValueError,UnicodeError) as exc:
-                    raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
-                finally:
-                    os.close(fd)
+            existing=_read_release_receipt(state_fd,name)
+            if existing is not None:
                 _require(existing==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
                 return str(state_root/name)
-            tmp="."+name+"."+hashlib.sha256(encoded).hexdigest()[:16]+".tmp"
-            try:
-                fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
-                try:
-                    os.write(fd,encoded);os.fsync(fd)
-                finally:
-                    os.close(fd)
-                os.replace(tmp,name,src_dir_fd=state_fd,dst_dir_fd=state_fd)
-            except OSError as exc:
-                try: os.unlink(tmp,dir_fd=state_fd)
-                except OSError: pass
-                raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_WRITE_FAILED") from exc
-            fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
-            try:
-                st=os.fstat(fd);reread=json.loads(os.read(fd,131072).decode())
-                _require(stat.S_ISREG(st.st_mode) and (st.st_mode & 0o777)==0o600 and reread==receipt,
-                         "BUNDLE_RELEASE_INSTALL_RECEIPT_READBACK_MISMATCH")
-            finally:
-                os.close(fd)
-            return str(state_root/name)
+            return _write_release_receipt_locked(state_fd,state_root,name,receipt)
         finally:
             fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_UN)
-
-
 def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
     product_ref=binding["product_ref"];consumer_ref=binding["consumer_ref"]
     approved=binding["approved_lock_sha256"];allowed=frozenset(binding["provider_hosts"])
+    profile=load_bundle_profile(Path(lock),allowed_hosts=allowed)
+    receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":product_ref,"consumer_ref":consumer_ref,
+        "release_ref":binding.get("release_ref"),"release_generation":binding.get("release_generation"),
+        "entrypoint_qualification_ref":binding.get("entrypoint_qualification_ref"),"approved_lock_sha256":approved,
+        "bundle_profile_id":profile.get("profile_id"),"bundle_state":"INSTALLED_BYTES_VERIFIED",
+        "installed_role_count":len(profile.get("ordered_roles") or []),"readback_verified":True,"effect_authority":False}
+    name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json"
     roots_env=env or os.environ
     state_root=Path(roots_env.get("XDG_STATE_HOME") or (Path.home()/".local/state"))/"xi-io"/"installer"/"release-distributions"
     state_fd=_secure_ensure_state_root(state_root)
@@ -143,14 +157,23 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
         _require(st_desc.st_ino==st_path.st_ino and st_desc.st_dev==st_path.st_dev
                  and (st_desc.st_mode & 0o777)==0o700,
                  "BUNDLE_RELEASE_STATE_ROOT_UNTRUSTED")
-        installed=install_bundle(Path(lock),approved_lock_sha256=approved,env=env,allowed_hosts=allowed,fetch=fetch)
-        receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":product_ref,"consumer_ref":consumer_ref,
-            "release_ref":binding.get("release_ref"),"release_generation":binding.get("release_generation"),
-            "entrypoint_qualification_ref":binding.get("entrypoint_qualification_ref"),"approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),"bundle_state":installed.get("state"),
-            "installed_role_count":len(installed.get("roles") or []),"readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED","effect_authority":False}
-        name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json"
-        receipt_path=_persist_release_receipt(state_fd,state_root,name,receipt)
-        return {**installed,"release_distribution_receipt":receipt_path}
+        with _open_release_receipt_lock(state_fd,name) as receipt_lock:
+            try:
+                existing=_read_release_receipt(state_fd,name)
+                if existing is not None:
+                    _require(existing==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
+                installed=install_bundle(Path(lock),approved_lock_sha256=approved,env=env,allowed_hosts=allowed,fetch=fetch)
+                _require(installed.get("profile_id")==receipt["bundle_profile_id"]
+                         and installed.get("state")==receipt["bundle_state"]
+                         and len(installed.get("roles") or [])==receipt["installed_role_count"],
+                         "BUNDLE_RELEASE_INSTALL_RESULT_MISMATCH")
+                if existing is None:
+                    receipt_path=_write_release_receipt_locked(state_fd,state_root,name,receipt)
+                else:
+                    receipt_path=str(state_root/name)
+                return {**installed,"release_distribution_receipt":receipt_path}
+            finally:
+                fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_UN)
     finally:
         os.close(state_fd)
 
