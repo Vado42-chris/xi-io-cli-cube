@@ -173,7 +173,7 @@ class BundleTests(unittest.TestCase):
         lock,digest=f.lock(fixture=False);result=install_bundle(lock,approved_lock_sha256=digest,env=f.env,fetch=f.fetch)
         row=result["dependency_binding_receipts"]["node"];receipt=json.loads(Path(row["path"]).read_text())
         self.assertEqual(receipt["schema"],"xiio.installer-dependency-binding-receipt/v1");self.assertEqual(receipt["dependency_id"],"node")
-        self.assertEqual(receipt["accepted_generation"],generation);self.assertEqual(receipt["fields"]["accepted_generation"],generation);self.assertTrue(Path(receipt["fields"]["release_receipt_path"]).is_file());self.assertTrue(Path(receipt["fields"]["module"]).is_file());self.assertFalse(receipt["effect_authority"])
+        self.assertEqual(receipt["state"],"BOUND");self.assertEqual(receipt["accepted_generation"],generation);self.assertTrue(Path(receipt["release_receipt_path"]).is_file());self.assertTrue(Path(receipt["fields"]["module"]).is_file());self.assertFalse(receipt["effect_authority"])
 
     def test_release_hosts_reject_wildcards_private_local_and_malformed(self):
         f = self.fixture()
