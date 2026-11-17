@@ -140,9 +140,6 @@ def install_from_installed_framework_release(lock: Path, *, product_ref: str,
                                              consumer_ref: str,
                                              framework_binding_receipt: Path,
                                              expected_framework_generation: str,
-                                             read_accepted_release,
-                                             read_current_adopter,
-                                             read_entrypoint_qualification,
                                              env: dict[str, str] | None = None,
                                              fetch=None, node_binary: str = "node"):
     """Resolve verified installed Framework custody, then invoke its release compiler."""
@@ -152,9 +149,6 @@ def install_from_installed_framework_release(lock: Path, *, product_ref: str,
     )
     reader = build_framework_release_distribution_reader(
         framework_release_distribution_module=Path(export["release_distribution_module"]),
-        read_accepted_release=read_accepted_release,
-        read_current_adopter=read_current_adopter,
-        read_entrypoint_qualification=read_entrypoint_qualification,
         node_binary=node_binary,
     )
     return install_from_distribution_reader(
