@@ -1,0 +1,62 @@
+{
+  "billing_effect_authority": false,
+  "classification": "TEST_DISTRIBUTION_FIXTURE_NOT_RUNTIME_AUTHORITY",
+  "effect_authority": false,
+  "files": {
+    "scripts/lib/distributable-release-projection.mjs": {
+      "destination": "xi-io/framework/runtime/distributable-release-projection.mjs",
+      "git_blob": "b6ade4b03f82dd9644bfa3374e1167da5a9eac70",
+      "sha256": "1094870909fa855e1e9e8beafafcb0aa0aa6a1645ee8a9643b06cde4de537d5f",
+      "size": 4040
+    },
+    "scripts/lib/executable-entrypoint-qualification.mjs": {
+      "destination": "xi-io/framework/runtime/executable-entrypoint-qualification.mjs",
+      "git_blob": "35cd5c1c40e81f747de562095b67becacd681983",
+      "sha256": "ec17d1fef10e6718d38eccf1614f00c97cbbd00311ca5f656e8496d1d30f9b65",
+      "size": 3034
+    },
+    "scripts/lib/release-authoritative-readback.mjs": {
+      "destination": "xi-io/framework/runtime/release-authoritative-readback.mjs",
+      "git_blob": "be95ce23b2c1f7dc964d8bc3e8e0a8278cfd03ab",
+      "sha256": "ae1f0aa2fe95a3b2ce610f6f90b740c42ebde9ed6d0b9ced6fdf95cc6b219ce9",
+      "size": 5906
+    },
+    "scripts/lib/release-authority-producer.mjs": {
+      "destination": "xi-io/framework/runtime/release-authority-producer.mjs",
+      "git_blob": "7950d4e0b4e7010a9343dd44a5a714846bc07d9b",
+      "sha256": "872a6769f3ec6637434721fce97d6177341fee0395ed698757e99cc5c36caffc",
+      "size": 2344
+    },
+    "scripts/lib/release-distribution-lock.mjs": {
+      "destination": "xi-io/framework/runtime/release-distribution-lock.mjs",
+      "git_blob": "4dc0d9b12b6295ecd67e79f7984d76f32e7340de",
+      "sha256": "8da32236abf70961979b4782959a214bbcf7266094c3633a05a57243ac992e0f",
+      "size": 6243
+    },
+    "scripts/lib/release-distribution-reader.mjs": {
+      "destination": "xi-io/framework/runtime/release-distribution-reader.mjs",
+      "git_blob": "62b31152590e6063733132da8dacc66dd9c17229",
+      "sha256": "770b1c9f2617834457980d8f360e82a1fd33902b6aa8567b7af2754ce31586cc",
+      "size": 390
+    },
+    "tools/hex-operator/rc/bin/current-worker-assignment-reader.mjs": {
+      "destination": "xi-io/framework/runtime/current-worker-assignment-reader.mjs",
+      "git_blob": "ded0d288884fd1f29d76ed76dcc4e3615fd2dfa3",
+      "sha256": "62458a02fa1a603ef208eed16f64061432c7b3a53787674d8215c15045af21d8",
+      "size": 2374
+    }
+  },
+  "hard": [
+    "FIXTURE_BYTES!=LIVE_FRAMEWORK_REPOSITORY",
+    "SOURCE_ADOPTION!=INSTALLED_RUNTIME",
+    "INSTALLED_RUNTIME!=PRODUCT_API_ADMISSION",
+    "RELEASE_AUTHORITY!=EFFECT_AUTHORITY",
+    "HOSTED_LINUX!=ARIES_OR_LOKI"
+  ],
+  "owner_pr": 1551,
+  "owner_ref": "cfe2776b08e1768882f95884fd52576e48f0550c",
+  "owner_repository": "Vado42-chris/xi-io.net",
+  "provider_effect": false,
+  "schema": "xiio.hex.framework-runtime-source-adoption/v1",
+  "state": "ACCEPTED_OWNER_BYTES_PACKAGED_FOR_PHYSICAL_CONSUMER_TEST"
+}

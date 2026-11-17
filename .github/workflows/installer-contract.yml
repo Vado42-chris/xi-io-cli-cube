@@ -233,3 +233,135 @@ jobs:
             maths-deb.contents
           if-no-files-found: warn
           retention-days: 14
+
+  framework-release-physical-chain:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact HEX consumer and pinned Framework fixture
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Use qualified Node 24.22.1
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.22.1'
+      - name: Verify exact accepted Framework owner bytes and hostile substitution refusal
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest native.hex.adapter.test_framework_physical_chain_fixture -v
+      - name: Install and bind exact Framework 1551 bytes through the embedded Installer
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/framework-physical"
+          fixture="$GITHUB_WORKSPACE/native/hex/fixtures/framework-runtime-cfe2776"
+          mkdir -p "$work"/{config,data,state,cache,receipts}
+          chmod 0700 "$work"/{config,data,state,cache,receipts}
+          export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache"
+          export XIIO_FRAMEWORK_FIXTURE="$fixture" XIIO_FRAMEWORK_WORK="$work"
+          PYTHONDONTWRITEBYTECODE=1 python3 -B - <<'PY'
+          import os,sys
+          from pathlib import Path
+          sys.path.insert(0,str(Path('native/hex/adapter/kernel').resolve()))
+          from xiio_installer.manifest import load_manifest
+          from xiio_installer.dependency_binding import bind_dependency_manifest
+          from xiio_installer.dependency_receipt_verification import verify_dependency_binding_receipt
+          fixture=Path(os.environ['XIIO_FRAMEWORK_FIXTURE'])
+          work=Path(os.environ['XIIO_FRAMEWORK_WORK'])
+          env={key:os.environ[key] for key in ('XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME')}
+          generation='cfe2776b08e1768882f95884fd52576e48f0550c'
+          manifest=load_manifest(fixture/'framework-runtime.manifest.json')
+          receipt=bind_dependency_manifest(
+              manifest,fixture,work/'receipts/install.json',work/'receipts/binding.json',
+              expected_dependency_id='framework-runtime',
+              expected_owner_repo='Vado42-chris/xi-io.net',
+              expected_generation=generation,env=env)
+          reopened=verify_dependency_binding_receipt(
+              work/'receipts/binding.json',
+              expected_dependency_id='framework-runtime',
+              expected_owner_repo='Vado42-chris/xi-io.net',
+              expected_generation=generation)
+          assert receipt['state']=='BOUND'
+          assert reopened['state']=='VERIFIED' and reopened['custody_verified'] is True
+          for key in ('dependency_id','owner_repo','accepted_generation','binding_receipt_path','runtime_exports','fields','provider_effect','effect_authority'):
+              assert receipt[key]==reopened[key]
+          assert set(reopened['runtime_exports'])=={'current_assignment_module','release_distribution_module'}
+          PY
+      - name: Produce durable authority using the installed Framework runtime
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/framework-physical"
+          export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache"
+          runtime="$XDG_DATA_HOME/xi-io/framework/runtime"
+          lock="$work/product.lock"
+          printf 'hosted physical release lock\n' > "$lock"
+          export XIIO_FRAMEWORK_RUNTIME="$runtime" XIIO_LOCK_SHA="$(sha256sum "$lock" | awk '{print $1}')"
+          node --input-type=module - <<'NODE'
+          import {pathToFileURL} from 'node:url';
+          import path from 'node:path';
+          const runtime=process.env.XIIO_FRAMEWORK_RUNTIME;
+          const generation='cfe2776b08e1768882f95884fd52576e48f0550c';
+          const product='product:hosted-framework-canary';
+          const consumer='consumer:hex-hosted';
+          const {produceDurableReleaseAuthority}=await import(pathToFileURL(path.join(runtime,'release-authority-producer.mjs')));
+          const result=await produceDurableReleaseAuthority({
+            release:{lifecycle:'DISTRIBUTABLE',release_ref:'release:hosted:1',product_ref:product,release_generation:generation,approved_lock_sha256:process.env.XIIO_LOCK_SHA,provider_hosts:['releases.example.com'],artifact_refs:['artifact:framework-runtime'],manifest_refs:['manifest:framework-runtime']},
+            release_qualification:{current:true,qualified:true,qualification_ref:'release-qual:hosted:1',product_ref:product,release_generation:generation,approved_lock_sha256:process.env.XIIO_LOCK_SHA},
+            adopter:{adopter_lock_ref:'adopter:hex-hosted:1',consumer_ref:consumer,product_ref:product,release_ref:'release:hosted:1',release_generation:generation,approved_lock_sha256:process.env.XIIO_LOCK_SHA},
+            currentness:{current:true,adopter_lock_ref:'adopter:hex-hosted:1',release_ref:'release:hosted:1',release_generation:generation,consumer_ref:consumer,currentness_ref:'current:hosted:1'},
+            artifact_root:runtime,artifact_generation:generation,
+            entrypoints:[{path:'release-distribution-reader.mjs',runtime:'node'}],
+            product_ref:product,observed_at:'2026-11-17T16:00:00Z'
+          });
+          if(result.state!=='DURABLE_REOPEN_VERIFIED')throw Error('FRAMEWORK_DURABLE_AUTHORITY_NOT_REOPENED');
+          NODE
+      - name: Resolve the installed export and invoke the Framework reader through HEX
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/framework-physical"
+          export XDG_CONFIG_HOME="$work/config" XDG_DATA_HOME="$work/data" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache"
+          export XIIO_FRAMEWORK_WORK="$work" XIIO_HEX_SOURCE="$GITHUB_SHA"
+          PYTHONDONTWRITEBYTECODE=1 python3 -B - <<'PY'
+          import hashlib,json,os,sys
+          from pathlib import Path
+          sys.path.insert(0,str(Path('.').resolve()))
+          sys.path.insert(0,str(Path('native/hex/adapter/kernel').resolve()))
+          from native.hex.adapter.framework_release_export import resolve_framework_release_distribution_module
+          from native.hex.adapter.framework_release_reader import build_framework_release_distribution_reader
+          work=Path(os.environ['XIIO_FRAMEWORK_WORK'])
+          generation='cfe2776b08e1768882f95884fd52576e48f0550c'
+          binding=work/'receipts/binding.json'
+          export=resolve_framework_release_distribution_module(binding,expected_framework_generation=generation)
+          reader=build_framework_release_distribution_reader(
+              framework_release_distribution_module=Path(export['release_distribution_module']))
+          result=reader(product_ref='product:hosted-framework-canary',consumer_ref='consumer:hex-hosted')
+          assert result['schema']=='xiio.release-distribution-lock/v1'
+          assert result['release_generation']==generation
+          assert result['adopter_current'] is True
+          assert result['effect_authority'] is False and result['installed'] is False
+          assert isinstance(result['entrypoint_qualification_ref'],str) and result['entrypoint_qualification_ref']
+          proof={
+              'schema':'xiio.hex.framework-physical-consumer-proof/v1',
+              'state':'INSTALLED_EXPORT_READER_REOPEN_VERIFIED',
+              'hex_source':os.environ['XIIO_HEX_SOURCE'],
+              'framework_owner_ref':generation,
+              'binding_receipt_sha256':hashlib.sha256(binding.read_bytes()).hexdigest(),
+              'release_distribution':result,
+              'effect_authority':False,'provider_effect':False,'billing_effect_authority':False,
+              'physical_target':'GITHUB_HOSTED_DISPOSABLE_LINUX',
+              'aries_or_loki':False,'return_applied':False,'restart_reopen_product_transaction':False,
+          }
+          (work/'framework-physical-proof.json').write_text(json.dumps(proof,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+          print('FRAMEWORK_PHYSICAL_RELEASE_READER_PASS')
+          PY
+      - name: Preserve the installed binding and independent reader proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-physical-chain-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/framework-physical/receipts/*.json
+            ${{ runner.temp }}/framework-physical/state/xi-io/framework/release-readback/*.json
+            ${{ runner.temp }}/framework-physical/framework-physical-proof.json
+          if-no-files-found: error
+          retention-days: 14
