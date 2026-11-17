@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -131,6 +132,22 @@ class ServiceProfileTests(unittest.TestCase):
  def test_falsey_non_list_candidates_are_not_laundered_as_empty(self):
   self.catalog['services'][0]['systemd_candidates']='';self.write_catalog()
   with self.assertRaisesRegex(ValueError,'SERVICE_CATALOG_UNITS_INVALID:alpha'):
+   service_profile.load_catalog(self.root)
+
+ def test_symlinked_catalog_directory_refuses(self):
+  linked=Path(self.tmp.name)/'linked-source';linked.mkdir()
+  (linked/'config').symlink_to(self.root/'config',target_is_directory=True)
+  with self.assertRaisesRegex(ValueError,'SERVICE_CATALOG_CONFIG_UNTRUSTED'):
+   service_profile.load_catalog(linked)
+
+ def test_hard_linked_catalog_file_refuses(self):
+  alias=self.root/'config/service-catalog-alias.json';os.link(self.catalog_path,alias)
+  with self.assertRaisesRegex(ValueError,'SERVICE_CATALOG_FILE_UNTRUSTED'):
+   service_profile.load_catalog(self.root)
+
+ def test_group_writable_catalog_file_refuses(self):
+  self.catalog_path.chmod(0o664)
+  with self.assertRaisesRegex(ValueError,'SERVICE_CATALOG_FILE_UNTRUSTED'):
    service_profile.load_catalog(self.root)
 
 
