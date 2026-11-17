@@ -1,4 +1,4 @@
-name: Temporary installer adapter source export
+name: Temporary installer adapter repair
 
 on:
   pull_request:
@@ -6,19 +6,136 @@ on:
       - '.github/workflows/export-installer-adapter-temporary.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export-source:
-    runs-on: ubuntu-latest
+  repair-source:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - name: Check out exact PR source
+      - name: Check out exact PR head
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Export exact adapter source
-        uses: actions/upload-artifact@v4
         with:
-          name: installer-adapter-exact-${{ github.event.pull_request.head.sha }}
-          path: native/hex/adapter/installer_adapter.py
-          if-no-files-found: error
-          retention-days: 1
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply exact installed-consumer repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('native/hex/adapter/installer_adapter.py')
+          s=p.read_text()
+          if 'def _commit_permission_state(base,p,action):' in s:
+              print('installer adapter already repaired')
+              raise SystemExit(0)
+          load_plan="""def load_plan(base,ident):
+              demand(isinstance(ident,str) and len(ident)==32 and all(c in '0123456789abcdef' for c in ident),'PLAN_ID_INVALID')
+              p=json.loads(file_bytes(base/'native-plans'/(ident+'.json')))
+              value=dict(p);claimed=value.pop('approval_digest',None)
+              demand(claimed==digest(canonical(value)) and p['plan_id']==ident,'PLAN_DIGEST_MISMATCH')
+              return p
+
+          """
+          helper=load_plan+"""def _commit_permission_state(base,p,action):
+              plan_id=p.get('plan_id')
+              if action=='apply':
+                  expected=p.get('permission_profile')
+                  created=permission_profile.save_grant(base,plan_id,expected,approved=True)
+                  current=permission_profile.load_grant(base,plan_id)
+                  if created!=expected or current!=expected:
+                      raise ValueError('PERMISSION_GRANT_READBACK_MISMATCH')
+                  return {'permission_state':'GRANT_READBACK_VERIFIED',
+                          'permission_digest':current['permission_digest']}
+              if action=='rollback':
+                  current=permission_profile.load_grant(base,plan_id)
+                  revoked=permission_profile.compile_profile({
+                    'schema':permission_profile.SCHEMA,'profile_id':'revoked-after-rollback',
+                    'capabilities':[],'service_scopes':[],'update_policy':'off',
+                    'central_updates':False,'remote_access':False,'revoked':True})
+                  replaced=permission_profile.replace_grant(
+                      base,plan_id,current['permission_digest'],revoked,True)
+                  reopened=permission_profile.load_grant(base,plan_id)
+                  if replaced!=revoked or reopened!=revoked:
+                      raise ValueError('PERMISSION_REVOCATION_READBACK_MISMATCH')
+                  return {'permission_state':'REVOKED_AFTER_ROLLBACK',
+                          'permission_digest':reopened['permission_digest']}
+              raise ValueError('PERMISSION_STATE_ACTION_INVALID')
+
+          """
+          if load_plan not in s: raise SystemExit('LOAD_PLAN_ANCHOR_MISSING')
+          s=s.replace(load_plan,helper,1)
+          old="'service_plan':{'action','plan_id','service_ids'}"
+          if old not in s: raise SystemExit('SERVICE_PLAN_FIELDS_ANCHOR_MISSING')
+          s=s.replace(old,"'service_plan':{'action','plan_id','service_ids','service_action'}",1)
+          old_block="""            catalog=service_profile.load_catalog(SOURCE)
+                      service_plan=service_profile.compile_service_plan(catalog,grant,req.get('service_ids'))
+                      service_plan_digest=digest(canonical(service_plan))
+                      if act=='service_plan':
+                          return {**service_plan,'service_plan_digest':service_plan_digest}
+                      demand(req.get('service_plan_digest')==service_plan_digest,'SERVICE_PLAN_CHANGED_SINCE_REVIEW')
+                      effect=service_profile.apply_service_action(service_plan,grant,'start' if act=='service_start' else 'stop',req.get('approved'))
+                      return {**effect,'service_plan_digest':service_plan_digest}
+          """
+          new_block="""            catalog=service_profile.load_catalog(SOURCE)
+                      if act=='service_plan':
+                          service_action=req.get('service_action')
+                          demand(service_action in {'start','stop'},'SERVICE_PLAN_ACTION_REQUIRED')
+                      else:
+                          service_action='start' if act=='service_start' else 'stop'
+                      service_plan=service_profile.compile_service_plan(
+                          catalog,grant,req.get('service_ids'),service_action,
+                          permission_base=base,permission_plan_id=p['plan_id'])
+                      service_plan_digest=digest(canonical(service_plan))
+                      if act=='service_plan':
+                          return {**service_plan,'service_plan_digest':service_plan_digest}
+                      demand(req.get('service_plan_digest')==service_plan_digest,'SERVICE_PLAN_CHANGED_SINCE_REVIEW')
+                      effect=service_profile.apply_service_action(
+                          service_plan,grant,service_action,req.get('approved'),
+                          catalog_source_root=SOURCE,permission_base=base)
+                      return {**effect,'service_plan_digest':service_plan_digest}
+          """
+          if old_block not in s: raise SystemExit('SERVICE_CONSUMER_ANCHOR_MISSING')
+          s=s.replace(old_block,new_block,1)
+          old_permission="""            permission_state='UNCHANGED'
+                      try:
+                          if act=='apply':
+                              permission_profile.save_grant(base,p['plan_id'],p['permission_profile'])
+                              permission_state='GRANT_READBACK_VERIFIED'
+                          else:
+                              permission_profile.save_grant(base,p['plan_id'],{
+                                'schema':permission_profile.SCHEMA,'profile_id':'revoked-after-rollback',
+                                'capabilities':[],'service_scopes':[],'update_policy':'off',
+                                'central_updates':False,'remote_access':False,'revoked':True})
+                              permission_state='REVOKED_AFTER_ROLLBACK'
+                      except Exception:
+                          permission_state='GRANT_READBACK_UNCONFIRMED'
+                      journal.finish('passed' if act=='apply' else 'rolled_back','CLI generation and independent version readback verified',expected_action=act,details={'generation':rb['generation'],'source_sha':rb['source_sha'],'approval_digest':p['approval_digest'],'destination_tree_digest':digest(canonical(tree(Path(p['prefix'])))),'connection_receipt_sha256':connection_receipt['receipt_sha256'],'permission_state':permission_state})
+                      return {**project(base,p),'readback':rb,'connection_readback':cr,'permission_state':permission_state,'connection_state':'CONFIGURATION_REQUIRED','connected':False,'observation_current':True}
+          """
+          new_permission="""            permission=_commit_permission_state(base,p,act)
+                      journal.finish('passed' if act=='apply' else 'rolled_back','CLI generation and independent version readback verified',expected_action=act,details={'generation':rb['generation'],'source_sha':rb['source_sha'],'approval_digest':p['approval_digest'],'destination_tree_digest':digest(canonical(tree(Path(p['prefix'])))),'connection_receipt_sha256':connection_receipt['receipt_sha256'],'permission_state':permission['permission_state'],'permission_digest':permission['permission_digest']})
+                      return {**project(base,p),'readback':rb,'connection_readback':cr,**permission,'connection_state':'CONFIGURATION_REQUIRED','connected':False,'observation_current':True}
+          """
+          if old_permission not in s: raise SystemExit('PERMISSION_COMMIT_ANCHOR_MISSING')
+          s=s.replace(old_permission,new_permission,1)
+          p.write_text(s)
+          PY
+          python3 -m py_compile native/hex/adapter/installer_adapter.py
+          git diff --check
+      - name: Commit repaired consumer to PR branch
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No repair commit required'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/hex/adapter/installer_adapter.py
+          git commit -m 'fix(hex): consume durable grants in installed adapter'
+          git push origin "HEAD:${HEAD_REF}"
