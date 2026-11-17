@@ -16,6 +16,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "kernel"))
 
+from xiio_installer.dependency_receipt_verification import verify_dependency_binding_receipt
+
 from child_bundle import (
     BundleError,
     _safe_url,
@@ -173,7 +175,9 @@ class BundleTests(unittest.TestCase):
         lock,digest=f.lock(fixture=False);result=install_bundle(lock,approved_lock_sha256=digest,env=f.env,fetch=f.fetch)
         row=result["dependency_binding_receipts"]["node"];receipt=json.loads(Path(row["path"]).read_text())
         self.assertEqual(receipt["schema"],"xiio.installer-dependency-binding-receipt/v1");self.assertEqual(receipt["dependency_id"],"node")
-        self.assertEqual(receipt["accepted_generation"],generation);self.assertEqual(receipt["fields"]["accepted_generation"],generation);self.assertTrue(Path(receipt["fields"]["release_receipt_path"]).is_file());self.assertTrue(Path(receipt["fields"]["module"]).is_file());self.assertFalse(receipt["effect_authority"])
+        self.assertEqual(receipt["state"],"BOUND");self.assertEqual(receipt["accepted_generation"],generation);self.assertEqual(set(receipt["fields"]),set(receipt["runtime_exports"]));self.assertTrue(Path(receipt["release_receipt_path"]).is_file());self.assertTrue(Path(receipt["fields"]["module"]).is_file());self.assertEqual(Path(receipt["binding_receipt_path"]).resolve(),Path(row["path"]).resolve());self.assertFalse(receipt["effect_authority"])
+        verified=verify_dependency_binding_receipt(Path(row["path"]),expected_dependency_id="node",expected_owner_repo="owner/node",expected_generation=generation)
+        self.assertEqual(verified["state"],"VERIFIED");self.assertTrue(verified["custody_verified"])
 
     def test_release_hosts_reject_wildcards_private_local_and_malformed(self):
         f = self.fixture()
