@@ -97,6 +97,23 @@ class InstalledServiceConsumerTests(unittest.TestCase):
    catalog_source_root=installer_adapter.SOURCE,permission_base=self.base)
   self.assertEqual(result['service_plan_digest'],plan_digest)
 
+ def test_service_stop_consumes_reviewed_action_catalog_and_grant_root(self):
+  compiled={'schema':'xiio.hex.user-service-admin/v1','action':'stop',
+            'permission_plan_id':self.plan_id,'permission_grant_ref':'sha256:'+'d'*64}
+  plan_digest=installer_adapter.digest(installer_adapter.canonical(compiled))
+  effect={'schema':'xiio.hex.user-service-effect/v1','state':'READBACK_VERIFIED'}
+  result,entered=self.run_with(
+   {'action':'service_stop','plan_id':self.plan_id,'service_ids':['ollama'],
+    'service_plan_digest':plan_digest,'approved':True},compiled,effect)
+  compile_mock=entered[-2];apply_mock=entered[-1]
+  compile_mock.assert_called_once_with(
+   self.catalog,self.grant,['ollama'],'stop',
+   permission_base=self.base,permission_plan_id=self.plan_id)
+  apply_mock.assert_called_once_with(
+   compiled,self.grant,'stop',True,
+   catalog_source_root=installer_adapter.SOURCE,permission_base=self.base)
+  self.assertEqual(result['service_plan_digest'],plan_digest)
+
  def test_service_start_refuses_digest_from_other_reviewed_action(self):
   compiled={'schema':'xiio.hex.user-service-admin/v1','action':'start'}
   stop={'schema':'xiio.hex.user-service-admin/v1','action':'stop'}
