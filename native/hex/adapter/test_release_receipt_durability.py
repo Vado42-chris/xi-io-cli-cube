@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import sys
@@ -24,6 +25,10 @@ class ReleaseReceiptDurabilityTests(unittest.TestCase):
             "consumer_ref": "consumer:hex",
             "release_generation": "generation-demo",
         }
+
+    def temp_name(self, name, receipt):
+        encoded = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()
+        return "." + name + "." + hashlib.sha256(encoded).hexdigest()[:16] + ".tmp"
 
     def test_hard_linked_receipt_is_untrusted(self):
         with tempfile.TemporaryDirectory() as td:
@@ -64,6 +69,53 @@ class ReleaseReceiptDurabilityTests(unittest.TestCase):
                 )
             finally:
                 os.close(state_fd)
+
+    def test_private_stale_temp_is_replaced_on_retry(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            name = "receipt.json"
+            temp = root / self.temp_name(name, self.receipt())
+            temp.write_bytes(b"partial prior write")
+            temp.chmod(0o600)
+            state_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                result = _persist_release_receipt(
+                    state_fd,
+                    root,
+                    name,
+                    self.receipt(),
+                )
+            finally:
+                os.close(state_fd)
+            self.assertEqual(Path(result), root / name)
+            self.assertFalse(temp.exists())
+            self.assertEqual(
+                json.loads((root / name).read_text(encoding="utf-8")),
+                self.receipt(),
+            )
+
+    def test_untrusted_stale_temp_refuses_without_final_receipt(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            name = "receipt.json"
+            temp = root / self.temp_name(name, self.receipt())
+            temp.write_bytes(b"untrusted prior write")
+            temp.chmod(0o644)
+            state_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with self.assertRaisesRegex(
+                    BundleError, "BUNDLE_RELEASE_INSTALL_RECEIPT_TEMP_UNTRUSTED"
+                ):
+                    _persist_release_receipt(
+                        state_fd,
+                        root,
+                        name,
+                        self.receipt(),
+                    )
+            finally:
+                os.close(state_fd)
+            self.assertTrue(temp.exists())
+            self.assertFalse((root / name).exists())
 
 
 if __name__ == "__main__":
