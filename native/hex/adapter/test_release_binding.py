@@ -68,6 +68,22 @@ class ReleaseBindingTests(unittest.TestCase):
    self.assertEqual(reads,[{"product_ref":"product-demo","consumer_ref":"consumer:hex"}])
    self.assertEqual(install.call_args.kwargs["allowed_hosts"],frozenset({"releases.example.test"}))
 
+ def test_symlinked_release_state_root_refuses_before_bundle_install(self):
+  td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
+  binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
+   "product_ref":"product-demo","consumer_ref":"consumer:hex","release_generation":"g1",
+   "approved_lock_sha256":r["approved_lock_sha256"],"manifest_ref":"manifest:demo:g1",
+   "provider_hosts":["releases.example.test"],"lifecycle":"DISTRIBUTABLE",
+   "adopter_current":True,"entrypoint_qualification_ref":"entrypoint:proof:g1","effect_authority":False,"installed":False}
+  state=lock.parent/"state";outside=lock.parent/"outside";outside.mkdir()
+  parent=state/"xi-io"/"installer";parent.mkdir(parents=True);(parent/"release-distributions").symlink_to(outside,target_is_directory=True)
+  env={"XDG_STATE_HOME":str(state),"XDG_DATA_HOME":str(lock.parent/"data"),"XDG_CONFIG_HOME":str(lock.parent/"config"),"XDG_CACHE_HOME":str(lock.parent/"cache")}
+  with patch('native.hex.adapter.release_binding.install_bundle') as install:
+   with self.assertRaisesRegex(BundleError,"BUNDLE_STATE_ROOT_UNTRUSTED|BUNDLE_RELEASE_STATE_ROOT_UNTRUSTED"):
+    install_from_distribution_reader(lock,product_ref="product-demo",consumer_ref="consumer:hex",read_release_distribution=lambda **_:binding,env=env)
+   install.assert_not_called()
+  self.assertEqual(list(outside.iterdir()),[])
+
  def test_existing_release_receipt_requires_private_regular_file_custody(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
   binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
