@@ -344,6 +344,39 @@ def _secure_ensure_state_root(state_root: Path) -> int:
 
 
 
+
+def _atomic_private_json(path: Path, value: dict) -> None:
+    _require(not path.is_symlink(), "BUNDLE_RELEASE_RECEIPT_SYMLINK_FORBIDDEN")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix="."+path.name+".", suffix=".tmp", dir=path.parent)
+    os.close(fd); p=Path(tmp)
+    try:
+        p.write_text(json.dumps(value, indent=2, sort_keys=True)+"\n", encoding="utf-8")
+        os.chmod(p, 0o600); os.replace(p, path)
+    finally:
+        if p.exists(): p.unlink()
+
+def _release_distribution_receipt(manifest, transaction_receipt: Path, output: Path) -> dict | None:
+    generation=str(manifest.raw.get("accepted_generation") or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", generation):
+        return None
+    tx=json.loads(transaction_receipt.read_text(encoding="utf-8"))
+    _require(tx.get("schema_version")=="xiio-installer-receipt-v1"
+             and tx.get("product_id")==manifest.product_id
+             and len(tx.get("entries") or [])==len(manifest.entries),
+             "BUNDLE_RELEASE_TRANSACTION_RECEIPT_INVALID")
+    value={"schema":"xiio.installer.release-distribution-install-receipt/v1",
+           "product_ref":manifest.product_id,"release_generation":generation,
+           "bundle_state":"INSTALLED_BYTES_VERIFIED","readback_verified":True,
+           "transaction_receipt":transaction_receipt.name,
+           "effect_authority":False,"provider_effect":False}
+    _atomic_private_json(output,value)
+    reread=json.loads(output.read_text(encoding="utf-8"))
+    _require(reread==value and (output.stat().st_mode & 0o777)==0o600,
+             "BUNDLE_RELEASE_RECEIPT_READBACK_FAILED")
+    return value
+
+
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
                    env: dict[str, str] | None = None,
                    allowed_hosts: frozenset[str] | None = None,
@@ -453,6 +486,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             except (TransactionError, OSError) as exc:
                 raise BundleError("BUNDLE_FILESYSTEM_CHANGED_BEFORE_APPLY") from exc
             applied = []
+            release_receipts = {}
             try:
                 for role in profile["ordered_roles"]:
                     manifest = profile["products"][role][0]
@@ -461,6 +495,9 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                              "BUNDLE_RECEIPT_ALREADY_EXISTS")
                     apply_install(manifest, staged[role], receipt, env)
                     applied.append(receipt)
+                    release_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".release.json")
+                    release_value=_release_distribution_receipt(manifest,receipt,release_path)
+                    if release_value is not None: release_receipts[role]={"path":str(release_path),"receipt":release_value}
                     if fail_after_product is not None and len(applied) == fail_after_product:
                         raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
             except Exception as cause:
@@ -481,6 +518,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 "lock_sha256": approved_lock_sha256,
                 "roles": list(profile["ordered_roles"]),
                 "receipt_count": len(applied),
+                "release_distribution_receipts": release_receipts,
                 "filesystem_precommand_state": filesystem["state"],
                 "runtime_qualified": False, "authority_granted": False,
                 "device_connected": False, "child_services_started": False
