@@ -105,14 +105,32 @@ def _prepare_loaded_server_package(pkg,home,permissions):
 def prepare_server_package(package_root,home,permissions):
  return _prepare_loaded_server_package(load_server_package(package_root),home,permissions)
 
+class _NoProbeRedirect(urllib.request.HTTPRedirectHandler):
+ def redirect_request(self,req,fp,code,msg,headers,newurl):
+  return None
+
 def _probe(url):
  if url is None:return {'state':'NO_PROBE_DECLARED'}
  try:
-  with urllib.request.urlopen(url,timeout=3) as r:
+  parsed=urllib.parse.urlparse(url)
+  if parsed.scheme not in ('http','https') or parsed.hostname not in LOOPBACK or parsed.username or parsed.password or parsed.fragment:
+   return {'state':'PROBE_NOT_LOOPBACK'}
+  # Health qualification is local-only. Disable ambient proxies and redirects so
+  # a loopback service cannot turn its probe into external network access.
+  opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),_NoProbeRedirect())
+  with opener.open(url,timeout=3) as r:
+   final=urllib.parse.urlparse(r.geturl())
+   if final.scheme not in ('http','https') or final.hostname not in LOOPBACK or final.username or final.password or final.fragment:
+    return {'state':'PROBE_REDIRECT_FORBIDDEN','status':getattr(r,'status',None)}
+   status=getattr(r,'status',None)
+   if not isinstance(status,int) or status<200 or status>=300:
+    return {'state':'HTTP_FAIL','status':status}
    body=r.read(4097)
-   if len(body)>4096:return {'state':'PROBE_RESPONSE_TOO_LARGE','status':r.status}
-   return {'state':'PASS','status':r.status}
- except urllib.error.HTTPError as e:return {'state':'HTTP_FAIL','status':e.code}
+   if len(body)>4096:return {'state':'PROBE_RESPONSE_TOO_LARGE','status':status}
+   return {'state':'PASS','status':status}
+ except urllib.error.HTTPError as e:
+  if 300<=e.code<400:return {'state':'PROBE_REDIRECT_FORBIDDEN','status':e.code}
+  return {'state':'HTTP_FAIL','status':e.code}
  except Exception:return {'state':'UNREACHABLE'}
 
 def _reviewed_services(reviewed_plan,permissions):
