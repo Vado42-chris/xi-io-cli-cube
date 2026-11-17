@@ -17,6 +17,7 @@ import service_profile
 
 SCHEMA='xiio.hex.server-package/v1'
 PLAN_SCHEMA='xiio.hex.server-package-plan/v1'
+INSTALLER_RECEIPT_SCHEMA='xiio-installer-receipt-v1'
 UNIT=re.compile(r'^[A-Za-z0-9_.@:-]+\.service$')
 LOOPBACK={'127.0.0.1','localhost','::1','[::1]'}
 
@@ -35,6 +36,10 @@ def _roots(home):
          'XDG_DATA_HOME':str(h/'.local/share'),
          'XDG_STATE_HOME':str(h/'.local/state'),
          'XDG_CACHE_HOME':str(h/'.cache')}
+
+def _manifest_identity(manifest):
+ return {'product_id':manifest.product_id,'profile_id':manifest.profile_id,
+         'version':manifest.version,'channel':manifest.channel,'fixture':manifest.fixture}
 
 def load_server_package(root):
  root=Path(root)
@@ -75,7 +80,7 @@ def load_server_package(root):
          'package_sha256':sha(descriptor_bytes),'root':root}
 
 def _prepare_loaded_server_package(pkg,home,permissions):
- doc=pkg['document']
+ doc=pkg['document'];manifest=pkg['manifest']
  service_ids=[x['service_id'] for x in doc['services']]
  for sid in service_ids:
   permission_profile.require_capability(permissions,'configure_services',sid)
@@ -83,11 +88,12 @@ def _prepare_loaded_server_package(pkg,home,permissions):
   # A service must never be started unless the same reviewed ceiling can stop it.
   permission_profile.require_capability(permissions,'stop_services',sid)
  roots=_roots(home)
- plan=[x.__dict__ for x in plan_install(pkg['manifest'],pkg['root'],roots)]
+ plan=[x.__dict__ for x in plan_install(manifest,pkg['root'],roots)]
  return {
   'schema':PLAN_SCHEMA,
   'package_id':doc['package_id'],'version':doc['version'],'source_ref':doc.get('source_ref'),
   'package_sha256':pkg['package_sha256'],'permission_digest':permissions['permission_digest'],
+  'installer_identity':_manifest_identity(manifest),
   'services':doc['services'],'file_plan':plan,
   'payload_files':len(plan),'effect_authorized':False,
   'first_red':None,
@@ -126,6 +132,32 @@ def _reviewed_services(reviewed_plan,permissions):
   seen.add(row['service_id']);seen_units.add(row['unit'])
  return services
 
+def _bound_installer_receipt(reviewed_plan,receipt_path):
+ path=Path(receipt_path)
+ if (not path.is_absolute() or path.is_symlink() or not path.is_file()
+     or path.stat().st_nlink!=1 or (path.stat().st_mode & 0o777)!=0o600
+     or path.stat().st_uid!=os.getuid()):
+  raise ValueError('SERVER_ROLLBACK_RECEIPT_UNTRUSTED')
+ try: receipt=json.loads(path.read_bytes())
+ except (OSError,ValueError,UnicodeError) as exc: raise ValueError('SERVER_ROLLBACK_RECEIPT_INVALID') from exc
+ if receipt.get('schema_version')!=INSTALLER_RECEIPT_SCHEMA or receipt.get('absolute_paths_redacted') is not True:
+  raise ValueError('SERVER_ROLLBACK_RECEIPT_INVALID')
+ identity=reviewed_plan.get('installer_identity')
+ if not isinstance(identity,dict) or set(identity)!={'product_id','profile_id','version','channel','fixture'}:
+  raise ValueError('SERVER_ROLLBACK_PLAN_INSTALLER_IDENTITY_INVALID')
+ for key in identity:
+  if receipt.get(key)!=identity[key]: raise ValueError('SERVER_ROLLBACK_RECEIPT_IDENTITY_MISMATCH:'+key)
+ expected=reviewed_plan.get('file_plan');observed=receipt.get('entries')
+ if not isinstance(expected,list) or not isinstance(observed,list) or len(expected)!=len(observed):
+  raise ValueError('SERVER_ROLLBACK_RECEIPT_PLAN_MISMATCH')
+ for plan_item,receipt_item in zip(expected,observed):
+  if not isinstance(plan_item,dict) or not isinstance(receipt_item,dict):
+   raise ValueError('SERVER_ROLLBACK_RECEIPT_PLAN_MISMATCH')
+  for key,value in plan_item.items():
+   if receipt_item.get(key)!=value:
+    raise ValueError('SERVER_ROLLBACK_RECEIPT_PLAN_MISMATCH:'+str(key))
+ return receipt
+
 def _stop_services(rows,permissions):
  results=[];failures=[]
  for row in reversed(rows):
@@ -144,7 +176,9 @@ def _stop_services(rows,permissions):
   raise ValueError('SERVER_SERVICE_STOP_OR_READBACK_FAILED:'+','.join(x[0] for x in failures)) from failures[0][1]
  return results
 
-def _rollback_with_readback(home,permissions,services,receipt_path):
+def _rollback_with_readback(home,permissions,reviewed_plan,services,receipt_path):
+ # Receipt identity and exact file plan are verified before any service or file effect.
+ _bound_installer_receipt(reviewed_plan,receipt_path)
  stopped=_stop_services(services,permissions)
  rollback(Path(receipt_path),_roots(home))
  r=service_profile._run(['systemctl','--user','daemon-reload'])
@@ -166,6 +200,7 @@ def apply_server_package(package_root,home,permissions,reviewed_plan,receipt_pat
  apply_install(pkg['manifest'],pkg['root'],Path(receipt_path),_roots(home))
  started=[]
  try:
+  _bound_installer_receipt(live,receipt_path)
   r=service_profile._run(['systemctl','--user','daemon-reload'])
   if r.returncode!=0: raise ValueError('SYSTEMD_USER_DAEMON_RELOAD_FAILED')
   for row in services:
@@ -185,11 +220,12 @@ def apply_server_package(package_root,home,permissions,reviewed_plan,receipt_pat
     raise ValueError('SERVER_SERVICE_PROBE_FAILED:'+sid)
   return {'schema':'xiio.hex.server-package-effect/v1','state':'INSTALLED_STARTED_READBACK_VERIFIED',
           'package_id':live['package_id'],'package_sha256':live['package_sha256'],
+          'installer_identity':live['installer_identity'],
           'permission_digest':permissions['permission_digest'],'services':started,
           'installer_receipt':str(receipt_path),'effect_authorized':True}
  except Exception:
   try:
-   _rollback_with_readback(home,permissions,started,receipt_path)
+   _rollback_with_readback(home,permissions,live,started,receipt_path)
   except Exception as rb:
    raise ValueError('SERVER_PACKAGE_APPLY_FAILED_ROLLBACK_UNCERTAIN') from rb
   raise
@@ -198,9 +234,9 @@ def rollback_server_package(home,permissions,reviewed_plan,receipt_path,approved
  if approved is not True: raise ValueError('EXPLICIT_SERVER_ROLLBACK_APPROVAL_REQUIRED')
  services=_reviewed_services(reviewed_plan,permissions)
  try:
-  stopped=_rollback_with_readback(home,permissions,services,receipt_path)
+  stopped=_rollback_with_readback(home,permissions,reviewed_plan,services,receipt_path)
  except Exception as exc:
   raise ValueError('SERVER_PACKAGE_ROLLBACK_FAILED_OR_UNVERIFIED') from exc
  return {'schema':'xiio.hex.server-package-effect/v1','state':'ROLLED_BACK_READBACK_VERIFIED',
-         'package_id':reviewed_plan.get('package_id'),'permission_digest':permissions['permission_digest'],
-         'services':stopped,'effect_authorized':True}
+         'package_id':reviewed_plan.get('package_id'),'installer_identity':reviewed_plan.get('installer_identity'),
+         'permission_digest':permissions['permission_digest'],'services':stopped,'effect_authorized':True}
