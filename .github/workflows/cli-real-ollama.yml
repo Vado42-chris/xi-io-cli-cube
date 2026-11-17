@@ -63,6 +63,12 @@ jobs:
           ollama pull qwen2.5:1.5b
           kill -0 "$ollama_pid"
           ollama list
+
+      - name: Capture exact Ollama model identity
+        run: |
+          set -euo pipefail
+          ollama_pid="$(cat "$RUNNER_TEMP/ollama.pid")"
+          kill -0 "$ollama_pid"
           python3 -B native/hex/cli-source/capture_ollama_model_identity.py capture \
             --model qwen2.5:1.5b \
             --output "$RUNNER_TEMP/ollama-model-identity.json"
