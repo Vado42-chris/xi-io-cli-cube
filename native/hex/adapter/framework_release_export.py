@@ -8,10 +8,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .kernel.xiio_installer.dependency_receipt_verification import (
-    verify_dependency_binding_receipt,
-    DependencyReceiptVerificationError,
-)
+try:
+    from .kernel.xiio_installer.dependency_receipt_verification import (
+        verify_dependency_binding_receipt,
+        DependencyReceiptVerificationError,
+    )
+except ImportError:
+    from xiio_installer.dependency_receipt_verification import (
+        verify_dependency_binding_receipt,
+        DependencyReceiptVerificationError,
+    )
 
 FRAMEWORK_DEPENDENCY_ID = "framework-runtime"
 FRAMEWORK_OWNER_REPO = "Vado42-chris/xi-io.net"
