@@ -128,5 +128,10 @@ class ServiceProfileTests(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'SERVICE_CATALOG_UNIT_IDENTITY_DUPLICATE:alpha.service'):
    service_profile.load_catalog(self.root)
 
+ def test_falsey_non_list_candidates_are_not_laundered_as_empty(self):
+  self.catalog['services'][0]['systemd_candidates']='';self.write_catalog()
+  with self.assertRaisesRegex(ValueError,'SERVICE_CATALOG_UNITS_INVALID:alpha'):
+   service_profile.load_catalog(self.root)
+
 
 if __name__=='__main__':unittest.main()
