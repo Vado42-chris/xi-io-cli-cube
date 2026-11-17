@@ -11,6 +11,7 @@ test('authority and installed-consumer regressions stay in the hosted denominato
   'native.hex.adapter.test_permission_profile',
   'native.hex.adapter.test_service_profile',
   'native.hex.adapter.test_installer_service_consumer',
+  'native.hex.adapter.test_installer_hotpatch_consumer',
  ]) assert.ok(sourceCommand.includes(module),`UNEXECUTED_CONSUMER_REGRESSION:${module}`);
 });
 
