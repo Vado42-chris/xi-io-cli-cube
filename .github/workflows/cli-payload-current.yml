@@ -23,6 +23,10 @@ jobs:
           node-version: '24.22.1'
       - name: Verify qualification entry and denominator
         run: node --test tests/cli-payload-qualification.test.mjs
+      - name: Install PTY qualification dependency
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-pexpect
       - name: Qualify receiving CLI package
         shell: bash
         run: |
