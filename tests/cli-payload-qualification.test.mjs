@@ -112,6 +112,9 @@ test('receiving qualification follows the existing process owners and delivery b
   /not downstream adoption or RETURN\/APPLY_RETURN/,
   /Retirement-eligible is not deleted/,
   /creates no admission/,
+  /same generated launcher and disposable installation/,
+  /saved chat and original receipt in fresh processes after restart and rollback/,
+  /Source-only inference and separate installer smokes do not qualify/,
  ])assert.match(entry.replace(/\s+/g,' '),obligation);
 });
 
@@ -119,6 +122,7 @@ test('workflow triggers include receiving sources, controls and onboarding',()=>
  const patterns=triggerPatterns();
  for(const filename of [
   'AGENTS.md','.github/workflows/cli-payload-current.yml','tests/cli-payload-qualification.test.mjs',
+  '.github/workflows/cli-real-ollama.yml',
   'native/hex/cli-source/install.mjs','native/hex/cli-source/packaged-source.json',
   'native/hex/cli-source/test_future_delivery.py','native/hex/test_future_discovery.py',
   'native/hex/download-install-cli.py','native/hex/compose-cli-packaged-source.py',
