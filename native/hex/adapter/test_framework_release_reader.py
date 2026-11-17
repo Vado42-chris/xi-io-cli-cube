@@ -58,6 +58,16 @@ class FrameworkReleaseReaderTests(unittest.TestCase):
             with self.assertRaisesRegex(BundleError,"BUNDLE_FRAMEWORK_RELEASE_COMPILATION_REFUSED"):
                 reader(product_ref="product:alpha",consumer_ref="consumer:hex")
 
+    def test_entrypoint_reader_is_mandatory(self):
+        with tempfile.TemporaryDirectory() as td:
+            module=Path(td)/"release-distribution-lock.mjs"; module.write_text(MODULE)
+            with self.assertRaisesRegex(BundleError,"BUNDLE_ENTRYPOINT_QUALIFICATION_READER_UNBOUND"):
+                build_framework_release_distribution_reader(
+                    framework_release_distribution_module=module,
+                    read_accepted_release=lambda **_: {},
+                    read_current_adopter=lambda **_: {},
+                    read_entrypoint_qualification=None)
+
     def test_module_must_be_absolute_regular_nonsymlink(self):
         with self.assertRaisesRegex(BundleError,"PATH_REQUIRED"):
             build_framework_release_distribution_reader(
