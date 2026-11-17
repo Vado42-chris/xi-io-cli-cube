@@ -11,6 +11,9 @@ const serverProfile=readFileSync(new URL('native/hex/adapter/server_profile.py',
 const protocol=readFileSync(new URL('native/hex/carrier/src-tauri/src/protocol.rs',root),'utf8');
 const installerWorkflow=readFileSync(new URL('.github/workflows/installer-contract.yml',root),'utf8');
 const installerCurrentness=readFileSync(new URL('native/hex/adapter/kernel/test_installer_34_currentness.py',root),'utf8');
+const ollamaWorkflow=readFileSync(new URL('.github/workflows/cli-real-ollama.yml',root),'utf8');
+const ollamaEvidenceVerifier=readFileSync(new URL('native/hex/cli-source/verify_installed_evidence_custody.py',root),'utf8');
+const ollamaEvidenceTests=readFileSync(new URL('native/hex/cli-source/test_installed_evidence_custody.py',root),'utf8');
 const frameworkFixture=JSON.parse(readFileSync(new URL('native/hex/fixtures/framework-runtime-cfe2776/SOURCE.json',root),'utf8'));
 
 test('authority and installed-consumer regressions stay in the hosted denominator',()=>{
@@ -43,6 +46,28 @@ test('accepted Installer currentness controls stay executable under unittest',()
  ]) assert.ok(installerCurrentness.includes(token),`INSTALLER_CURRENTNESS_CONTROL_MISSING:${token}`);
  assert.match(installerCurrentness,/if __name__==["']__main__["']:\s*\n\s*unittest\.main\(\)/,
   'INSTALLER_CURRENTNESS_DIRECT_ENTRY_MISSING');
+});
+
+test('installed Ollama evidence custody stays in the executed proof denominator',()=>{
+ for(const token of [
+  'python3 -B native/hex/cli-source/test_installed_evidence_custody.py',
+  'python3 -B native/hex/cli-source/verify_installed_evidence_custody.py --root "$work"',
+  '${{ runner.temp }}/xiio-real-ollama/prefix/current',
+  '${{ runner.temp }}/xiio-real-ollama/prefix/previous',
+ ]) assert.ok(ollamaWorkflow.includes(token),`OLLAMA_EVIDENCE_CUSTODY_JOIN_MISSING:${token}`);
+ for(const token of [
+  'exact_mode=0o755','exact_mode=0o600',
+  'EVIDENCE_FILE_WRITABLE_BY_OTHERS','EVIDENCE_CLAIM_CEILING_VIOLATED',
+  'INSTALLED_OLLAMA_EVIDENCE_CUSTODY_VERIFIED','return_applied',
+ ]) assert.ok(ollamaEvidenceVerifier.includes(token),`OLLAMA_EVIDENCE_CUSTODY_CONTROL_MISSING:${token}`);
+ for(const token of [
+  'test_world_writable_or_wrong_mode_launcher_refuses',
+  'test_permissive_install_receipt_refuses',
+  'test_permissive_pointer_or_chat_session_refuses',
+  'test_hard_linked_launcher_refuses',
+  'test_permissive_payload_or_config_refuses',
+  'test_promoted_authority_or_collapsed_generations_refuses',
+ ]) assert.ok(ollamaEvidenceTests.includes(token),`OLLAMA_EVIDENCE_HOSTILE_CONTROL_MISSING:${token}`);
 });
 
 test('temporary repair workflows cannot remain in the product tree',()=>{
