@@ -158,23 +158,53 @@ def _bound_installer_receipt(reviewed_plan,receipt_path):
     raise ValueError('SERVER_ROLLBACK_RECEIPT_PLAN_MISMATCH:'+str(key))
  return receipt
 
+def _restore_stop_attempts(attempts,permissions):
+ failures=[];restored=[]
+ for row in reversed(attempts):
+  sid=row['service_id'];unit=row['unit'];before=row['before']
+  try:
+   current=service_profile.observe_user_unit(unit)
+   wanted=before.get('active_state')
+   if wanted=='active' and current.get('active_state')!='active':
+    permission_profile.require_capability(permissions,'start_services',sid)
+    r=service_profile._run(['systemctl','--user','start',unit])
+    if r.returncode!=0: raise ValueError('SERVER_SERVICE_STOP_COMPENSATION_START_FAILED:'+sid)
+    current=service_profile.observe_user_unit(unit)
+   elif wanted=='inactive' and current.get('active_state')!='inactive':
+    permission_profile.require_capability(permissions,'stop_services',sid)
+    r=service_profile._run(['systemctl','--user','stop',unit])
+    if r.returncode!=0: raise ValueError('SERVER_SERVICE_STOP_COMPENSATION_STOP_FAILED:'+sid)
+    current=service_profile.observe_user_unit(unit)
+   if current.get('active_state')!=wanted:
+    raise ValueError('SERVER_SERVICE_STOP_COMPENSATION_READBACK_FAILED:'+sid)
+   row['compensation']={'state':'RESTORED','after':current};restored.append(row)
+  except Exception as exc:
+   failures.append((sid,exc))
+ if failures:
+  raise ValueError('SERVER_SERVICE_STOP_COMPENSATION_UNCERTAIN:'+','.join(x[0] for x in failures)) from failures[0][1]
+ return restored
+
 def _stop_services(rows,permissions):
- results=[];failures=[]
+ attempts=[];failures=[]
  for row in reversed(rows):
   sid=row.get('service_id');unit=row.get('unit')
   try:
    permission_profile.require_capability(permissions,'stop_services',sid)
    before=service_profile.observe_user_unit(unit)
-   r=service_profile._run(['systemctl','--user','stop',unit])
+   attempt={'service_id':sid,'unit':unit,'before':before,'after':None,'stop_returncode':None}
+   attempts.append(attempt)
+   r=service_profile._run(['systemctl','--user','stop',unit]);attempt['stop_returncode']=r.returncode
+   after=service_profile.observe_user_unit(unit);attempt['after']=after
    if r.returncode!=0: raise ValueError('SERVER_SERVICE_STOP_FAILED:'+sid)
-   after=service_profile.observe_user_unit(unit)
    if after['active_state']!='inactive': raise ValueError('SERVER_SERVICE_STOP_READBACK_FAILED:'+sid)
-   results.append({'service_id':sid,'unit':unit,'before':before,'after':after})
   except Exception as exc:
    failures.append((str(sid),exc))
  if failures:
+  try:_restore_stop_attempts(attempts,permissions)
+  except Exception as compensation:
+   raise ValueError('SERVER_SERVICE_STOP_PARTIAL_EFFECT_UNCERTAIN') from compensation
   raise ValueError('SERVER_SERVICE_STOP_OR_READBACK_FAILED:'+','.join(x[0] for x in failures)) from failures[0][1]
- return results
+ return attempts
 
 def _rollback_with_readback(home,permissions,reviewed_plan,services,receipt_path):
  # Receipt identity and exact file plan are verified before any service or file effect.
