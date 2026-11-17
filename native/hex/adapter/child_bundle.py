@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from xiio_installer.discovery import xdg_roots
+from xiio_installer.dependency_binding import compile_dependency_binding_receipt
 from xiio_installer.manifest import load_manifest, sha256_file, verify_payload
 from xiio_installer.transaction import (TransactionError, apply_install, plan_install,
     qualify_precommand_install_plans, qualify_precommand_manifests, rollback)
@@ -487,6 +488,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 raise BundleError("BUNDLE_FILESYSTEM_CHANGED_BEFORE_APPLY") from exc
             applied = []
             release_receipts = {}
+            dependency_binding_receipts = {}
             try:
                 for role in profile["ordered_roles"]:
                     manifest = profile["products"][role][0]
@@ -498,6 +500,12 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                     release_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".release.json")
                     release_value=_release_distribution_receipt(manifest,receipt,release_path)
                     if release_value is not None: release_receipts[role]={"path":str(release_path),"receipt":release_value}
+                    if manifest.raw.get("runtime_exports"):
+                        tx=json.loads(receipt.read_text(encoding="utf-8"))
+                        binding=compile_dependency_binding_receipt(manifest,tx,env)
+                        binding_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".binding.json")
+                        _atomic_private_json(binding_path,binding)
+                        dependency_binding_receipts[role]={"path":str(binding_path),"receipt":binding}
                     if fail_after_product is not None and len(applied) == fail_after_product:
                         raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
             except Exception as cause:
@@ -519,6 +527,7 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 "roles": list(profile["ordered_roles"]),
                 "receipt_count": len(applied),
                 "release_distribution_receipts": release_receipts,
+                "dependency_binding_receipts": dependency_binding_receipts,
                 "filesystem_precommand_state": filesystem["state"],
                 "runtime_qualified": False, "authority_granted": False,
                 "device_connected": False, "child_services_started": False
