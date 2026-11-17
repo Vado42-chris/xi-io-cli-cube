@@ -27,21 +27,58 @@ pub enum InstallerRequest {
     #[serde(rename = "central_update_decision")]
     CentralUpdateDecision { plan_id: String, request: Value },
     #[serde(rename = "service_plan")]
-    ServicePlan { plan_id: String, service_ids: Vec<String> },
+    ServicePlan { plan_id: String, service_ids: Vec<String>, service_action: String },
     #[serde(rename = "service_start")]
     ServiceStart { plan_id: String, service_ids: Vec<String>, service_plan_digest: String, approved: bool },
     #[serde(rename = "service_stop")]
     ServiceStop { plan_id: String, service_ids: Vec<String>, service_plan_digest: String, approved: bool },
     #[serde(rename = "server_prepare")]
-    ServerPrepare { plan_id: String, package_root: String },
+    ServerPrepare {
+        plan_id: String,
+        package_root: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framework_binding_receipt: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framework_generation: Option<String>,
+    },
     #[serde(rename = "server_apply")]
-    ServerApply { plan_id: String, package_root: String, server_plan: Value, server_plan_digest: String, approved: bool },
+    ServerApply {
+        plan_id: String,
+        package_root: String,
+        server_plan: Value,
+        server_plan_digest: String,
+        approved: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framework_binding_receipt: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framework_generation: Option<String>,
+    },
     #[serde(rename = "server_rollback")]
     ServerRollback { plan_id: String, server_plan: Value, server_plan_digest: String, approved: bool },
     #[serde(rename = "hotpatch_prepare")]
-    HotpatchPrepare { plan_id: String, request: Value, package_root: String },
+    HotpatchPrepare {
+        plan_id: String,
+        request: Value,
+        package_root: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framework_binding_receipt: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framework_generation: Option<String>,
+    },
     #[serde(rename = "hotpatch_apply")]
-    HotpatchApply { plan_id: String, request: Value, package_root: String, server_plan: Value, server_plan_digest: String, authorization: Value, approved: bool },
+    HotpatchApply {
+        plan_id: String,
+        request: Value,
+        package_root: String,
+        server_plan: Value,
+        server_plan_digest: String,
+        authorization: Value,
+        approved: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framework_binding_receipt: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        framework_generation: Option<String>,
+    },
 }
 fn id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
@@ -59,6 +96,13 @@ fn absolute(s: &str) -> bool {
     !s.contains('\0') && s.len() <= 4096 && Path::new(s).is_absolute()
         && !Path::new(s).components().any(|c| matches!(c, Component::ParentDir | Component::CurDir))
         && Path::new(s).parent().is_some()
+}
+fn framework_binding(receipt:&Option<String>,generation:&Option<String>)->bool {
+    match (receipt,generation) {
+        (None,None)=>true,
+        (Some(path),Some(value))=>absolute(path)&&(lower_hex(value,40)||lower_hex(value,64)),
+        _=>false,
+    }
 }
 impl InstallerRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -83,24 +127,32 @@ impl InstallerRequest {
                 *approved && id(plan_id) && lower_hex(current_digest,64) && bounded_object(new_profile,16*1024),
             Self::CentralUpdateDecision { plan_id, request } =>
                 id(plan_id) && bounded_object(request,16*1024),
-            Self::ServicePlan { plan_id, service_ids: ids } =>
-                id(plan_id) && service_ids(ids),
+            Self::ServicePlan { plan_id, service_ids: ids, service_action } =>
+                id(plan_id) && service_ids(ids) && matches!(service_action.as_str(),"start"|"stop"),
             Self::ServiceStart { plan_id, service_ids: ids, service_plan_digest, approved }
             | Self::ServiceStop { plan_id, service_ids: ids, service_plan_digest, approved } =>
                 *approved && id(plan_id) && service_ids(ids) && lower_hex(service_plan_digest,64),
-            Self::ServerPrepare { plan_id, package_root } =>
-                id(plan_id) && absolute(package_root),
-            Self::ServerApply { plan_id, package_root, server_plan, server_plan_digest, approved } =>
+            Self::ServerPrepare { plan_id, package_root, framework_binding_receipt, framework_generation } =>
+                id(plan_id) && absolute(package_root)
+                && framework_binding(framework_binding_receipt,framework_generation),
+            Self::ServerApply { plan_id, package_root, server_plan, server_plan_digest, approved,
+                                framework_binding_receipt, framework_generation } =>
                 *approved && id(plan_id) && absolute(package_root)
-                && bounded_object(server_plan,128*1024) && lower_hex(server_plan_digest,64),
+                && bounded_object(server_plan,128*1024) && lower_hex(server_plan_digest,64)
+                && framework_binding(framework_binding_receipt,framework_generation),
             Self::ServerRollback { plan_id, server_plan, server_plan_digest, approved } =>
                 *approved && id(plan_id) && bounded_object(server_plan,128*1024) && lower_hex(server_plan_digest,64),
-            Self::HotpatchPrepare { plan_id, request, package_root } =>
-                id(plan_id) && absolute(package_root) && bounded_object(request,16*1024),
-            Self::HotpatchApply { plan_id, request, package_root, server_plan, server_plan_digest, authorization, approved } =>
+            Self::HotpatchPrepare { plan_id, request, package_root,
+                                    framework_binding_receipt, framework_generation } =>
+                id(plan_id) && absolute(package_root) && bounded_object(request,16*1024)
+                && framework_binding(framework_binding_receipt,framework_generation),
+            Self::HotpatchApply { plan_id, request, package_root, server_plan, server_plan_digest,
+                                  authorization, approved, framework_binding_receipt,
+                                  framework_generation } =>
                 *approved && id(plan_id) && absolute(package_root)
                 && bounded_object(request,16*1024) && bounded_object(server_plan,128*1024)
-                && bounded_object(authorization,16*1024) && lower_hex(server_plan_digest,64),
+                && bounded_object(authorization,16*1024) && lower_hex(server_plan_digest,64)
+                && framework_binding(framework_binding_receipt,framework_generation),
         };
         if valid { Ok(()) } else { Err("INVALID_INSTALLER_REQUEST") }
     }
@@ -149,5 +201,27 @@ mod tests {
         let mut value=serde_json::json!({"action":"apply","plan_id":"plan-1","approval_digest":"a".repeat(64),"approved":true});
         assert!(valid(&value.to_string())); value["approved"]=false.into(); assert!(!valid(&value.to_string()));
         value["approved"]=true.into(); value["approval_digest"]="ABC".into(); assert!(!valid(&value.to_string()));
+    }
+    #[test] fn service_plan_requires_exact_reviewed_action() {
+        assert!(valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"],"service_action":"start"}"#));
+        assert!(valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"],"service_action":"stop"}"#));
+        assert!(!valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"]}"#));
+        assert!(!valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"],"service_action":"restart"}"#));
+    }
+    #[test] fn framework_product_api_coordinates_are_bounded_and_paired() {
+        let base=serde_json::json!({"action":"server_prepare","plan_id":"plan-1","package_root":"/home/a/package"});
+        assert!(valid(&base.to_string()));
+        let mut bound=base.clone();
+        bound["framework_binding_receipt"]="/home/a/framework.binding.json".into();
+        bound["framework_generation"]="a".repeat(40).into();
+        assert!(valid(&bound.to_string()));
+        bound.as_object_mut().unwrap().remove("framework_generation");
+        assert!(!valid(&bound.to_string()));
+        bound["framework_generation"]="a".repeat(40).into();
+        bound["framework_binding_receipt"]="relative.json".into();
+        assert!(!valid(&bound.to_string()));
+        bound["framework_binding_receipt"]="/home/a/framework.binding.json".into();
+        bound["framework_generation"]="A".repeat(40).into();
+        assert!(!valid(&bound.to_string()));
     }
 }
