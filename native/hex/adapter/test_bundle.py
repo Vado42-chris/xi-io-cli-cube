@@ -581,6 +581,33 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(list(state_root.glob("*.binding.json")), [])
         self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/provider/provider.bin").exists())
 
+    def test_retry_failure_preserves_preexisting_idempotent_derived_receipts(self):
+        f = self.fixture()
+        generation = "d"*40
+        f.child("provider", fixture=False, accepted_generation=generation, runtime_export=True)
+        lock, digest = f.lock(fixture=False)
+        first = install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=f.fetch)
+        state_root = Path(f.env["XDG_STATE_HOME"]) / "xi-io/installer/bundles/core-test"
+        release = Path(first["release_distribution_receipts"]["provider"]["path"])
+        binding = Path(first["dependency_binding_receipts"]["provider"]["path"])
+        release_before = release.read_bytes()
+        binding_before = binding.read_bytes()
+        primary = next(state_root.glob("*.receipt.json"))
+        rollback(primary, f.env)
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/provider/provider.bin").exists())
+        self.assertTrue(release.is_file())
+        self.assertTrue(binding.is_file())
+
+        with self.assertRaisesRegex(BundleError, "BUNDLE_APPLY_FAILED_ROLLED_BACK"):
+            install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                           fetch=f.fetch, fail_after_product=1)
+
+        self.assertEqual(release.read_bytes(), release_before)
+        self.assertEqual(binding.read_bytes(), binding_before)
+        self.assertEqual(release.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(binding.stat().st_mode & 0o777, 0o600)
+        self.assertFalse((Path(f.env["XDG_DATA_HOME"]) / "xi-io/provider/provider.bin").exists())
+
     def test_existing_user_file_is_not_overwritten(self):
         f = self.fixture()
         f.child("cli")
