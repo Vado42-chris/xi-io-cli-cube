@@ -50,6 +50,14 @@ class ServerProfileTests(unittest.TestCase):
    return SimpleNamespace(returncode=1,stdout='',stderr='unexpected')
   self.run=fake_run
 
+ def test_two_service_ids_cannot_claim_one_unit(self):
+  package_path=self.root/'server-package.json'
+  package=json.loads(package_path.read_text())
+  package['services'].append({'service_id':'second-logical-service','unit':'xiio-test.service','probe':None,'required':True})
+  package_path.write_text(json.dumps(package))
+  with self.assertRaisesRegex(ValueError,'SERVER_USER_UNIT_IDENTITY_DUPLICATE:xiio-test.service'):
+   server_profile.load_server_package(self.root)
+
  def test_prepare_requires_service_grant(self):
   denied=permission_profile.compile_profile()
   with self.assertRaisesRegex(ValueError,'CAPABILITY_NOT_GRANTED'):

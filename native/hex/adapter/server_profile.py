@@ -51,13 +51,15 @@ def load_server_package(root):
  verify_payload(manifest,root)
  services=doc.get('services')
  if not isinstance(services,list) or not services: raise ValueError('SERVER_SERVICES_REQUIRED')
- seen=set()
+ seen=set();seen_units=set()
  for row in services:
   if not isinstance(row,dict) or set(row)-{'service_id','unit','probe','required'}: raise ValueError('SERVER_SERVICE_FIELDS_INVALID')
   sid=row.get('service_id');unit=row.get('unit');probe=row.get('probe')
   if not isinstance(sid,str) or not sid or sid in seen: raise ValueError('SERVER_SERVICE_ID_INVALID')
   seen.add(sid)
   if not isinstance(unit,str) or not UNIT.fullmatch(unit): raise ValueError('SERVER_USER_UNIT_INVALID')
+  if unit in seen_units: raise ValueError('SERVER_USER_UNIT_IDENTITY_DUPLICATE:'+unit)
+  seen_units.add(unit)
   # User units must be installed by this exact payload under systemd/user.
   matches=[e for e in manifest.entries if e.destination_scope=='xdg_config' and e.destination=='systemd/user/'+unit]
   if len(matches)!=1: raise ValueError('SERVER_USER_UNIT_NOT_IN_PAYLOAD:'+sid)
