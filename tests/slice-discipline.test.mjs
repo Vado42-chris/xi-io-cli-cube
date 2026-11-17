@@ -14,6 +14,8 @@ const installerCurrentness=readFileSync(new URL('native/hex/adapter/kernel/test_
 const ollamaWorkflow=readFileSync(new URL('.github/workflows/cli-real-ollama.yml',root),'utf8');
 const ollamaEvidenceVerifier=readFileSync(new URL('native/hex/cli-source/verify_installed_evidence_custody.py',root),'utf8');
 const ollamaEvidenceTests=readFileSync(new URL('native/hex/cli-source/test_installed_evidence_custody.py',root),'utf8');
+const ollamaModelIdentity=readFileSync(new URL('native/hex/cli-source/capture_ollama_model_identity.py',root),'utf8');
+const ollamaModelTests=readFileSync(new URL('native/hex/cli-source/test_ollama_model_identity.py',root),'utf8');
 const frameworkFixture=JSON.parse(readFileSync(new URL('native/hex/fixtures/framework-runtime-cfe2776/SOURCE.json',root),'utf8'));
 
 test('authority and installed-consumer regressions stay in the hosted denominator',()=>{
@@ -68,6 +70,27 @@ test('installed Ollama evidence custody stays in the executed proof denominator'
   'test_permissive_payload_or_config_refuses',
   'test_promoted_authority_or_collapsed_generations_refuses',
  ]) assert.ok(ollamaEvidenceTests.includes(token),`OLLAMA_EVIDENCE_HOSTILE_CONTROL_MISSING:${token}`);
+});
+
+test('real Ollama proof binds the mutable tag to an exact reopened model digest',()=>{
+ for(const token of [
+  'python3 -B native/hex/cli-source/test_ollama_model_identity.py',
+  'capture_ollama_model_identity.py capture',
+  'capture_ollama_model_identity.py reopen',
+  'model-identity-readback.json',
+ ]) assert.ok(ollamaWorkflow.includes(token),`OLLAMA_MODEL_IDENTITY_JOIN_MISSING:${token}`);
+ for(const token of [
+  'OLLAMA_MODEL_IDENTITY_CAPTURED','OLLAMA_MODEL_IDENTITY_REOPEN_VERIFIED',
+  'OLLAMA_MODEL_IDENTITY_CHANGED','OLLAMA_MODEL_IDENTITY_CUSTODY_INVALID',
+  'billing_effect_authority','provider_effect',
+ ]) assert.ok(ollamaModelIdentity.includes(token),`OLLAMA_MODEL_IDENTITY_CONTROL_MISSING:${token}`);
+ for(const token of [
+  'test_capture_and_independent_reopen_bind_exact_digest',
+  'test_same_tag_with_substituted_digest_or_size_refuses',
+  'test_missing_invalid_or_ambiguous_digest_refuses',
+  'test_permissive_or_hard_linked_baseline_refuses',
+  'test_baseline_identity_and_claim_ceilings_cannot_be_promoted',
+ ]) assert.ok(ollamaModelTests.includes(token),`OLLAMA_MODEL_IDENTITY_HOSTILE_CONTROL_MISSING:${token}`);
 });
 
 test('temporary repair workflows cannot remain in the product tree',()=>{
