@@ -44,9 +44,13 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
     _require(release.get("product_ref") == expected_product_ref
              and adopter.get("product_ref") == expected_product_ref,
              "BUNDLE_RELEASE_PRODUCT_MISMATCH")
-    for key in ("release_ref", "release_generation", "approved_lock_sha256"):
+    for key in ("release_ref", "release_generation", "approved_lock_sha256", "entrypoint_qualification_ref"):
         _require(release.get(key) == adopter.get(key),
                  "BUNDLE_RELEASE_ADOPTER_BINDING_MISMATCH")
+    entrypoint_qualification_ref = _required_text(
+        release.get("entrypoint_qualification_ref"),
+        "BUNDLE_ENTRYPOINT_QUALIFICATION_REF_REQUIRED",
+    )
     raw = Path(lock).read_bytes()
     observed = hashlib.sha256(raw).hexdigest()
     approved = release.get("approved_lock_sha256")
@@ -69,6 +73,7 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
         "release_ref": release.get("release_ref"),
         "release_generation": release.get("release_generation"),
         "approved_lock_sha256": approved,
+        "entrypoint_qualification_ref": entrypoint_qualification_ref,
         "provider_hosts": list(release_hosts),
     }, env=env, fetch=fetch)
 
