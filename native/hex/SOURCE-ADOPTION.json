@@ -11,10 +11,10 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "6567f0b135d7a08971c6fa48fde1c6045dc037d1",
+    "ref": "e094b27471fdde5789a3f5c6cbc8d800a4d6673b",
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 36,
-    "acceptance_note": "Latest accepted Installer main generation through distinct composition/profile generation and per-service declared component generation; HEX consumes changed owner bytes byte-for-byte and preserves exact Git blob identity.",
+    "owner_pr": 37,
+    "acceptance_note": "Latest accepted Installer main generation through exact user service-unit materialization; HEX consumes the new owner module byte-for-byte while retaining prior accepted owner files.",
     "accepted_generation_history": [
       {
         "owner_pr": 18,
@@ -54,6 +54,11 @@
       {
         "owner_pr": 36,
         "merge_ref": "6567f0b135d7a08971c6fa48fde1c6045dc037d1",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 37,
+        "merge_ref": "e094b27471fdde5789a3f5c6cbc8d800a4d6673b",
         "status": "CURRENT_ACCEPTED_MAIN"
       }
     ],
@@ -78,7 +83,8 @@
       "runtime_binding.py": "d49a7308d560cb44b8413457468be02108029e22",
       "runtime_config.py": "dc0f0d5bb527c07309f12d556f2d7889830a749f",
       "running_generation.py": "b79bd3b6901dcfd9c6e7419a2afd4e9972353af5",
-      "dependency_receipt_verification.py": "ad76f6ea5ec80951d041d9e4a4866fa8c07a50fa"
+      "dependency_receipt_verification.py": "ad76f6ea5ec80951d041d9e4a4866fa8c07a50fa",
+      "service_unit_materialization.py": "720f223cb11acadbfe8a6e68378b9e4a2c5404e6"
     }
   },
   "cli": {
