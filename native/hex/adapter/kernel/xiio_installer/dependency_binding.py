@@ -6,7 +6,7 @@ from .transaction import xdg_roots
 
 class DependencyBindingError(RuntimeError): pass
 
-def compile_dependency_binding_receipt(manifest:ProductManifest,install_receipt:dict[str,Any],env:dict[str,str]|None=None)->dict[str,Any]:
+def compile_dependency_binding_receipt(manifest:ProductManifest,install_receipt:dict[str,Any],env:dict[str,str]|None=None,release_receipt_path:Path|None=None)->dict[str,Any]:
     raw=manifest.raw
     dependency_id=str(raw.get("dependency_id") or "").strip();owner=str(raw.get("owner_repo") or "").strip();generation=str(raw.get("accepted_generation") or "").strip()
     exports=raw.get("runtime_exports")
@@ -15,7 +15,10 @@ def compile_dependency_binding_receipt(manifest:ProductManifest,install_receipt:
         raise DependencyBindingError("DEPENDENCY_BINDING_INSTALL_RECEIPT_MISMATCH")
     entries={(e.destination_scope,e.destination):e for e in manifest.entries}
     installed={(e.get("destination_scope"),e.get("destination")):e for e in install_receipt.get("entries",[]) if isinstance(e,dict)}
-    roots=xdg_roots(env);fields={}
+    roots=xdg_roots(env);fields={'accepted_generation':generation}
+    if release_receipt_path is not None:
+        if not release_receipt_path.is_absolute() or release_receipt_path.is_symlink() or not release_receipt_path.is_file(): raise DependencyBindingError('DEPENDENCY_BINDING_RELEASE_RECEIPT_UNTRUSTED')
+        fields['release_receipt_path']=str(release_receipt_path.resolve())
     for name,spec in exports.items():
         if not isinstance(name,str) or not name or not isinstance(spec,dict): raise DependencyBindingError("DEPENDENCY_BINDING_EXPORT_INVALID")
         scope=str(spec.get("destination_scope") or "");destination=str(spec.get("destination") or "")
