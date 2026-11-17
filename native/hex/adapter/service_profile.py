@@ -6,13 +6,14 @@ never accepts arbitrary unit names, and never treats central requests as local
 effect authority.
 """
 from __future__ import annotations
-import hashlib, json, os, re, subprocess
+import hashlib, json, os, re, stat, subprocess
 from pathlib import Path
 import permission_profile
 
 SCHEMA='xiio.hex.user-service-admin/v1'
 CATALOG_SCHEMA='xiio.cli.service-catalog/v1'
 UNIT=re.compile(r'^[A-Za-z0-9_.@:-]+\.service$')
+MAX_CATALOG_BYTES=1024*1024
 
 def _canon(value):
  return json.dumps(value,sort_keys=True,separators=(',',':')).encode()
@@ -39,12 +40,46 @@ def _validate_catalog_document(doc):
    seen_units.add(unit)
  return doc
 
+def _trusted_directory(fd,code):
+ st=os.fstat(fd)
+ if (not stat.S_ISDIR(st.st_mode) or st.st_uid not in {0,os.getuid()}
+     or stat.S_IMODE(st.st_mode)&0o022):
+  raise ValueError(code)
+
+def _read_catalog_bytes(source_root):
+ root=Path(source_root)
+ if not root.is_absolute(): raise ValueError('SERVICE_CATALOG_ROOT_UNTRUSTED')
+ flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
+ try: root_fd=os.open(root,flags)
+ except OSError as exc: raise ValueError('SERVICE_CATALOG_ROOT_UNTRUSTED') from exc
+ try:
+  _trusted_directory(root_fd,'SERVICE_CATALOG_ROOT_UNTRUSTED')
+  try: config_fd=os.open('config',flags,dir_fd=root_fd)
+  except OSError as exc: raise ValueError('SERVICE_CATALOG_CONFIG_UNTRUSTED') from exc
+  try:
+   _trusted_directory(config_fd,'SERVICE_CATALOG_CONFIG_UNTRUSTED')
+   try:
+    fd=os.open('service-catalog.json',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=config_fd)
+   except OSError as exc: raise ValueError('SERVICE_CATALOG_FILE_UNTRUSTED') from exc
+   try:
+    st=os.fstat(fd)
+    if (not stat.S_ISREG(st.st_mode) or st.st_nlink!=1
+        or st.st_uid not in {0,os.getuid()} or stat.S_IMODE(st.st_mode)&0o022):
+     raise ValueError('SERVICE_CATALOG_FILE_UNTRUSTED')
+    if st.st_size>MAX_CATALOG_BYTES: raise ValueError('SERVICE_CATALOG_FILE_TOO_LARGE')
+    chunks=[];total=0
+    while True:
+     chunk=os.read(fd,min(65536,MAX_CATALOG_BYTES+1-total))
+     if not chunk: break
+     chunks.append(chunk);total+=len(chunk)
+     if total>MAX_CATALOG_BYTES: raise ValueError('SERVICE_CATALOG_FILE_TOO_LARGE')
+    return b''.join(chunks)
+   finally: os.close(fd)
+  finally: os.close(config_fd)
+ finally: os.close(root_fd)
+
 def load_catalog(source_root):
- p=Path(source_root)/'config/service-catalog.json'
- if p.is_symlink() or not p.is_file() or p.stat().st_nlink!=1 or p.stat().st_uid!=os.getuid():
-  raise ValueError('SERVICE_CATALOG_FILE_UNTRUSTED')
- raw=p.read_bytes()
- if len(raw)>1024*1024: raise ValueError('SERVICE_CATALOG_FILE_TOO_LARGE')
+ raw=_read_catalog_bytes(source_root)
  try: doc=json.loads(raw)
  except (ValueError,UnicodeError) as exc: raise ValueError('SERVICE_CATALOG_INVALID') from exc
  _validate_catalog_document(doc)
