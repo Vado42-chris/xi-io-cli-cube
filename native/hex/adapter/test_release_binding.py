@@ -84,6 +84,24 @@ class ReleaseBindingTests(unittest.TestCase):
   self.assertEqual(errors,[]);self.assertEqual(len(results),2)
   self.assertEqual(json.loads((root/"same.json").read_text()),receipt)
 
+ def test_release_receipt_lock_requires_private_single_link_regular_file(self):
+  from native.hex.adapter.release_binding import _persist_release_receipt
+  receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":"p","consumer_ref":"c","release_generation":"g"}
+  for kind in ("permissive-mode","hard-link"):
+   with self.subTest(kind=kind),tempfile.TemporaryDirectory() as td:
+    root=Path(td);lock_path=root/".same.json.lock"
+    if kind=="permissive-mode":
+     lock_path.write_text("");lock_path.chmod(0o644)
+    else:
+     source=root/"lock-source";source.write_text("");source.chmod(0o600);os.link(source,lock_path)
+    fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+    try:
+     with self.assertRaisesRegex(BundleError,"BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED"):
+      _persist_release_receipt(fd,root,"same.json",receipt)
+    finally:
+     os.close(fd)
+    self.assertFalse((root/"same.json").exists())
+
  def test_release_receipt_write_stays_on_verified_directory_after_path_swap(self):
   td,lock,r,a=self.fixture();self.addCleanup(td.cleanup)
   binding={"schema":"xiio.release-distribution-lock/v1","release_ref":r["release_ref"],
