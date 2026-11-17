@@ -80,6 +80,7 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
 def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
     product_ref=binding["product_ref"];consumer_ref=binding["consumer_ref"]
     approved=binding["approved_lock_sha256"];allowed=frozenset(binding["provider_hosts"])
+    profile=load_bundle_profile(Path(lock),allowed_hosts=allowed)
     roots_env=env or os.environ
     state_root=Path(roots_env.get("XDG_STATE_HOME") or (Path.home()/".local/state"))/"xi-io"/"installer"/"release-distributions"
     state_fd=_secure_ensure_state_root(state_root)
@@ -90,12 +91,12 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
                  "BUNDLE_RELEASE_STATE_ROOT_UNTRUSTED")
     finally:
         os.close(state_fd)
-    installed=install_bundle(Path(lock),approved_lock_sha256=approved,env=env,allowed_hosts=allowed,fetch=fetch)
     receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":product_ref,"consumer_ref":consumer_ref,
         "release_ref":binding.get("release_ref"),"release_generation":binding.get("release_generation"),
-        "entrypoint_qualification_ref":binding.get("entrypoint_qualification_ref"),"approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),"bundle_state":installed.get("state"),
-        "installed_role_count":len(installed.get("roles") or []),"readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED","effect_authority":False}
+        "entrypoint_qualification_ref":binding.get("entrypoint_qualification_ref"),"approved_lock_sha256":approved,"bundle_profile_id":profile.get("profile_id"),"bundle_state":"INSTALLED_BYTES_VERIFIED",
+        "installed_role_count":len(profile.get("ordered_roles") or []),"readback_verified":True,"effect_authority":False}
     name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json";target=state_root/name
+    existing=None
     if target.exists() or target.is_symlink():
         _require(not target.is_symlink() and target.is_file()
                  and (target.stat().st_mode & 0o777)==0o600,
@@ -105,6 +106,12 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
         except (OSError,ValueError,UnicodeError) as exc:
             raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_UNTRUSTED") from exc
         _require(existing==receipt,"BUNDLE_RELEASE_INSTALL_RECEIPT_CONFLICT")
+    installed=install_bundle(Path(lock),approved_lock_sha256=approved,env=env,allowed_hosts=allowed,fetch=fetch)
+    _require(installed.get("profile_id")==receipt["bundle_profile_id"]
+             and installed.get("state")==receipt["bundle_state"]
+             and len(installed.get("roles") or [])==receipt["installed_role_count"],
+             "BUNDLE_RELEASE_INSTALL_RESULT_MISMATCH")
+    if existing is not None:
         return {**installed,"release_distribution_receipt":str(target)}
     fd,tmp=tempfile.mkstemp(prefix="."+name+".",suffix=".tmp",dir=state_root);os.close(fd);p=Path(tmp)
     try:p.write_text(json.dumps(receipt,indent=2,sort_keys=True)+"\n",encoding="utf-8");os.chmod(p,0o600);os.replace(p,target)
