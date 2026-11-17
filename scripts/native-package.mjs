@@ -1,13 +1,13 @@
 // Repository build wiring only. Never install a package or touch user app state.
 import {spawnSync} from 'node:child_process';
 import {cpSync, existsSync, lstatSync, readdirSync, rmSync} from 'node:fs';
-import {resolve, join} from 'node:path';
+import {resolve, join, delimiter} from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const carrier=join(root,'native/hex/carrier'),adapter=join(root,'native/hex/adapter');
 const mode=process.argv[2];
 if(!['stage','check','build'].includes(mode)||process.argv.length!==3)throw Error('Use native-package.mjs stage|check|build');
-function run(command,args,cwd=root){const r=spawnSync(command,args,{cwd,stdio:'inherit',env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'}});if(r.error)throw r.error;if(r.status!==0)process.exit(r.status??1);}
+function run(command,args,cwd=root,extraEnv={}){const r=spawnSync(command,args,{cwd,stdio:'inherit',env:{...process.env,PYTHONDONTWRITEBYTECODE:'1',...extraEnv}});if(r.error)throw r.error;if(r.status!==0)process.exit(r.status??1);}
 function stage(){
  const source=join(root,'dist'),target=join(carrier,'frontend');
  if(!existsSync(join(source,'index.html')))throw Error('Build the root frontend first: npm run build');
@@ -26,12 +26,15 @@ function testAdapterInIsolation(){
   .filter(row=>row.isFile()&&/^test_.*\.py$/.test(row.name))
   .map(row=>row.name).sort();
  if(tests.length===0)throw Error('Adapter regression denominator is empty');
+ const pythonPath=[root,adapter,join(adapter,'kernel')].join(delimiter);
  // Each legacy adapter suite imports owner modules by short name and may patch
  // process-global module state. One shared unittest-discovery interpreter makes
  // qualification depend on file order. Preserve the full denominator while
- // giving every file a fresh module registry and patch lifecycle.
+ // giving every file a fresh module registry and patch lifecycle. Each isolated
+ // process receives the explicit repository, adapter and embedded Installer
+ // kernel roots, never another test module's accidental sys.path mutation.
  for(const name of tests){
-  run('/usr/bin/python3',['-B','-m','unittest','discover','-s',adapter,'-p',name]);
+  run('/usr/bin/python3',['-B','-m','unittest','discover','-s',adapter,'-p',name],root,{PYTHONPATH:pythonPath});
  }
 }
 if(mode==='build')run('npm',['run','build']);
