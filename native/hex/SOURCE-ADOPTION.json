@@ -11,10 +11,10 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "e094b27471fdde5789a3f5c6cbc8d800a4d6673b",
+    "ref": "8e1bb08b58824898cdcaf022fd1ea0df11452268",
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 37,
-    "acceptance_note": "Latest accepted Installer main generation through exact user service-unit materialization; HEX consumes the new owner module byte-for-byte while retaining prior accepted owner files.",
+    "owner_pr": 39,
+    "acceptance_note": "Latest accepted Installer main generation through verifier-compatible compiled dependency-binding receipts plus dependency-to-running-service generation conservation; HEX consumes owner bytes exactly.",
     "accepted_generation_history": [
       {
         "owner_pr": 18,
@@ -59,6 +59,16 @@
       {
         "owner_pr": 37,
         "merge_ref": "e094b27471fdde5789a3f5c6cbc8d800a4d6673b",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 38,
+        "merge_ref": "be98452eea87b06a84396897f4c8090fb10d1f84",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 39,
+        "merge_ref": "8e1bb08b58824898cdcaf022fd1ea0df11452268",
         "status": "CURRENT_ACCEPTED_MAIN"
       }
     ],
@@ -67,7 +77,7 @@
       "__init__.py": "8638a08518d86ef0fd48933d4b0174c026c59136",
       "cli.py": "13e024cf0ea41d2603f7a84d75447e977fef83d6",
       "consent.py": "52e6adfbd15da70dc6d18ded1f9025266ac9c2b7",
-      "dependency_binding.py": "f5e0efe094bc693e3901b2cbf7c0a9128cad574b",
+      "dependency_binding.py": "37838adc2b9fe022faf25be974245b1261f3c2a6",
       "diagnostics.py": "e173b12fb42b7e33f9e7dd7379491d7048e8e520",
       "discovery.py": "6b84520098dea4cef3cbf6249fc2437b2184dd14",
       "managed_update.py": "9b1a9965a54472af9d635b08cfb94fdbbe201caf",
@@ -76,7 +86,7 @@
       "observability.py": "27478747baf903ae13d7c3fb0cde862d4ff08287",
       "redaction.py": "11372bf25339d76d56fc230f7ae1548e8d79a145",
       "runtime_activation.py": "849727659f0b049477457c19eebe4852d923c620",
-      "runtime_profile.py": "b4880b1333c9207aa8341a20555a253ed1d9b5c1",
+      "runtime_profile.py": "7ff7e39ebbecd8e6814d4fdeb169226860abb604",
       "service_profile.py": "41f932e0d90027a3332c33dc9a5d6db04fd3039e",
       "transaction.py": "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2",
       "update_request.py": "abe3b7944d061603142f8ca01b180dcc877d1869",
