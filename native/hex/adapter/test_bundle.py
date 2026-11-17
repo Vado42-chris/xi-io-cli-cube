@@ -164,7 +164,7 @@ class BundleTests(unittest.TestCase):
         f=self.fixture();generation="a"*40;f.child("sdk",fixture=False,accepted_generation=generation)
         lock,digest=f.lock(fixture=False);result=install_bundle(lock,approved_lock_sha256=digest,env=f.env,fetch=f.fetch)
         row=result["release_distribution_receipts"]["sdk"];receipt=json.loads(Path(row["path"]).read_text())
-        self.assertEqual(receipt["schema"],"xiio.installer.release-distribution-install-receipt/v1")
+        self.assertEqual(receipt["schema"],"xiio.installer.child-generation-receipt/v1")
         self.assertEqual(receipt["product_ref"],"xi-io-sdk");self.assertEqual(receipt["release_generation"],generation)
         self.assertEqual(receipt["bundle_state"],"INSTALLED_BYTES_VERIFIED");self.assertTrue(receipt["readback_verified"]);self.assertFalse(receipt["effect_authority"])
         self.assertEqual(Path(row["path"]).stat().st_mode & 0o777,0o600)
