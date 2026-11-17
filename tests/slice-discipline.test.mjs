@@ -10,6 +10,7 @@ const installerAdapter=readFileSync(new URL('native/hex/adapter/installer_adapte
 const serverProfile=readFileSync(new URL('native/hex/adapter/server_profile.py',root),'utf8');
 const protocol=readFileSync(new URL('native/hex/carrier/src-tauri/src/protocol.rs',root),'utf8');
 const installerWorkflow=readFileSync(new URL('.github/workflows/installer-contract.yml',root),'utf8');
+const installerCurrentness=readFileSync(new URL('native/hex/adapter/kernel/test_installer_34_currentness.py',root),'utf8');
 const frameworkFixture=JSON.parse(readFileSync(new URL('native/hex/fixtures/framework-runtime-cfe2776/SOURCE.json',root),'utf8'));
 
 test('authority and installed-consumer regressions stay in the hosted denominator',()=>{
@@ -27,6 +28,21 @@ test('authority and installed-consumer regressions stay in the hosted denominato
 
 test('slice-discipline guard executes in the same denominator',()=>{
  assert.ok(sourceCommand.includes('tests/slice-discipline.test.mjs'),'SLICE_DISCIPLINE_NOT_EXECUTED');
+});
+
+test('accepted Installer currentness controls stay executable under unittest',()=>{
+ assert.ok(installerWorkflow.includes('native.hex.adapter.kernel.test_installer_34_currentness'),
+  'INSTALLER_CURRENTNESS_NOT_IN_HOSTED_DENOMINATOR');
+ assert.match(installerCurrentness,/class AcceptedInstallerCurrentnessTests\(unittest\.TestCase\):/,
+  'INSTALLER_CURRENTNESS_TESTCASE_MISSING');
+ for(const token of [
+  'test_latest_installer_custody_and_currentness_are_pinned()',
+  'test_runtime_binding_consumes_persisted_verifier_and_activation_requires_component_generation()',
+  'test_predecessor_pin_is_not_current',
+  'test_changed_embedded_bytes_refuse',
+ ]) assert.ok(installerCurrentness.includes(token),`INSTALLER_CURRENTNESS_CONTROL_MISSING:${token}`);
+ assert.match(installerCurrentness,/if __name__==["']__main__["']:\s*\n\s*unittest\.main\(\)/,
+  'INSTALLER_CURRENTNESS_DIRECT_ENTRY_MISSING');
 });
 
 test('temporary repair workflows cannot remain in the product tree',()=>{
