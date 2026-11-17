@@ -136,8 +136,9 @@ def _plan_digest(plan):
  if not isinstance(plan,dict): raise ValueError('SERVICE_PLAN_SCHEMA_INVALID')
  return _digest({key:value for key,value in plan.items() if key!='plan_digest'})
 
-def compile_service_plan(catalog,permissions,service_ids):
+def compile_service_plan(catalog,permissions,service_ids,action):
  document,catalog_sha256=_catalog_binding(catalog)
+ if action not in {'start','stop'}: raise ValueError('SERVICE_ACTION_INVALID')
  if (not isinstance(service_ids,list) or not service_ids
      or len(service_ids)!=len(set(service_ids))
      or any(not isinstance(sid,str) or not sid for sid in service_ids)):
@@ -148,15 +149,17 @@ def compile_service_plan(catalog,permissions,service_ids):
   permission_profile.require_capability(permissions,'start_services',sid)
   permission_profile.require_capability(permissions,'stop_services',sid)
   rows.append(_compile_service_row(document,sid))
+ ready=all(row['state']=='READY_EXISTING_USER_UNIT' for row in rows)
  plan={
-  'schema':SCHEMA,'catalog_sha256':catalog_sha256,
+  'schema':SCHEMA,'action':action,'catalog_sha256':catalog_sha256,
   'permission_digest':permissions['permission_digest'],'service_ids':list(service_ids),
-  'services':rows,'effect_authorized':False,
-  'can_start':all(row['state']=='READY_EXISTING_USER_UNIT' for row in rows),
+  'services':rows,'effect_authorized':False,'can_apply':ready,
+  'can_start':action=='start' and ready,
   'first_red':next((row['state'] for row in rows if row['state']!='READY_EXISTING_USER_UNIT'),None),
   'hard':['CATALOG_ENTRY!=INSTALLED_UNIT','UNIT_PRESENT!=SERVICE_HEALTHY',
           'START_ALLOWED!=START_APPROVED','CENTRAL_REQUEST!=LOCAL_EFFECT_AUTHORITY',
-          'SYSTEM_SERVICE!=USER_SERVICE','PLAN_REVIEW!=LIVE_CATALOG'],
+          'SYSTEM_SERVICE!=USER_SERVICE','PLAN_REVIEW!=LIVE_CATALOG',
+          'PLAN_ACTION!=APPLY_ACTION'],
  }
  plan['plan_digest']=_plan_digest(plan)
  return plan
@@ -185,11 +188,12 @@ def _restore_attempts(attempts,permissions):
  if failures:
   raise ValueError('SERVICE_ACTION_PARTIAL_EFFECT_UNCERTAIN:'+','.join(sid for sid,_ in failures)) from failures[0][1]
 
-def _validate_apply_plan(source_root,plan,permissions):
+def _validate_apply_plan(source_root,plan,permissions,action):
  if not isinstance(plan,dict) or plan.get('schema')!=SCHEMA:
   raise ValueError('SERVICE_PLAN_SCHEMA_INVALID')
  if plan.get('plan_digest')!=_plan_digest(plan):
   raise ValueError('SERVICE_PLAN_DIGEST_MISMATCH')
+ if plan.get('action')!=action: raise ValueError('SERVICE_PLAN_ACTION_MISMATCH')
  if plan.get('permission_digest')!=permissions.get('permission_digest'):
   raise ValueError('SERVICE_PERMISSION_DIGEST_CHANGED')
  catalog=load_catalog(source_root)
@@ -217,7 +221,7 @@ def apply_service_action(plan,permissions,action,approved,*,catalog_source_root=
  if action not in {'start','stop'}: raise ValueError('SERVICE_ACTION_INVALID')
  if approved is not True: raise ValueError('EXPLICIT_SERVICE_APPROVAL_REQUIRED')
  if catalog_source_root is None: raise ValueError('SERVICE_CATALOG_SOURCE_REQUIRED')
- rows=_validate_apply_plan(catalog_source_root,plan,permissions)
+ rows=_validate_apply_plan(catalog_source_root,plan,permissions,action)
  expected='active' if action=='start' else 'inactive'
  attempts=[]
  try:
