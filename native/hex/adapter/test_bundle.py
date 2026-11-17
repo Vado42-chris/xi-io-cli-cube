@@ -59,7 +59,7 @@ class BundleFixture:
         self.rows = []
 
     def child(self, role, *, depends_on=(), bytes_=None, destination=None,
-              fixture=True, overwrite="fail"):
+              fixture=True, overwrite="fail", accepted_generation=None):
         b = bytes_ if bytes_ is not None else (role + " delivered\n").encode()
         url = "https://github.com/xiio-test/releases/" + role + ".bin"
         self.payloads[url] = b
@@ -74,6 +74,7 @@ class BundleFixture:
             "version": "0.0.1-fixture" if fixture else "0.0.1",
             "channel": "fixture" if fixture else "alpha",
             "fixture": fixture,
+            **({"accepted_generation": accepted_generation} if accepted_generation else {}),
             "payload": [{
                 "source": source,
                 "sha256": sha(b),
@@ -154,6 +155,16 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(result["receipt_count"], 1)
         self.assertFalse(result["runtime_qualified"])
         self.assertFalse(result["authority_granted"])
+
+
+    def test_installed_child_with_generation_persists_release_distribution_receipt(self):
+        f=self.fixture();generation="a"*40;f.child("sdk",fixture=False,accepted_generation=generation)
+        lock,digest=f.lock(fixture=False);result=install_bundle(lock,approved_lock_sha256=digest,env=f.env,fetch=f.fetch)
+        row=result["release_distribution_receipts"]["sdk"];receipt=json.loads(Path(row["path"]).read_text())
+        self.assertEqual(receipt["schema"],"xiio.installer.release-distribution-install-receipt/v1")
+        self.assertEqual(receipt["product_ref"],"xi-io-sdk");self.assertEqual(receipt["release_generation"],generation)
+        self.assertEqual(receipt["bundle_state"],"INSTALLED_BYTES_VERIFIED");self.assertTrue(receipt["readback_verified"]);self.assertFalse(receipt["effect_authority"])
+        self.assertEqual(Path(row["path"]).stat().st_mode & 0o777,0o600)
 
     def test_release_hosts_reject_wildcards_private_local_and_malformed(self):
         f = self.fixture()
