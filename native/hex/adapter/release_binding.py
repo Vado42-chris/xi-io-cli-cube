@@ -6,6 +6,7 @@ D2/D3 projection and passes its approved provider hosts into child_bundle.
 from __future__ import annotations
 from pathlib import Path
 import hashlib
+import fcntl
 import json
 import os
 import tempfile
@@ -95,6 +96,14 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
             "installed_role_count":len(installed.get("roles") or []),"readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED","effect_authority":False}
         name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json"
         encoded=(json.dumps(receipt,indent=2,sort_keys=True)+"\n").encode()
+        lock_name="."+name+".lock"
+        try:
+            lock_raw=os.open(lock_name,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=state_fd)
+        except OSError as exc:
+            raise BundleError("BUNDLE_RELEASE_INSTALL_RECEIPT_LOCK_UNTRUSTED") from exc
+        receipt_lock=os.fdopen(lock_raw,"a+b",closefd=True)
+        try:
+            fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_EX)
         try:
             fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
         except FileNotFoundError:
@@ -133,6 +142,9 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
         finally:
             os.close(fd)
         return {**installed,"release_distribution_receipt":str(state_root/name)}
+        finally:
+            try: fcntl.flock(receipt_lock.fileno(),fcntl.LOCK_UN)
+            finally: receipt_lock.close()
     finally:
         os.close(state_fd)
 
