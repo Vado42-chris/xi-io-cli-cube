@@ -14,7 +14,7 @@
     "ref": "8bd35c6c8de9e1bc29fccb89a8ebd027e92f288c",
     "acceptance_state": "ACCEPTED_MAIN",
     "owner_pr": 31,
-    "acceptance_note": "Latest accepted Installer main generation through #31; shared runtime binding/config primitives are now owned upstream and Cube vendored kernel is byte-identical by exact owner Git blob identity.",
+    "acceptance_note": "Latest accepted Installer main generation through #31; shared runtime binding/config primitives are now owned upstream and Cube vendored kernel remains byte-identical by exact owner Git blob identity.",
     "accepted_generation_history": [
       {
         "owner_pr": 18,
