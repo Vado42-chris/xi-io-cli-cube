@@ -4,12 +4,12 @@ import json
 import os
 import subprocess
 import tempfile
+import re
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
 from .runtime_profile import RuntimeProfile, RuntimeProfileError, compile_user_consent
-from .runtime_binding import materialize_runtime_bindings
 
 class RuntimeActivationError(RuntimeError):
     pass
@@ -50,6 +50,38 @@ def _atomic_json(path:Path,value:dict[str,Any])->None:
         if p.exists():
             p.unlink()
 
+def _materialize_dependency(dep)->None:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",dep.owner_repo):
+        raise RuntimeActivationError("RUNTIME_DEPENDENCY_OWNER_INVALID:"+dep.dependency_id)
+    materializer=Path(dep.materializer)
+    if materializer.is_absolute() or ".." in materializer.parts or not materializer.parts:
+        raise RuntimeActivationError("RUNTIME_DEPENDENCY_MATERIALIZER_INVALID:"+dep.dependency_id)
+    with tempfile.TemporaryDirectory(prefix="xiio-runtime-dependency-") as td:
+        root=Path(td)/"source"
+        clone=_run(["git","clone","--no-checkout","--filter=blob:none","--quiet",f"https://github.com/{dep.owner_repo}.git",str(root)],timeout=120)
+        if clone.returncode!=0:
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_CLONE_FAILED:"+dep.dependency_id)
+        fetch=_run(["git","-C",str(root),"fetch","origin",dep.accepted_generation,"--depth=1","--quiet"],timeout=120)
+        if fetch.returncode!=0:
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_GENERATION_FETCH_FAILED:"+dep.dependency_id)
+        checkout=_run(["git","-C",str(root),"checkout","--detach","--quiet",dep.accepted_generation],timeout=30)
+        if checkout.returncode!=0:
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_GENERATION_CHECKOUT_FAILED:"+dep.dependency_id)
+        head=_run(["git","-C",str(root),"rev-parse","HEAD"],timeout=10)
+        if head.returncode!=0 or head.stdout.strip()!=dep.accepted_generation:
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_GENERATION_READBACK_FAILED:"+dep.dependency_id)
+        executable=root/materializer
+        try:
+            resolved=executable.resolve(strict=True)
+            resolved.relative_to(root.resolve())
+        except Exception as exc:
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_MATERIALIZER_MISSING:"+dep.dependency_id) from exc
+        if not resolved.is_file() or not os.access(resolved,os.X_OK):
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_MATERIALIZER_NOT_EXECUTABLE:"+dep.dependency_id)
+        run=_run([str(resolved),"--ref",dep.accepted_generation],timeout=300)
+        if run.returncode!=0:
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_MATERIALIZATION_FAILED:"+dep.dependency_id)
+
 def activate_runtime_profile(
     profile:RuntimeProfile,
     *,
@@ -58,28 +90,29 @@ def activate_runtime_profile(
     consent_receipt_path:Path,
     activation_receipt_path:Path,
     principal_ref:str="local-user",
-    runtime_binding_profile:dict[str,Any]|None=None,
-    dependency_binding_receipts:dict[str,dict[str,Any]]|None=None,
-    runtime_binding_destination:Path|None=None,
 )->dict[str,Any]:
     consent=compile_user_consent(profile,grants=grants,update_policy=update_policy,principal_ref=principal_ref)
     allowed=set(consent["permissions"])
+    roots_env=os.environ.copy()
+    state_home=Path(roots_env.get("XDG_STATE_HOME") or (Path.home()/".local/state"))
     for dep in profile.dependencies:
-        if not set(dep.required_for_permissions).intersection(allowed):
+        if dep.required_for_permissions and not set(dep.required_for_permissions).intersection(allowed):
             continue
-        if dep.expected_unit is not None:
+        if dep.materializer=="xiio.installer-dependency-binding-receipt/v1":
+            receipt_path=state_home/"xi-io/installer/dependencies"/(dep.dependency_id+".binding.json")
+            try: receipt=json.loads(receipt_path.read_text(encoding="utf-8"))
+            except Exception as exc: raise RuntimeActivationError("RUNTIME_DEPENDENCY_BINDING_MISSING:"+dep.dependency_id) from exc
+            if receipt.get("schema")!=dep.materializer or receipt.get("state")!="BOUND" or receipt.get("dependency_id")!=dep.dependency_id or receipt.get("owner_repo")!=dep.owner_repo or receipt.get("accepted_generation")!=dep.accepted_generation or not isinstance(receipt.get("runtime_exports"),dict) or not receipt["runtime_exports"]:
+                raise RuntimeActivationError("RUNTIME_DEPENDENCY_BINDING_MISMATCH:"+dep.dependency_id)
+            continue
+        if dep.expected_unit is None:
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_UNIT_REQUIRED:"+dep.dependency_id)
+        unit=_run(["systemctl","--user","cat",dep.expected_unit],timeout=5)
+        if unit.returncode!=0:
+            _materialize_dependency(dep)
             unit=_run(["systemctl","--user","cat",dep.expected_unit],timeout=5)
-            if unit.returncode!=0:
-                raise RuntimeActivationError("RUNTIME_DEPENDENCY_NOT_INSTALLED:"+dep.dependency_id)
-    binding_receipt=None
-    if runtime_binding_profile is not None:
-        if dependency_binding_receipts is None or runtime_binding_destination is None:
-            raise RuntimeActivationError("RUNTIME_BINDING_INPUTS_REQUIRED")
-        try:
-            binding_receipt=materialize_runtime_bindings(profile,runtime_binding_profile,dependency_binding_receipts,runtime_binding_destination)
-        except Exception as exc:
-            raise RuntimeActivationError("RUNTIME_BINDING_MATERIALIZATION_FAILED:"+str(exc)) from exc
-
+        if unit.returncode!=0:
+            raise RuntimeActivationError("RUNTIME_DEPENDENCY_NOT_INSTALLED:"+dep.dependency_id)
     selected=[]
     for service in profile.services:
         if not set(service.required_permissions).issubset(allowed):
@@ -136,7 +169,6 @@ def activate_runtime_profile(
         "permissions":consent["permissions"],
         "update_policy":consent["update_policy"],
         "services":activated,
-        "runtime_binding":binding_receipt,
         "readback_verified":all(row["active"] for row in activated),
         "provider_effect":False,
         "hard":[

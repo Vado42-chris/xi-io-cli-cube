@@ -11,27 +11,10 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "64328dd422ec5a751d61c03c382157656272d6f1",
-    "files_unchanged_sha256": {
-      "__init__.py": "06f35e9d4b5de30b7b32f4aa56ee4ccbfb995c0c26a459db6ada3a31cf689509",
-      "cli.py": "d92dfb0c509c34c40f4c0d0f2aa3e1319381cb4bcc6269225af1204d9294bff2",
-      "consent.py": "a411148b8e1eb87375f644927b51ee2741c642e87274338f14636846dc06ea0c",
-      "diagnostics.py": "45b04222167028c95f28ebba4d8c57c1346b58f28d446529a4f55135aea2e581",
-      "discovery.py": "c1c6096189c03b593707f7c440b8727ea0aff49135f9d8d26afd5d10e5ee60a8",
-      "managed_update.py": "e175420d133b3b74cae97a9c816ace8faf197bdd0becdc52aab10531f1d0897f",
-      "managed_update_cli.py": "1fb7bf790d939ac7b64327cf4e00c31d8f87d9ec06db9f6cef8b4a326052d55e",
-      "manifest.py": "e8550b6ca42a3dee51791fc4be0146f858b8b414a941da4448be9f7cd9e28719",
-      "observability.py": "d6d4f51afcdd741380fb5b6869948b044c7099879f2480d0a801eb9afe040d04",
-      "redaction.py": "83be0ef6a2afabcddbd1f731ebdddb86bc094f6d59ae8f24b27480dab6190a47",
-      "runtime_activation.py": "76c8a3dd93d6fa54f08a6ed14e81073101591c7bb1aa68da2c1f352e3619c81c",
-      "runtime_profile.py": "0713b957e8df7d325cc050f3def00bb47ac4af4a1da3e0f208375e81aaaf6a1c",
-      "service_profile.py": "2b8ab837a3cfd916ca5160206fa8265e775a09f0de48d311eb3afc7c562f766e",
-      "transaction.py": "848bb6bfd74235f2969b632ae43b04f3387d6f8e878092ff31f68e78fdb4f497",
-      "update_request.py": "6f448b910bdbcf001379fdc35ab87098816c7fa83e640ce1b62fc8d2a658b09e"
-    },
+    "ref": "78646554ad6cd3de12b126b1a6ce020e8fc17b06",
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 21,
-    "acceptance_note": "Latest accepted Installer main generation after #18 and #21; Cube vendored kernel remains byte-identical. Package payload delivery remains distinct from Cube/Sphere native mathematical format.",
+    "owner_pr": 30,
+    "acceptance_note": "Latest accepted Installer main generation through #30; Cube vendored kernel is byte-identical by exact owner Git blob identity. Package payload delivery remains distinct from Cube/Sphere native mathematical format.",
     "accepted_generation_history": [
       {
         "owner_pr": 18,
@@ -41,10 +24,33 @@
       {
         "owner_pr": 21,
         "merge_ref": "64328dd422ec5a751d61c03c382157656272d6f1",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 30,
+        "merge_ref": "78646554ad6cd3de12b126b1a6ce020e8fc17b06",
         "status": "CURRENT_ACCEPTED_MAIN"
       }
     ],
-    "currentness_rule": "Vendored kernel must match latest accepted Installer main generation; a newer lane report about an older merged PR cannot downgrade currentness."
+    "currentness_rule": "Vendored kernel must match latest accepted Installer main generation; a newer lane report about an older merged PR cannot downgrade currentness.",
+    "files_unchanged_git_blob": {
+      "__init__.py": "8638a08518d86ef0fd48933d4b0174c026c59136",
+      "cli.py": "13e024cf0ea41d2603f7a84d75447e977fef83d6",
+      "consent.py": "52e6adfbd15da70dc6d18ded1f9025266ac9c2b7",
+      "dependency_binding.py": "a564603cf76eb29c4537e60e0bc886ea174a53d2",
+      "diagnostics.py": "e173b12fb42b7e33f9e7dd7379491d7048e8e520",
+      "discovery.py": "6b84520098dea4cef3cbf6249fc2437b2184dd14",
+      "managed_update.py": "9b1a9965a54472af9d635b08cfb94fdbbe201caf",
+      "managed_update_cli.py": "89d697e0aae559ffa8d3756179279990e483fa26",
+      "manifest.py": "f49286944b78f158a1eddf9745782929c9fa9571",
+      "observability.py": "27478747baf903ae13d7c3fb0cde862d4ff08287",
+      "redaction.py": "11372bf25339d76d56fc230f7ae1548e8d79a145",
+      "runtime_activation.py": "fd8aadf768036fde4498b34e2e84467638c61ebb",
+      "runtime_profile.py": "475f77f09ab7aa89b1815065d9292b89e2758656",
+      "service_profile.py": "41f932e0d90027a3332c33dc9a5d6db04fd3039e",
+      "transaction.py": "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2",
+      "update_request.py": "abe3b7944d061603142f8ca01b180dcc877d1869"
+    }
   },
   "cli": {
     "source_manifest": "cli-source/SOURCE.json",

@@ -9,6 +9,7 @@ from typing import Any
 from . import __version__
 from .discovery import discover_host
 from .manifest import load_manifest, verify_payload
+from .dependency_binding import bind_dependency_manifest
 from .diagnostics import diagnostic_bundle, evidence_status
 from .observability import OperationJournal, inspect_operation, list_operations
 from .redaction import redact_text
@@ -18,7 +19,6 @@ from .service_profile import compile_service_activation, load_service_profile
 from .update_request import authorize_update, load_update_request
 from .runtime_profile import load_runtime_profile, qualify_update_request
 from .runtime_activation import activate_runtime_profile, revoke_runtime_consent
-from .runtime_binding import load_runtime_binding_profile, runtime_binding_destination
 
 
 def _refs_from_items(items: list[Any]) -> list[dict[str, Any]]:
@@ -155,6 +155,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("payload_root", type=Path)
     ap.add_argument("receipt", type=Path)
     ap.add_argument("--approve", action="store_true", help="required for mutation")
+    bp = sub.add_parser("bind-dependency-manifest")
+    bp.add_argument("manifest", type=Path)
+    bp.add_argument("payload_root", type=Path)
+    bp.add_argument("install_receipt", type=Path)
+    bp.add_argument("binding_receipt", type=Path)
+    bp.add_argument("expected_dependency_id")
+    bp.add_argument("expected_owner_repo")
+    bp.add_argument("expected_generation")
+    bp.add_argument("--approve", action="store_true", help="required for dependency installation")
     rp = sub.add_parser("rollback")
     rp.add_argument("receipt", type=Path)
     rp.add_argument("--approve", action="store_true", help="required for mutation")
@@ -193,8 +202,6 @@ def main(argv: list[str] | None = None) -> int:
     ar.add_argument("--grant", action="append", default=[])
     ar.add_argument("--update-policy", choices=["MANUAL","SECURITY_AUTO","MANAGED"])
     ar.add_argument("--principal-ref", default="local-user")
-    ar.add_argument("--runtime-bindings", type=Path)
-    ar.add_argument("--dependency-binding-receipts", type=Path)
     ar.add_argument("--approve", action="store_true", help="required for runtime activation")
     rr = sub.add_parser("revoke-runtime-consent")
     rr.add_argument("consent_receipt", type=Path)
@@ -243,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 70
 
-    approval_required = args.cmd in {"apply", "rollback", "consent-write", "consent-update", "activate-runtime", "revoke-runtime-consent"} or (
+    approval_required = args.cmd in {"apply", "bind-dependency-manifest", "rollback", "consent-write", "consent-update", "activate-runtime", "revoke-runtime-consent"} or (
         args.cmd == "diagnostic-bundle" and args.output is not None
     )
     if approval_required and not args.approve:
@@ -363,11 +370,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["state"]=="AUTHORIZED_FOR_WARD_ADMISSION" else 3
         if args.cmd == "activate-runtime":
             profile = load_runtime_profile(args.runtime_profile)
-            binding_profile=load_runtime_binding_profile(args.runtime_bindings) if args.runtime_bindings else None
-            dependency_receipts=json.loads(args.dependency_binding_receipts.read_text(encoding="utf-8")) if args.dependency_binding_receipts else None
-            if (args.runtime_bindings is None)!=(args.dependency_binding_receipts is None):
-                raise RuntimeError("RUNTIME_BINDING_ARGUMENTS_MUST_BE_PAIRED")
-            binding_destination=runtime_binding_destination(binding_profile) if binding_profile else None
             result = activate_runtime_profile(
                 profile,
                 grants=args.grant,
@@ -375,9 +377,6 @@ def main(argv: list[str] | None = None) -> int:
                 consent_receipt_path=args.consent_receipt,
                 activation_receipt_path=args.activation_receipt,
                 principal_ref=args.principal_ref,
-                runtime_binding_profile=binding_profile,
-                dependency_binding_receipts=dependency_receipts,
-                runtime_binding_destination=binding_destination,
             )
             finalized = _finish_terminal_or_report_unknown(
                 journal, "passed", "runtime profile activated with local consent and service readback",
@@ -477,6 +476,16 @@ def main(argv: list[str] | None = None) -> int:
                 return 70
             print(json.dumps(receipt, indent=2))
             return 0
+        if args.cmd == "bind-dependency-manifest":
+            m = load_manifest(args.manifest)
+            receipt = bind_dependency_manifest(m,args.payload_root,args.install_receipt,args.binding_receipt,
+                expected_dependency_id=args.expected_dependency_id,expected_owner_repo=args.expected_owner_repo,expected_generation=args.expected_generation)
+            finalized = _finish_terminal_or_report_unknown(journal,"passed","dependency manifest installed and runtime exports independently rebound",
+                expected_action=expected,execution_result="succeeded",do_not_retry_before_reconcile=True,
+                changed_resources=[{"kind":"dependency_binding_receipt","path":redact_text(str(args.binding_receipt))}],rollback_eligible=True,
+                details={"kernel_version":__version__,"dependency_id":receipt["dependency_id"],"accepted_generation":receipt["accepted_generation"]})
+            if not finalized:return 70
+            print(json.dumps(receipt,indent=2));return 0
         if args.cmd == "rollback":
             changed = _receipt_refs(args.receipt)
             rollback(args.receipt)

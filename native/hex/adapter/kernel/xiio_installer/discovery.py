@@ -209,4 +209,7 @@ def discover_host(env: dict[str, str] | None = None) -> dict[str, Any]:
         "commands": legacy_commands,
         "executable_roles": discover_executable_roles(e, family=family),
         "mutation_authority": "NONE",
+        "capabilities": {
+            "runtime_dependency_materialization_exact_generation": True,
+        },
     }
