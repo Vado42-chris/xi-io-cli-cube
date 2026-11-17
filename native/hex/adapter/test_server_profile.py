@@ -102,7 +102,8 @@ class ServerProfileTests(unittest.TestCase):
    rb=server_profile.rollback_server_package(self.home,self.permissions,p,receipt,True)
    self.assertEqual(rb['state'],'ROLLED_BACK_READBACK_VERIFIED')
    self.assertEqual(rb['services'][0]['final']['active_state'],'inactive')
-   self.assertFalse(self.active);self.assertFalse(receipt.exists())
+   self.assertFalse(self.active);self.assertTrue(receipt.exists())
+   self.assertEqual(json.loads(receipt.read_text())['schema_version'],'xiio-installer-receipt-v1')
    self.assertFalse((self.home/'.config/systemd/user/xiio-test.service').exists())
 
  def test_stop_failure_refuses_file_rollback(self):
@@ -132,7 +133,7 @@ class ServerProfileTests(unittest.TestCase):
    receipt=self.home/'receipt.json'
    with self.assertRaisesRegex(ValueError,'SERVER_SERVICE_START_FAILED'):
     server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
-  self.assertFalse(self.active);self.assertFalse(receipt.exists())
+  self.assertFalse(self.active);self.assertTrue(receipt.exists())
   self.assertFalse((self.home/'.config/systemd/user/xiio-test.service').exists())
 
  def test_failed_required_probe_rolls_back_files_and_service(self):
@@ -142,7 +143,7 @@ class ServerProfileTests(unittest.TestCase):
    receipt=self.home/'receipt.json'
    with self.assertRaisesRegex(ValueError,'SERVER_SERVICE_PROBE_FAILED'):
     server_profile.apply_server_package(self.root,self.home,self.permissions,p,receipt,True)
-  self.assertFalse(self.active);self.assertFalse(receipt.exists())
+  self.assertFalse(self.active);self.assertTrue(receipt.exists())
   self.assertFalse((self.home/'.config/systemd/user/xiio-test.service').exists())
 
  def test_failed_probe_with_stop_failure_is_rollback_uncertain_and_keeps_files(self):
