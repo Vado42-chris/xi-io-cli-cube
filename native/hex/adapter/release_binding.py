@@ -21,6 +21,11 @@ def _require(ok: bool, code: str) -> None:
         raise BundleError(code)
 
 
+def _required_text(value, code: str) -> str:
+    _require(isinstance(value, str) and bool(value.strip()), code)
+    return value.strip()
+
+
 def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
                                  expected_product_ref: str,
                                  env: dict[str, str] | None = None,
@@ -58,7 +63,7 @@ def install_from_release_binding(lock: Path, *, release: dict, adopter: dict,
     _require(expected_product_ref in product_ids, "BUNDLE_RELEASE_PRODUCT_NOT_IN_LOCK")
     return _install_bound_release(lock, binding={
         "product_ref": expected_product_ref,
-        "consumer_ref": adopter.get("consumer_ref") or "legacy-adopter-lock",
+        "consumer_ref": _required_text(adopter.get("consumer_ref"), "BUNDLE_RELEASE_CONSUMER_REF_REQUIRED"),
         "release_ref": release.get("release_ref"),
         "release_generation": release.get("release_generation"),
         "approved_lock_sha256": approved,
