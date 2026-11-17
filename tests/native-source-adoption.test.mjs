@@ -48,10 +48,10 @@ test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  assert.ok(ownerBlobs && typeof ownerBlobs==='object' && !Array.isArray(ownerBlobs));
  assert.deepEqual(readdirSync(directory).filter(n=>n.endsWith('.py')).sort(),Object.keys(ownerBlobs).sort());
  for(const [name,blobSha]of Object.entries(ownerBlobs)){
-  assert.match(name,/^[a-z_]+\\.py$/);
+  assert.match(name,/^[a-z_]+\.py$/);
   assert.match(blobSha,/^[0-9a-f]{40}$/);
   const bytes=readFileSync(new URL(name,directory));
-  const gitBlob=createHash('sha1').update(Buffer.from('blob '+bytes.length+'\\0')).update(bytes).digest('hex');
+  const gitBlob=createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');
   assert.equal(gitBlob,blobSha);
 
  }
