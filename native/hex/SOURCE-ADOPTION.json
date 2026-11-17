@@ -11,10 +11,10 @@
   },
   "kernel": {
     "repository": "Vado42-chris/xi-io_installer",
-    "ref": "78646554ad6cd3de12b126b1a6ce020e8fc17b06",
+    "ref": "8bd35c6c8de9e1bc29fccb89a8ebd027e92f288c",
     "acceptance_state": "ACCEPTED_MAIN",
-    "owner_pr": 30,
-    "acceptance_note": "Latest accepted Installer main generation through #30; Cube vendored kernel is byte-identical by exact owner Git blob identity. Package payload delivery remains distinct from Cube/Sphere native mathematical format.",
+    "owner_pr": 31,
+    "acceptance_note": "Latest accepted Installer main generation through #31; shared runtime binding/config primitives are now owned upstream and Cube vendored kernel remains byte-identical by exact owner Git blob identity.",
     "accepted_generation_history": [
       {
         "owner_pr": 18,
@@ -29,6 +29,11 @@
       {
         "owner_pr": 30,
         "merge_ref": "78646554ad6cd3de12b126b1a6ce020e8fc17b06",
+        "status": "ACCEPTED_PREDECESSOR"
+      },
+      {
+        "owner_pr": 31,
+        "merge_ref": "8bd35c6c8de9e1bc29fccb89a8ebd027e92f288c",
         "status": "CURRENT_ACCEPTED_MAIN"
       }
     ],
@@ -37,7 +42,7 @@
       "__init__.py": "8638a08518d86ef0fd48933d4b0174c026c59136",
       "cli.py": "13e024cf0ea41d2603f7a84d75447e977fef83d6",
       "consent.py": "52e6adfbd15da70dc6d18ded1f9025266ac9c2b7",
-      "dependency_binding.py": "a564603cf76eb29c4537e60e0bc886ea174a53d2",
+      "dependency_binding.py": "f5e0efe094bc693e3901b2cbf7c0a9128cad574b",
       "diagnostics.py": "e173b12fb42b7e33f9e7dd7379491d7048e8e520",
       "discovery.py": "6b84520098dea4cef3cbf6249fc2437b2184dd14",
       "managed_update.py": "9b1a9965a54472af9d635b08cfb94fdbbe201caf",
@@ -49,7 +54,9 @@
       "runtime_profile.py": "475f77f09ab7aa89b1815065d9292b89e2758656",
       "service_profile.py": "41f932e0d90027a3332c33dc9a5d6db04fd3039e",
       "transaction.py": "32c0be53c51f96bc2b4cd4028a679cb0ddb1e5a2",
-      "update_request.py": "abe3b7944d061603142f8ca01b180dcc877d1869"
+      "update_request.py": "abe3b7944d061603142f8ca01b180dcc877d1869",
+      "runtime_binding.py": "5353ecaf430b28108c9a11e9a0ec86ca4e70d7ef",
+      "runtime_config.py": "dc0f0d5bb527c07309f12d556f2d7889830a749f"
     }
   },
   "cli": {
