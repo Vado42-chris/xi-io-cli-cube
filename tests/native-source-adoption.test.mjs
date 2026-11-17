@@ -38,7 +38,7 @@ test('kernel closure stays byte-identical to its pinned owner manifest',()=>{
  assert.equal(adoption.kernel.ref,'8ba47176df46491e486063616bde319b2cb2098b');
  assert.equal(adoption.kernel.acceptance_state,'ACCEPTED_MAIN');
  assert.equal(adoption.kernel.owner_pr,35);
- assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21,30,31,34,35]);
+ assert.deepEqual(adoption.kernel.accepted_generation_history.map(x=>x.owner_pr),[18,21,30,31,32,34,35]);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).merge_ref,adoption.kernel.ref);
  assert.equal(adoption.kernel.accepted_generation_history.at(-1).status,'CURRENT_ACCEPTED_MAIN');
  assert.match(adoption.kernel.currentness_rule,/cannot downgrade currentness/);
