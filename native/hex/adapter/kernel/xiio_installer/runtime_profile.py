@@ -97,6 +97,7 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
         raise RuntimeProfileError("SERVICES_ARRAY_REQUIRED")
     dependencies=[]
     dep_ids=set()
+    dep_units=set()
     for i,row in enumerate(raw.get("dependencies",[])):
         if not isinstance(row,dict):
             raise RuntimeProfileError(f"DEPENDENCY_{i}_OBJECT_REQUIRED")
@@ -114,7 +115,11 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
             raise RuntimeProfileError(f"DEPENDENCY_{i}_GENERATION_INVALID")
         if expected_unit is not None and not SAFE_UNIT.fullmatch(expected_unit):
             raise RuntimeProfileError(f"DEPENDENCY_{i}_UNIT_INVALID")
+        if expected_unit is not None and expected_unit in dep_units:
+            raise RuntimeProfileError("DUPLICATE_RUNTIME_DEPENDENCY_UNIT:"+expected_unit)
         dep_ids.add(did)
+        if expected_unit is not None:
+            dep_units.add(expected_unit)
         dependencies.append(RuntimeDependency(
             did,owner,dep_generation,materializer,
             _permissions(row.get("required_for_permissions",[]),f"DEPENDENCY_{i}_PERMISSIONS"),
