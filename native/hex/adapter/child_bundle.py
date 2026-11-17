@@ -366,7 +366,7 @@ def _release_distribution_receipt(manifest, transaction_receipt: Path, output: P
              and tx.get("product_id")==manifest.product_id
              and len(tx.get("entries") or [])==len(manifest.entries),
              "BUNDLE_RELEASE_TRANSACTION_RECEIPT_INVALID")
-    value={"schema":"xiio.installer.release-distribution-install-receipt/v1",
+    value={"schema":"xiio.installer.child-generation-receipt/v1",
            "product_ref":manifest.product_id,"release_generation":generation,
            "bundle_state":"INSTALLED_BYTES_VERIFIED","readback_verified":True,
            "transaction_receipt":transaction_receipt.name,
