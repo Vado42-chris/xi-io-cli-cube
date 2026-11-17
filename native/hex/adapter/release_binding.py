@@ -8,6 +8,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import stat
 import tempfile
 
 from .child_bundle import BundleError, install_bundle, load_bundle_profile, _secure_ensure_state_root
