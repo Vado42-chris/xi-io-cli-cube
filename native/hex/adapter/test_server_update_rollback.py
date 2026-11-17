@@ -57,7 +57,7 @@ class ServerUpdateRollbackTests(unittest.TestCase):
    'central_updates':False,'remote_access':False,'revoked':False})
   self.active=True;self.events=[]
 
- def run(self,args):
+ def fake_run(self,args):
   if args[:3]==['systemctl','--user','show']:
    state='active' if self.active else 'inactive'
    return SimpleNamespace(returncode=0,stdout='LoadState=loaded\nActiveState='+state+'\nSubState='+('running' if self.active else 'dead')+'\n',stderr='')
@@ -81,7 +81,7 @@ class ServerUpdateRollbackTests(unittest.TestCase):
 
  def test_explicit_update_rollback_restores_old_bytes_and_active_state(self):
   plan=self.plan();receipt=self.home/'receipt.json'
-  with patch.object(server_profile.service_profile,'_run',side_effect=self.run), \
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.fake_run), \
        patch.object(server_profile,'_probe',return_value={'state':'PASS','status':200}):
    server_profile.apply_server_package(self.root,self.home,self.permissions,plan,receipt,True)
    self.events=[]
@@ -97,7 +97,7 @@ class ServerUpdateRollbackTests(unittest.TestCase):
 
  def test_failed_update_restores_old_bytes_and_active_state(self):
   plan=self.plan();receipt=self.home/'receipt.json'
-  with patch.object(server_profile.service_profile,'_run',side_effect=self.run), \
+  with patch.object(server_profile.service_profile,'_run',side_effect=self.fake_run), \
        patch.object(server_profile,'_probe',return_value={'state':'UNREACHABLE'}):
    with self.assertRaisesRegex(ValueError,'SERVER_SERVICE_PROBE_FAILED'):
     server_profile.apply_server_package(self.root,self.home,self.permissions,plan,receipt,True)
