@@ -16,6 +16,7 @@ import permission_profile
 import service_profile
 
 SCHEMA='xiio.hex.server-package/v1'
+PLAN_SCHEMA='xiio.hex.server-package-plan/v1'
 UNIT=re.compile(r'^[A-Za-z0-9_.@:-]+\.service$')
 LOOPBACK={'127.0.0.1','localhost','::1','[::1]'}
 
@@ -60,6 +61,7 @@ def load_server_package(root):
   if not isinstance(unit,str) or not UNIT.fullmatch(unit): raise ValueError('SERVER_USER_UNIT_INVALID')
   if unit in seen_units: raise ValueError('SERVER_USER_UNIT_IDENTITY_DUPLICATE:'+unit)
   seen_units.add(unit)
+  if 'required' in row and not isinstance(row['required'],bool): raise ValueError('SERVER_SERVICE_REQUIRED_FLAG_INVALID:'+sid)
   # User units must be installed by this exact payload under systemd/user.
   matches=[e for e in manifest.entries if e.destination_scope=='xdg_config' and e.destination=='systemd/user/'+unit]
   if len(matches)!=1: raise ValueError('SERVER_USER_UNIT_NOT_IN_PAYLOAD:'+sid)
@@ -78,10 +80,12 @@ def prepare_server_package(package_root,home,permissions):
  for sid in service_ids:
   permission_profile.require_capability(permissions,'configure_services',sid)
   permission_profile.require_capability(permissions,'start_services',sid)
+  # A service must never be started unless the same reviewed ceiling can stop it.
+  permission_profile.require_capability(permissions,'stop_services',sid)
  roots=_roots(home)
  plan=[x.__dict__ for x in plan_install(pkg['manifest'],pkg['root'],roots)]
  return {
-  'schema':'xiio.hex.server-package-plan/v1',
+  'schema':PLAN_SCHEMA,
   'package_id':doc['package_id'],'version':doc['version'],'source_ref':doc.get('source_ref'),
   'package_sha256':pkg['package_sha256'],'permission_digest':permissions['permission_digest'],
   'services':doc['services'],'file_plan':plan,
@@ -102,17 +106,60 @@ def _probe(url):
  except urllib.error.HTTPError as e:return {'state':'HTTP_FAIL','status':e.code}
  except Exception:return {'state':'UNREACHABLE'}
 
+def _reviewed_services(reviewed_plan,permissions):
+ if not isinstance(reviewed_plan,dict) or reviewed_plan.get('schema')!=PLAN_SCHEMA:
+  raise ValueError('SERVER_PACKAGE_PLAN_SCHEMA_INVALID')
+ if reviewed_plan.get('permission_digest')!=permissions.get('permission_digest'):
+  raise ValueError('SERVER_PACKAGE_PERMISSION_DIGEST_CHANGED')
+ services=reviewed_plan.get('services')
+ if not isinstance(services,list) or not services: raise ValueError('SERVER_ROLLBACK_SERVICES_REQUIRED')
+ for row in services:
+  if (not isinstance(row,dict) or not isinstance(row.get('service_id'),str)
+      or not isinstance(row.get('unit'),str) or not UNIT.fullmatch(row['unit'])):
+   raise ValueError('SERVER_ROLLBACK_SERVICE_IDENTITY_INVALID')
+ return services
+
+def _stop_services(rows,permissions):
+ results=[];failures=[]
+ for row in reversed(rows):
+  sid=row.get('service_id');unit=row.get('unit')
+  try:
+   permission_profile.require_capability(permissions,'stop_services',sid)
+   before=service_profile.observe_user_unit(unit)
+   r=service_profile._run(['systemctl','--user','stop',unit])
+   if r.returncode!=0: raise ValueError('SERVER_SERVICE_STOP_FAILED:'+sid)
+   after=service_profile.observe_user_unit(unit)
+   if after['active_state']!='inactive': raise ValueError('SERVER_SERVICE_STOP_READBACK_FAILED:'+sid)
+   results.append({'service_id':sid,'unit':unit,'before':before,'after':after})
+  except Exception as exc:
+   failures.append((str(sid),exc))
+ if failures:
+  raise ValueError('SERVER_SERVICE_STOP_OR_READBACK_FAILED:'+','.join(x[0] for x in failures)) from failures[0][1]
+ return results
+
+def _rollback_with_readback(home,permissions,services,receipt_path):
+ stopped=_stop_services(services,permissions)
+ rollback(Path(receipt_path),_roots(home))
+ r=service_profile._run(['systemctl','--user','daemon-reload'])
+ if r.returncode!=0: raise ValueError('SYSTEMD_USER_DAEMON_RELOAD_FAILED')
+ for row in stopped:
+  final=service_profile.observe_user_unit(row['unit'])
+  if final['active_state']!='inactive': raise ValueError('SERVER_SERVICE_ROLLBACK_READBACK_FAILED:'+row['service_id'])
+  row['final']=final
+ return stopped
+
 def apply_server_package(package_root,home,permissions,reviewed_plan,receipt_path,approved):
  if approved is not True: raise ValueError('EXPLICIT_SERVER_PACKAGE_APPROVAL_REQUIRED')
  live=prepare_server_package(package_root,home,permissions)
  if live!=reviewed_plan: raise ValueError('SERVER_PACKAGE_PLAN_CHANGED_SINCE_REVIEW')
+ services=_reviewed_services(live,permissions)
  pkg=load_server_package(package_root)
  receipt=apply_install(pkg['manifest'],pkg['root'],Path(receipt_path),_roots(home))
  started=[]
  try:
   r=service_profile._run(['systemctl','--user','daemon-reload'])
   if r.returncode!=0: raise ValueError('SYSTEMD_USER_DAEMON_RELOAD_FAILED')
-  for row in live['services']:
+  for row in services:
    sid=row['service_id'];unit=row['unit']
    permission_profile.require_capability(permissions,'start_services',sid)
    before=service_profile.observe_user_unit(unit)
@@ -130,23 +177,19 @@ def apply_server_package(package_root,home,permissions,reviewed_plan,receipt_pat
           'permission_digest':permissions['permission_digest'],'services':started,
           'installer_receipt':str(receipt_path),'effect_authorized':True}
  except Exception:
-  for row in reversed(started):
-   try:service_profile._run(['systemctl','--user','stop',row['unit']])
-   except Exception:pass
   try:
-   rollback(Path(receipt_path),_roots(home))
-   service_profile._run(['systemctl','--user','daemon-reload'])
+   _rollback_with_readback(home,permissions,started,receipt_path)
   except Exception as rb:
    raise ValueError('SERVER_PACKAGE_APPLY_FAILED_ROLLBACK_UNCERTAIN') from rb
   raise
 
 def rollback_server_package(home,permissions,reviewed_plan,receipt_path,approved):
  if approved is not True: raise ValueError('EXPLICIT_SERVER_ROLLBACK_APPROVAL_REQUIRED')
- for row in reviewed_plan.get('services',[]):
-  permission_profile.require_capability(permissions,'stop_services',row['service_id'])
-  service_profile._run(['systemctl','--user','stop',row['unit']])
- rollback(Path(receipt_path),_roots(home))
- r=service_profile._run(['systemctl','--user','daemon-reload'])
- if r.returncode!=0: raise ValueError('SYSTEMD_USER_DAEMON_RELOAD_FAILED')
- return {'schema':'xiio.hex.server-package-effect/v1','state':'ROLLED_BACK_READBACK_REQUIRED',
-         'package_id':reviewed_plan.get('package_id'),'effect_authorized':True}
+ services=_reviewed_services(reviewed_plan,permissions)
+ try:
+  stopped=_rollback_with_readback(home,permissions,services,receipt_path)
+ except Exception as exc:
+  raise ValueError('SERVER_PACKAGE_ROLLBACK_FAILED_OR_UNVERIFIED') from exc
+ return {'schema':'xiio.hex.server-package-effect/v1','state':'ROLLED_BACK_READBACK_VERIFIED',
+         'package_id':reviewed_plan.get('package_id'),'permission_digest':permissions['permission_digest'],
+         'services':stopped,'effect_authorized':True}
