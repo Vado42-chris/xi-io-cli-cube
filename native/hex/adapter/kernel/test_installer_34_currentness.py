@@ -8,18 +8,22 @@ def git_blob(path:Path)->str:
  data=path.read_bytes();return hashlib.sha1(f"blob {len(data)}\0".encode()+data).hexdigest()
 
 def test_latest_installer_custody_and_currentness_are_pinned():
- assert ADOPTION["kernel"]["ref"]=="c150a23891f30a48cc162c1244935c370c9df215"
- assert ADOPTION["kernel"]["owner_pr"]==40
+ assert ADOPTION["kernel"]["ref"]=="49848b4abc08fcd51e2e7ace9222d08b8ed1f68f"
+ assert ADOPTION["kernel"]["owner_pr"]==43
  assert ADOPTION["kernel"]["acceptance_state"]=="ACCEPTED_MAIN"
  expected=ADOPTION["kernel"]["files_unchanged_git_blob"]
- for name in ["runtime_profile.py","runtime_binding.py","runtime_activation.py","running_generation.py","dependency_receipt_verification.py"]:
+ for name in ["cli.py","dependency_binding.py","runtime_profile.py","runtime_binding.py","runtime_activation.py","running_generation.py","dependency_receipt_verification.py"]:
   assert git_blob(KERNEL/name)==expected[name]
 
 def test_runtime_binding_consumes_persisted_verifier_and_activation_requires_component_generation():
- binding=(KERNEL/"runtime_binding.py").read_text();activation=(KERNEL/"runtime_activation.py").read_text();profile=(KERNEL/"runtime_profile.py").read_text()
+ binding=(KERNEL/"runtime_binding.py").read_text();activation=(KERNEL/"runtime_activation.py").read_text();profile=(KERNEL/"runtime_profile.py").read_text();dependency=(KERNEL/"dependency_binding.py").read_text();cli=(KERNEL/"cli.py").read_text()
  assert "verify_dependency_binding_receipt" in binding
  assert "RUNTIME_BINDING_RECEIPT_UNVERIFIED" in binding
  assert "verify_running_generation" in activation
+ assert "verify_dependency_binding_receipt" in activation
+ assert "RUNTIME_DEPENDENCY_BINDING_UNVERIFIED" in activation
+ assert "xiio.installer-dependency-descriptor/v1" in dependency
+ assert "--descriptor" in cli
  assert "service.declared_generation or profile.generation" in activation
  assert '"profile_generation":profile.generation' in activation
  assert '"declared_component_generation":service.declared_generation or profile.generation' in activation
