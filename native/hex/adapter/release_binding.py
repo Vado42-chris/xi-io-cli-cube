@@ -81,7 +81,7 @@ def _install_bound_release(lock: Path, *, binding: dict, env=None, fetch=None):
     state_root.mkdir(parents=True,exist_ok=True,mode=0o700)
     receipt={"schema":"xiio.installer.release-distribution-install-receipt/v1","product_ref":product_ref,"consumer_ref":consumer_ref,
         "release_ref":binding.get("release_ref"),"release_generation":binding.get("release_generation"),
-        "approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),"bundle_state":installed.get("state"),
+        "entrypoint_qualification_ref":binding.get("entrypoint_qualification_ref"),"approved_lock_sha256":approved,"bundle_profile_id":installed.get("profile_id"),"bundle_state":installed.get("state"),
         "installed_role_count":len(installed.get("roles") or []),"readback_verified":installed.get("state")=="INSTALLED_BYTES_VERIFIED","effect_authority":False}
     name=hashlib.sha256((product_ref+"|"+consumer_ref+"|"+str(binding.get("release_generation"))).encode()).hexdigest()+".json";target=state_root/name
     if target.exists():
@@ -133,6 +133,7 @@ def install_from_distribution_reader(lock: Path, *, product_ref: str, consumer_r
     profile = load_bundle_profile(Path(lock), allowed_hosts=allowed)
     product_ids = {manifest.product_id for manifest, _urls, _deps in profile["products"].values()}
     _require(product_ref in product_ids, "BUNDLE_RELEASE_PRODUCT_NOT_IN_LOCK")
+    _required_text(binding.get("entrypoint_qualification_ref"), "BUNDLE_ENTRYPOINT_QUALIFICATION_REF_REQUIRED")
     return _install_bound_release(Path(lock),binding=binding,env=env,fetch=fetch)
 
 
