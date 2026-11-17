@@ -11,6 +11,7 @@ import os
 import tempfile
 
 from .child_bundle import BundleError, install_bundle, load_bundle_profile
+from .framework_release_reader import build_framework_release_distribution_reader
 
 RELEASE_SCHEMA = "xiio.framework.distributable-release-projection/v1"
 ADOPTER_SCHEMA = "xiio.framework.release-adopter-lock/v1"
@@ -132,3 +133,23 @@ def install_from_distribution_reader(lock: Path, *, product_ref: str, consumer_r
     product_ids = {manifest.product_id for manifest, _urls, _deps in profile["products"].values()}
     _require(product_ref in product_ids, "BUNDLE_RELEASE_PRODUCT_NOT_IN_LOCK")
     return _install_bound_release(Path(lock),binding=binding,env=env,fetch=fetch)
+
+
+def install_from_installed_framework_release(lock: Path, *, product_ref: str,
+                                             consumer_ref: str,
+                                             framework_release_distribution_module: Path,
+                                             read_accepted_release,
+                                             read_current_adopter,
+                                             env: dict[str, str] | None = None,
+                                             fetch=None, node_binary: str = "node"):
+    """Compose the installed Framework export into the existing native receiver."""
+    reader = build_framework_release_distribution_reader(
+        framework_release_distribution_module=framework_release_distribution_module,
+        read_accepted_release=read_accepted_release,
+        read_current_adopter=read_current_adopter,
+        node_binary=node_binary,
+    )
+    return install_from_distribution_reader(
+        lock, product_ref=product_ref, consumer_ref=consumer_ref,
+        read_release_distribution=reader, env=env, fetch=fetch,
+    )
