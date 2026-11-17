@@ -104,9 +104,8 @@ def load_runtime_profile(path:Path)->RuntimeProfile:
         # breaks CONSENT_PROFILE_GENERATION_STALE / hotpatch qualification.
         dep_generation=_text(row.get("accepted_generation"),f"DEPENDENCY_{i}_GENERATION")
         materializer=_text(row.get("materializer"),f"DEPENDENCY_{i}_MATERIALIZER")
-        expected_unit=row.get("expected_unit")
-        if expected_unit is not None:
-            expected_unit=_text(expected_unit,f"DEPENDENCY_{i}_UNIT")
+        expected_unit_raw=row.get("expected_unit")
+        expected_unit=_text(expected_unit_raw,f"DEPENDENCY_{i}_UNIT") if expected_unit_raw is not None else None
         if did in dep_ids:
             raise RuntimeProfileError("DUPLICATE_RUNTIME_DEPENDENCY")
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}",dep_generation):
