@@ -148,7 +148,7 @@ def activate_runtime_profile(
                 raise RuntimeActivationError("SERVICE_NOT_ACTIVE:"+service.service_id)
             health=_probe(service.health_url)
             try:
-                generation_readback=verify_running_generation(declared_generation=profile.generation,health=health)
+                generation_readback=verify_running_generation(declared_generation=profile.generation,health=health,generation_field=service.generation_field)
             except RunningGenerationError as exc:
                 raise RuntimeActivationError(str(exc)) from exc
             activated.append({
