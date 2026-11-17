@@ -40,7 +40,8 @@ def load_server_package(root):
  root=Path(root)
  if not root.is_absolute() or root.is_symlink() or not root.is_dir(): raise ValueError('SERVER_PACKAGE_ROOT_UNTRUSTED')
  manifest_path=root/'server-package.json'
- doc=json.loads(_read(manifest_path))
+ descriptor_bytes=_read(manifest_path)
+ doc=json.loads(descriptor_bytes)
  allowed={'schema','package_id','version','channel','source_ref','payload_manifest','services'}
  if set(doc)-allowed or doc.get('schema')!=SCHEMA: raise ValueError('SERVER_PACKAGE_SCHEMA_INVALID')
  if not isinstance(doc.get('package_id'),str) or not doc['package_id']: raise ValueError('SERVER_PACKAGE_ID_INVALID')
@@ -71,10 +72,9 @@ def load_server_package(root):
    if u.scheme not in ('http','https') or u.hostname not in LOOPBACK or u.username or u.password or u.fragment:
     raise ValueError('SERVER_PROBE_NOT_LOOPBACK:'+sid)
  return {'document':doc,'manifest':manifest,'manifest_path':payload_manifest,
-         'package_sha256':sha(_read(manifest_path)),'root':root}
+         'package_sha256':sha(descriptor_bytes),'root':root}
 
-def prepare_server_package(package_root,home,permissions):
- pkg=load_server_package(package_root)
+def _prepare_loaded_server_package(pkg,home,permissions):
  doc=pkg['document']
  service_ids=[x['service_id'] for x in doc['services']]
  for sid in service_ids:
@@ -95,6 +95,9 @@ def prepare_server_package(package_root,home,permissions):
           'START_ALLOWED!=START_APPROVED','CENTRAL_REQUEST!=LOCAL_AUTHORITY',
           'USER_SERVICE_ONLY','ROLLBACK_REQUIRED'],
  }
+
+def prepare_server_package(package_root,home,permissions):
+ return _prepare_loaded_server_package(load_server_package(package_root),home,permissions)
 
 def _probe(url):
  if url is None:return {'state':'NO_PROBE_DECLARED'}
@@ -154,11 +157,13 @@ def _rollback_with_readback(home,permissions,services,receipt_path):
 
 def apply_server_package(package_root,home,permissions,reviewed_plan,receipt_path,approved):
  if approved is not True: raise ValueError('EXPLICIT_SERVER_PACKAGE_APPROVAL_REQUIRED')
- live=prepare_server_package(package_root,home,permissions)
+ # Load once, compile the review from that exact object, and apply the same
+ # manifest/payload identity. A second package read cannot replace reviewed bytes.
+ pkg=load_server_package(package_root)
+ live=_prepare_loaded_server_package(pkg,home,permissions)
  if live!=reviewed_plan: raise ValueError('SERVER_PACKAGE_PLAN_CHANGED_SINCE_REVIEW')
  services=_reviewed_services(live,permissions)
- pkg=load_server_package(package_root)
- receipt=apply_install(pkg['manifest'],pkg['root'],Path(receipt_path),_roots(home))
+ apply_install(pkg['manifest'],pkg['root'],Path(receipt_path),_roots(home))
  started=[]
  try:
   r=service_profile._run(['systemctl','--user','daemon-reload'])
