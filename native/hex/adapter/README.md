@@ -220,3 +220,13 @@ The existing packaged source now carries exact CLI PR16 `958a5fe9d4a409e4ab2b690
 Rollback readback binds the exact reviewed previous receipt, rather than demanding that a historical six-file generation contain the newly added module. PR15 launcher-only repair retains its original verifier bytes in the separately named resource above; its installer, hashes and generation-preservation contract are unchanged.
 
 `test_connection_delivery.py` exercises actual adapter install, installed CLI invocation through native refusal, six-to-seven-file update and rollback, missing-payload refusal and prior-receipt drift. Missing/invalid bindings are deliberate negative tests, not enrollment, authentication, connected or remote-execution evidence.
+
+### Accepted kernel currentness regression
+
+The historical `kernel/test_installer_34_currentness.py` filename is retained,
+but its unittest controls qualify the accepted Installer #40 generation named
+in `../SOURCE-ADOPTION.json`, not the retired #34 pin. The existing
+`child-bundle-kernel` workflow executes these controls alongside dependency and
+runtime bindings. Predecessor pins and substituted embedded bytes must refuse.
+This verifies source custody/consumer contracts, not a running product, current
+Ward posture, account/session admission or installed OS-container interaction.

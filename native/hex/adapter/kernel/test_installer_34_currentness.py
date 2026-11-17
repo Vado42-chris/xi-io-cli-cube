@@ -1,4 +1,5 @@
-import hashlib,json
+import hashlib,json,unittest
+from unittest.mock import patch
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent
 KERNEL=ROOT/"xiio_installer"
@@ -7,7 +8,9 @@ def git_blob(path:Path)->str:
  data=path.read_bytes();return hashlib.sha1(f"blob {len(data)}\0".encode()+data).hexdigest()
 
 def test_latest_installer_custody_and_currentness_are_pinned():
- assert ADOPTION["kernel"]["ref"]=="6567f0b135d7a08971c6fa48fde1c6045dc037d1"
+ assert ADOPTION["kernel"]["ref"]=="c150a23891f30a48cc162c1244935c370c9df215"
+ assert ADOPTION["kernel"]["owner_pr"]==40
+ assert ADOPTION["kernel"]["acceptance_state"]=="ACCEPTED_MAIN"
  expected=ADOPTION["kernel"]["files_unchanged_git_blob"]
  for name in ["runtime_profile.py","runtime_binding.py","runtime_activation.py","running_generation.py","dependency_receipt_verification.py"]:
   assert git_blob(KERNEL/name)==expected[name]
@@ -22,3 +25,20 @@ def test_runtime_binding_consumes_persisted_verifier_and_activation_requires_com
  assert '"declared_component_generation":service.declared_generation or profile.generation' in activation
  assert "declared_generation:str|None" in profile
  assert 'row.get("declared_generation")' in profile
+
+# Preserve historical filename/function entry points; make both actual controls
+# visible to the existing unittest receiving-package denominator.
+class AcceptedInstallerCurrentnessTests(unittest.TestCase):
+ def test_accepted_installer_custody(self):
+  test_latest_installer_custody_and_currentness_are_pinned()
+ def test_runtime_binding_consumer(self):
+  test_runtime_binding_consumes_persisted_verifier_and_activation_requires_component_generation()
+ def test_predecessor_pin_is_not_current(self):
+  with patch.dict(ADOPTION["kernel"],ref="6567f0b135d7a08971c6fa48fde1c6045dc037d1"):
+   with self.assertRaises(AssertionError): test_latest_installer_custody_and_currentness_are_pinned()
+ def test_changed_embedded_bytes_refuse(self):
+  with patch(__name__+".git_blob",return_value="0"*40):
+   with self.assertRaises(AssertionError): test_latest_installer_custody_and_currentness_are_pinned()
+
+if __name__=="__main__":
+ unittest.main()
