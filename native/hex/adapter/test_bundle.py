@@ -179,6 +179,24 @@ class BundleTests(unittest.TestCase):
         verified=verify_dependency_binding_receipt(Path(row["path"]),expected_dependency_id="node",expected_owner_repo="owner/node",expected_generation=generation)
         self.assertEqual(verified["state"],"VERIFIED");self.assertTrue(verified["custody_verified"])
 
+    def test_changed_export_before_binding_refuses_without_false_rollback_credit(self):
+        from xiio_installer.transaction import apply_install as owner_apply
+        for change in ("bytes", "mode"):
+            with self.subTest(change=change):
+                f=self.fixture();f.child("node",fixture=False,accepted_generation="b"*40,runtime_export=True)
+                lock,digest=f.lock(fixture=False)
+                target=Path(f.env["XDG_DATA_HOME"])/"xi-io/node/node.bin"
+                def drift(*args,**kwargs):
+                    result=owner_apply(*args,**kwargs)
+                    if change=="bytes":target.write_bytes(b"changed after installation")
+                    else:target.chmod(0o600)
+                    return result
+                with patch("child_bundle.apply_install",side_effect=drift):
+                    with self.assertRaisesRegex(BundleError,"BUNDLE_PARTIAL_ROLLBACK_UNVERIFIED_DO_NOT_RETRY"):
+                        install_bundle(lock,approved_lock_sha256=digest,env=f.env,fetch=f.fetch)
+                self.assertFalse(list(f.root.rglob("*.binding.json")))
+                self.assertTrue(target.exists())  # modified bytes are not silently deleted
+
     def test_release_hosts_reject_wildcards_private_local_and_malformed(self):
         f = self.fixture()
         f.child("cli")

@@ -8,8 +8,8 @@ def git_blob(path:Path)->str:
  data=path.read_bytes();return hashlib.sha1(f"blob {len(data)}\0".encode()+data).hexdigest()
 
 def test_latest_installer_custody_and_currentness_are_pinned():
- assert ADOPTION["kernel"]["ref"]=="49848b4abc08fcd51e2e7ace9222d08b8ed1f68f"
- assert ADOPTION["kernel"]["owner_pr"]==43
+ assert ADOPTION["kernel"]["ref"]=="7768544865e6429c10da32153b41a22d7dfabefe"
+ assert ADOPTION["kernel"]["owner_pr"]==51
  assert ADOPTION["kernel"]["acceptance_state"]=="ACCEPTED_MAIN"
  expected=ADOPTION["kernel"]["files_unchanged_git_blob"]
  for name in ["cli.py","dependency_binding.py","runtime_profile.py","runtime_binding.py","runtime_activation.py","running_generation.py","dependency_receipt_verification.py"]:
@@ -24,6 +24,8 @@ def test_runtime_binding_consumes_persisted_verifier_and_activation_requires_com
  assert "RUNTIME_DEPENDENCY_BINDING_UNVERIFIED" in activation
  assert "xiio.installer-dependency-descriptor/v1" in dependency
  assert "--descriptor" in cli
+ assert "sha256_file(target) != expected.sha256" in dependency
+ assert "target.stat().st_mode & 0o777" in dependency
  assert "service.declared_generation or profile.generation" in activation
  assert '"profile_generation":profile.generation' in activation
  assert '"declared_component_generation":service.declared_generation or profile.generation' in activation

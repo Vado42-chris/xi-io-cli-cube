@@ -66,6 +66,9 @@ def compile_dependency_binding_receipt(manifest:ProductManifest,install_receipt:
             raise DependencyBindingError("DEPENDENCY_BINDING_EXPORT_READBACK_MISMATCH:"+name)
         target=roots[scope]/destination
         if target.is_symlink() or not target.is_file(): raise DependencyBindingError("DEPENDENCY_BINDING_EXPORT_FILE_MISSING:"+name)
+        # The install receipt records a past observation, not current file custody.
+        if (target.stat().st_mode & 0o777) != expected.mode or sha256_file(target) != expected.sha256:
+            raise DependencyBindingError("DEPENDENCY_BINDING_EXPORT_READBACK_MISMATCH:"+name)
         fields[name]=str(target.resolve())
         projected[name]={"destination_scope":scope,"destination":destination,"sha256":expected.sha256,"mode":f"{expected.mode:04o}"}
     receipt={"schema":"xiio.installer-dependency-binding-receipt/v1","state":"BOUND","dependency_id":dependency_id,"owner_repo":owner,"accepted_generation":generation,"product_id":manifest.product_id,"binding_receipt_path":str(binding_path),"runtime_exports":projected,"fields":fields,"provider_effect":False,"effect_authority":False}
