@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -200,6 +201,110 @@ def activate_runtime_profile(
     if readback!=receipt:
         raise RuntimeActivationError("ACTIVATION_RECEIPT_READBACK_MISMATCH")
     return receipt
+
+
+def verify_runtime_activation_receipt(
+    activation_receipt_path:Path,
+    *,
+    expected_profile_id:str,
+    expected_product_id:str,
+    expected_profile_generation:str,
+)->dict[str,Any]:
+    path=Path(activation_receipt_path)
+    if not path.is_absolute():
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_PATH_ABSOLUTE_REQUIRED")
+    try:
+        resolved=path.resolve(strict=True)
+        stat=path.lstat()
+    except OSError as exc:
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_UNREADABLE") from exc
+    if resolved!=path or path.is_symlink() or not path.is_file():
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_CUSTODY_INVALID")
+    if os.name!="nt" and (stat.st_mode & 0o077)!=0:
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_MODE_INVALID")
+    try:
+        raw=path.read_bytes()
+    except OSError as exc:
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_UNREADABLE") from exc
+    if len(raw)>1024*1024:
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_OVERSIZE")
+    try:
+        receipt=json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_JSON_INVALID") from exc
+    if not isinstance(receipt,dict) or receipt.get("schema")!="xiio-installer-runtime-activation-receipt-v1":
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_SCHEMA_INVALID")
+    profile_id=str(expected_profile_id or "").strip()
+    product_id=str(expected_product_id or "").strip()
+    profile_generation=str(expected_profile_generation or "").strip()
+    if not profile_id or not product_id or not profile_generation:
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_EXPECTATION_REQUIRED")
+    if receipt.get("profile_id")!=profile_id or receipt.get("product_id")!=product_id or receipt.get("profile_generation")!=profile_generation:
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_IDENTITY_MISMATCH")
+    if receipt.get("readback_verified") is not True or receipt.get("provider_effect") is not False:
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_RECEIPT_NOT_VERIFIED")
+    rows=receipt.get("services")
+    if not isinstance(rows,list):
+        raise RuntimeActivationError("RUNTIME_ACTIVATION_SERVICES_ARRAY_REQUIRED")
+    seen_services=set()
+    seen_units=set()
+    verified=[]
+    for index,row in enumerate(rows):
+        if not isinstance(row,dict):
+            raise RuntimeActivationError(f"RUNTIME_ACTIVATION_SERVICE_{index}_OBJECT_REQUIRED")
+        service_id=str(row.get("service_id") or "").strip()
+        unit=str(row.get("unit") or "").strip()
+        health_url=str(row.get("health_url") or "").strip()
+        declared=str(row.get("declared_component_generation") or "").strip()
+        if not service_id or not unit or not health_url or not declared:
+            raise RuntimeActivationError(f"RUNTIME_ACTIVATION_SERVICE_{index}_IDENTITY_INCOMPLETE")
+        if service_id in seen_services or unit in seen_units:
+            raise RuntimeActivationError("RUNTIME_ACTIVATION_SERVICE_DUPLICATE")
+        seen_services.add(service_id);seen_units.add(unit)
+        if not (health_url.startswith("http://127.0.0.1:") or health_url.startswith("https://127.0.0.1:")):
+            raise RuntimeActivationError("RUNTIME_ACTIVATION_SERVICE_HEALTH_NOT_LOOPBACK")
+        if row.get("profile_generation")!=profile_generation or row.get("active") is not True:
+            raise RuntimeActivationError("RUNTIME_ACTIVATION_SERVICE_NOT_CURRENT")
+        stored=row.get("generation_readback")
+        if not isinstance(stored,dict) or stored.get("schema")!="xiio.installer-running-generation-readback/v1" or stored.get("state")!="CURRENT":
+            raise RuntimeActivationError("RUNTIME_ACTIVATION_GENERATION_READBACK_INVALID")
+        if stored.get("provider_effect") is not False or stored.get("effect_authority") is not False:
+            raise RuntimeActivationError("RUNTIME_ACTIVATION_GENERATION_READBACK_EFFECTFUL")
+        generation_field=str(stored.get("generation_field") or "").strip()
+        if not generation_field or stored.get("declared_generation")!=declared or stored.get("running_generation")!=declared:
+            raise RuntimeActivationError("RUNTIME_ACTIVATION_GENERATION_READBACK_MISMATCH")
+        live_health=_probe(health_url)
+        try:
+            live=verify_running_generation(
+                declared_generation=declared,
+                health=live_health,
+                generation_field=generation_field,
+            )
+        except RunningGenerationError as exc:
+            raise RuntimeActivationError(str(exc)) from exc
+        verified.append({
+            "service_id":service_id,
+            "unit":unit,
+            "health_url":health_url,
+            "profile_generation":profile_generation,
+            "declared_component_generation":declared,
+            "generation_readback":live,
+            "health_schema":live_health.get("schema") if isinstance(live_health,dict) else None,
+            "active":True,
+        })
+    return {
+        "schema":"xiio.installer-runtime-activation-verification/v1",
+        "state":"VERIFIED",
+        "profile_id":profile_id,
+        "profile_generation":profile_generation,
+        "product_id":product_id,
+        "activation_receipt_path":str(resolved),
+        "activation_receipt_sha256":hashlib.sha256(raw).hexdigest(),
+        "services":verified,
+        "custody_verified":True,
+        "provider_effect":False,
+        "effect_authority":False,
+    }
 
 def revoke_runtime_consent(consent_receipt_path:Path)->dict[str,Any]:
     if not consent_receipt_path.exists():
