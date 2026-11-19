@@ -88,6 +88,13 @@ def _handle_product_request(req):
     for field in ("release_lock", "framework_binding_receipt", "node"):
         demand(isinstance(req.get(field), str), "PRODUCT_RECEIVER_PATH_REQUIRED")
         safe_path(Path(req[field]))
+    if action == "product_apply":
+        demand(req.get("approved") is True,
+               "PRODUCT_EXACT_APPROVAL_REQUIRED")
+        review_digest = req.get("review_digest")
+        demand(isinstance(review_digest, str)
+               and bool(_SHA256.fullmatch(review_digest)),
+               "PRODUCT_REVIEW_DIGEST_INVALID")
     observed_node = node_identity(req["node"])
     common = {
         "release_lock": req["release_lock"],
@@ -97,12 +104,6 @@ def _handle_product_request(req):
     }
     if action == "product_inspect":
         return native_product_receiver.inspect_product_release(**common)
-    demand(req.get("approved") is True,
-           "PRODUCT_EXACT_APPROVAL_REQUIRED")
-    review_digest = req.get("review_digest")
-    demand(isinstance(review_digest, str)
-           and bool(_SHA256.fullmatch(review_digest)),
-           "PRODUCT_REVIEW_DIGEST_INVALID")
     return native_product_receiver.apply_product_release(
         **common,
         review_digest=review_digest,

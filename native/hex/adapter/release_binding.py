@@ -12,9 +12,14 @@ import os
 import stat
 import tempfile
 
-from .child_bundle import BundleError, install_bundle, load_bundle_profile, _secure_ensure_state_root
-from .framework_release_reader import build_framework_release_distribution_reader
-from .framework_release_export import resolve_framework_release_distribution_module
+if __package__:
+    from .child_bundle import BundleError, install_bundle, load_bundle_profile, _secure_ensure_state_root
+    from .framework_release_reader import build_framework_release_distribution_reader
+    from .framework_release_export import resolve_framework_release_distribution_module
+else:
+    from child_bundle import BundleError, install_bundle, load_bundle_profile, _secure_ensure_state_root
+    from framework_release_reader import build_framework_release_distribution_reader
+    from framework_release_export import resolve_framework_release_distribution_module
 
 RELEASE_SCHEMA = "xiio.framework.distributable-release-projection/v1"
 ADOPTER_SCHEMA = "xiio.framework.release-adopter-lock/v1"

@@ -263,9 +263,18 @@ class InstallerAdapterProductDispatchTests(unittest.TestCase):
                          "PRODUCT_BYTES_INSTALLED_READBACK_VERIFIED")
         apply.assert_called_once()
         request["approved"] = False
-        with self.assertRaisesRegex(self.adapter.Refused,
-                                    "^PRODUCT_EXACT_APPROVAL_REQUIRED$"):
-            self.adapter.handle(request)
+        with patch.object(self.adapter, "node_identity") as node:
+            with self.assertRaisesRegex(self.adapter.Refused,
+                                        "^PRODUCT_EXACT_APPROVAL_REQUIRED$"):
+                self.adapter.handle(request)
+            node.assert_not_called()
+        request["approved"] = True
+        request["review_digest"] = "invalid"
+        with patch.object(self.adapter, "node_identity") as node:
+            with self.assertRaisesRegex(self.adapter.Refused,
+                                        "^PRODUCT_REVIEW_DIGEST_INVALID$"):
+                self.adapter.handle(request)
+            node.assert_not_called()
 
 
 if __name__ == "__main__":
