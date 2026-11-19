@@ -1,5 +1,7 @@
 import hashlib
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -228,6 +230,30 @@ class InstallerAdapterProductDispatchTests(unittest.TestCase):
         if action == "product_apply":
             value.update(review_digest="d" * 64, approved=True)
         return value
+
+    def test_packaged_python_transport_reaches_product_inspection(self):
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "native package qualification requires Node")
+        with tempfile.TemporaryDirectory(prefix="xiio-product-carrier-") as directory:
+            root = Path(directory).resolve()
+            request = {
+                "action": "product_inspect",
+                "release_lock": str(root / "missing-release.lock"),
+                "framework_binding_receipt": str(root / "missing-framework.json"),
+                "framework_generation": "c" * 40,
+                "node": str(Path(node).resolve()),
+            }
+            result = subprocess.run(
+                [sys.executable, "-I", "-B", str(HERE / "installer_adapter.py")],
+                input=json.dumps(request), text=True, capture_output=True,
+                cwd=HERE, env={"HOME": directory, "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+                timeout=15, check=True,
+            )
+            self.assertEqual(json.loads(result.stdout), {
+                "ok": False, "error": "PRODUCT_RELEASE_LOCK_UNTRUSTED",
+            })
+            self.assertFalse(result.stderr)
+            self.assertEqual(list(root.iterdir()), [])
 
     def test_wrapper_dispatches_only_exact_product_fields(self):
         expected = {"phase": "PRODUCT_REVIEW_REQUIRED"}
