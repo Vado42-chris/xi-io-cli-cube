@@ -11,7 +11,10 @@ import json
 import os
 import subprocess
 
-from .child_bundle import BundleError
+if __package__:
+    from .child_bundle import BundleError
+else:
+    from child_bundle import BundleError
 
 
 def _require(ok: bool, code: str) -> None:

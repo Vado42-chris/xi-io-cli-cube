@@ -2,9 +2,10 @@
 """Stable finite HEX installer adapter with Framework product/API consumption.
 
 The accepted implementation is retained byte-for-byte in
-installer_adapter_core.py. This surface only binds server-package requests to an
-installed, Installer-verified Framework product API module before delegating to
-the accepted transaction engine.
+installer_adapter_core.py. This surface binds server-package requests to the
+installed Framework product/API module and product-release requests to the
+installed Framework release reader before delegating effects to accepted
+transaction owners.
 """
 from pathlib import Path
 
@@ -27,6 +28,7 @@ import re
 
 import framework_product_api_reader
 import framework_release_export
+import native_product_receiver
 from child_bundle import BundleError
 
 _CORE_HANDLE = handle
@@ -35,7 +37,18 @@ _FRAMEWORK_SERVER_ACTIONS = {
     "server_prepare", "server_apply", "hotpatch_prepare", "hotpatch_apply",
 }
 _FRAMEWORK_REQUEST_FIELDS = {"framework_binding_receipt", "framework_generation"}
+_PRODUCT_ACTION_FIELDS = {
+    "product_inspect": {
+        "action", "release_lock", "framework_binding_receipt",
+        "framework_generation", "node",
+    },
+    "product_apply": {
+        "action", "release_lock", "framework_binding_receipt",
+        "framework_generation", "node", "review_digest", "approved",
+    },
+}
 _ACCEPTED_GENERATION = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _framework_product_api_context(req):
@@ -63,6 +76,41 @@ def _framework_product_api_context(req):
     return server_profile.bind_product_api_context(reader, export)
 
 
+def _handle_product_request(req):
+    action = req.get("action")
+    demand(action in _PRODUCT_ACTION_FIELDS
+           and set(req) == _PRODUCT_ACTION_FIELDS[action],
+           "PRODUCT_RECEIVER_FIELDS_INVALID")
+    generation = req.get("framework_generation")
+    demand(isinstance(generation, str)
+           and bool(_ACCEPTED_GENERATION.fullmatch(generation)),
+           "FRAMEWORK_RELEASE_GENERATION_INVALID")
+    for field in ("release_lock", "framework_binding_receipt", "node"):
+        demand(isinstance(req.get(field), str), "PRODUCT_RECEIVER_PATH_REQUIRED")
+        safe_path(Path(req[field]))
+    if action == "product_apply":
+        demand(req.get("approved") is True,
+               "PRODUCT_EXACT_APPROVAL_REQUIRED")
+        review_digest = req.get("review_digest")
+        demand(isinstance(review_digest, str)
+               and bool(_SHA256.fullmatch(review_digest)),
+               "PRODUCT_REVIEW_DIGEST_INVALID")
+    observed_node = node_identity(req["node"])
+    common = {
+        "release_lock": req["release_lock"],
+        "framework_binding_receipt": req["framework_binding_receipt"],
+        "framework_generation": generation,
+        "node": observed_node,
+    }
+    if action == "product_inspect":
+        return native_product_receiver.inspect_product_release(**common)
+    return native_product_receiver.apply_product_release(
+        **common,
+        review_digest=review_digest,
+        approved=True,
+    )
+
+
 def handle_repair(req, base, p):
     """Audit the preserved repair ordering before delegating to its exact core."""
     qualification = _CORE_SOURCE.index('qualification = qualify_precommand_targets(')
@@ -82,6 +130,8 @@ def handle_repair(req, base, p):
 
 
 def handle(req):
+    if isinstance(req, dict) and req.get("action") in _PRODUCT_ACTION_FIELDS:
+        return _handle_product_request(req)
     if not isinstance(req, dict) or req.get("action") not in _FRAMEWORK_SERVER_ACTIONS:
         return _CORE_HANDLE(req)
     context = _framework_product_api_context(req)
