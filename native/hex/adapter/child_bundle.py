@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from xiio_installer.discovery import xdg_roots
-from xiio_installer.dependency_binding import compile_dependency_binding_receipt
+from xiio_installer.dependency_binding import compile_dependency_binding_receipt, _dep, DependencyBindingError
 from xiio_installer.manifest import load_manifest, sha256_file, verify_payload
 from xiio_installer.transaction import (TransactionError, apply_install, plan_install,
     qualify_precommand_install_plans, qualify_precommand_manifests, rollback)
@@ -190,13 +190,25 @@ def load_bundle_profile(lock: Path, *,
     _require(isinstance(rows, list) and 0 < len(rows) <= 32,
              "BUNDLE_PRODUCT_COUNT_INVALID")
     products = {}
+    # Product-mode descriptors are exact, separately checked lock children.
+    # Strict Installer manifests never carry runtime_exports or release authority.
+    product_descriptors = {}
+    release_generations = {}
     product_ids = set()
     destinations = set()
     for row in rows:
-        _require(isinstance(row, dict) and set(row) ==
-                 {"role", "product_id", "manifest", "manifest_sha256",
-                  "depends_on", "payload_urls"},
-                 "BUNDLE_PRODUCT_FIELDS_INVALID")
+        row_fields = {"role", "product_id", "manifest", "manifest_sha256",
+                      "depends_on", "payload_urls"}
+        _require(isinstance(row, dict), "BUNDLE_PRODUCT_FIELDS_INVALID")
+        if profile_mode == "product":
+            # A dependency descriptor is a different coordinate from the
+            # product manifest, never an inferred field in manifest.raw.
+            extra = set(row) - row_fields
+            _require(extra in ({"release_generation"},
+                               {"release_generation", "descriptor_ref", "descriptor_sha256"}),
+                     "BUNDLE_PRODUCT_FIELDS_INVALID")
+        else:
+            _require(set(row) == row_fields, "BUNDLE_PRODUCT_FIELDS_INVALID")
         role = row["role"]
         _require(isinstance(role, str) and SAFE_ID.fullmatch(role)
                  and role not in products, "BUNDLE_PRODUCT_ROLE_INVALID")
@@ -223,6 +235,58 @@ def load_bundle_profile(lock: Path, *,
                  "BUNDLE_PRODUCT_VERSION_INVALID")
         _require(manifest.product_id == product_id and manifest.fixture == fixture,
                  "BUNDLE_PRODUCT_MANIFEST_IDENTITY_MISMATCH")
+        if profile_mode == "product":
+            # Product mode refuses the historical manifest.raw shortcut even
+            # if a permissive old parser accepts the extra keys.
+            _require(not any(key in manifest.raw for key in
+                             ("accepted_generation", "runtime_exports",
+                              "dependency_id", "owner_repo")),
+                     "BUNDLE_PRODUCT_MANIFEST_METADATA_MISPLACED")
+            generation = row.get("release_generation")
+            _require(isinstance(generation, str) and
+                     re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", generation),
+                     "BUNDLE_RELEASE_GENERATION_UNBOUND")
+            release_generations[role] = generation
+            if "descriptor_ref" in row:
+                descriptor_ref = _safe_rel(row["descriptor_ref"],
+                                           "BUNDLE_DESCRIPTOR_PATH_INVALID")
+                descriptor_digest = row["descriptor_sha256"]
+                _require(isinstance(descriptor_digest, str) and
+                         SHA256.fullmatch(descriptor_digest),
+                         "BUNDLE_DESCRIPTOR_DIGEST_INVALID")
+                descriptor_path = lock.parent / descriptor_ref
+                _require(descriptor_path.resolve().is_relative_to(lock.parent.resolve())
+                         and not descriptor_path.is_symlink(),
+                         "BUNDLE_DESCRIPTOR_PATH_UNTRUSTED")
+                descriptor_bytes = _safe_existing_file(descriptor_path, MAX_LOCK_BYTES)
+                _require(_sha(descriptor_bytes) == descriptor_digest,
+                         "BUNDLE_DESCRIPTOR_DIGEST_MISMATCH")
+                try:
+                    descriptor = json.loads(descriptor_bytes)
+                except (ValueError, UnicodeError) as exc:
+                    raise BundleError("BUNDLE_DESCRIPTOR_JSON_INVALID") from exc
+                _require(isinstance(descriptor, dict),
+                         "BUNDLE_DESCRIPTOR_SCHEMA_INVALID")
+                try:
+                    dependency_id, owner_repo, accepted, exports = _dep(manifest, descriptor)
+                except DependencyBindingError as exc:
+                    raise BundleError("BUNDLE_DESCRIPTOR_CONTRACT_INVALID") from exc
+                _require(accepted == generation,
+                         "BUNDLE_DESCRIPTOR_RELEASE_GENERATION_MISMATCH")
+                product_descriptors[role] = {
+                    "ref": descriptor_ref,
+                    "sha256": descriptor_digest,
+                    "data": descriptor,
+                    "dependency_id": dependency_id,
+                    "owner_repo": owner_repo,
+                    "generation": accepted,
+                    "export_count": len(exports),
+                }
+            else:
+                # Every transitive runtime child must have a descriptor; a
+                # selected root without runtime exports needs none.
+                _require(role == product_root_role,
+                         "BUNDLE_RUNTIME_DEPENDENCY_DESCRIPTOR_REQUIRED")
         deps = row["depends_on"]
         _require(isinstance(deps, list) and len(deps) <= 32
                  and len(set(map(str, deps))) == len(deps)
@@ -275,7 +339,10 @@ def load_bundle_profile(lock: Path, *,
         "profile_id": profile_id, "fixture": fixture,
         "profile_mode": profile_mode, "product_root_role": product_root_role,
         "lock_sha256": _sha(raw), "ordered_roles": tuple(ordered),
-        "products": products, "release_source_observed": True,
+        "products": products,
+        "product_descriptors": product_descriptors,
+        "release_generations": release_generations,
+        "release_source_observed": True,
         "runtime_authority": False
     }
 
@@ -366,8 +433,12 @@ def _atomic_private_json(path: Path, value: dict) -> bool:
         if p.exists(): p.unlink()
     return True
 
-def _release_distribution_receipt(manifest, transaction_receipt: Path, output: Path) -> tuple[dict, bool] | None:
-    generation=str(manifest.raw.get("accepted_generation") or "").strip()
+def _release_distribution_receipt(manifest, transaction_receipt: Path, output: Path, *,
+                                  release_generation: str | None = None) -> tuple[dict, bool] | None:
+    # The current product lock supplies the generation. The original
+    # manifest.raw lookup survives only for historical suite compatibility.
+    generation = (release_generation if release_generation is not None
+                  else str(manifest.raw.get("accepted_generation") or "").strip())
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", generation):
         return None
     tx=json.loads(transaction_receipt.read_text(encoding="utf-8"))
@@ -508,17 +579,30 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                     apply_install(manifest, staged[role], receipt, env)
                     applied.append(receipt)
                     release_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".release.json")
-                    release_result=_release_distribution_receipt(manifest,receipt,release_path)
+                    release_result=_release_distribution_receipt(
+                        manifest,receipt,release_path,
+                        release_generation=profile["release_generations"].get(role))
                     release_value=None
                     if release_result is not None:
                         release_value,release_created=release_result
                         if release_created:
                             derived_receipts.append(release_path)
                         release_receipts[role]={"path":str(release_path),"receipt":release_value}
-                    if manifest.raw.get("runtime_exports"):
+                    descriptor_info = profile["product_descriptors"].get(role)
+                    # Old suite fixtures retain their legacy behavior. In
+                    # product mode ONLY the separately pinned descriptor can
+                    # authorize a binding projection.
+                    if descriptor_info is not None or (
+                        profile["profile_mode"] == "suite" and
+                        manifest.raw.get("runtime_exports")
+                    ):
                         tx=json.loads(receipt.read_text(encoding="utf-8"))
                         binding_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".binding.json")
-                        binding=compile_dependency_binding_receipt(manifest,tx,env,release_path if release_value is not None else None,binding_receipt_path=binding_path)
+                        binding=compile_dependency_binding_receipt(
+                            manifest,tx,env,
+                            release_path if release_value is not None else None,
+                            binding_receipt_path=binding_path,
+                            descriptor=descriptor_info["data"] if descriptor_info is not None else None)
                         binding_created=_atomic_private_json(binding_path,binding)
                         if binding_created:
                             derived_receipts.append(binding_path)
