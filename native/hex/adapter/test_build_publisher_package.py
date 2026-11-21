@@ -63,6 +63,9 @@ class PublisherHexPackageConsumerTests(unittest.TestCase):
         self.assertFalse(receipt["effect_authority"])
         manifest = load_manifest(self.out / "manifest.json")
         self.assertEqual(manifest.product_id, "xiio-publisher")
+        # Existing Cube bundle receiver admits only fail/same_hash_ok; no
+        # unsanctioned replacement during first product installation.
+        self.assertEqual(manifest.entries[0].overwrite, "same_hash_ok")
         self.assertEqual(manifest.version, "source-" + self.source_sha[:12])
         self.assertEqual(verify_payload(manifest, self.out)[0]["sha256"],
                          sha(self.html))
