@@ -53,7 +53,8 @@ def compile_publisher_package(handoff_root: Path, destination: Path) -> dict:
             and all(not x.is_symlink() for x in root.parents),
             "PUBLISHER_HANDOFF_ROOT_UNTRUSTED")
     require(out.is_absolute() and not out.exists() and not out.is_symlink()
-            and out.parent.is_dir() and not out.parent.is_symlink(),
+            and out.parent.is_dir()
+            and all(not parent.is_symlink() for parent in out.parents),
             "PUBLISHER_OUTPUT_MUST_BE_NEW")
     raw = trusted_file(root / "hosting-handoff" / "handoff.json", 128 * 1024)
     try:
