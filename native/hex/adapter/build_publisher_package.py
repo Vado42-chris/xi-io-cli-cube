@@ -106,7 +106,7 @@ def compile_publisher_package(handoff_root: Path, destination: Path) -> dict:
             "destination_scope": "xdg_data",
             "destination": "xiio/publisher/index.html",
             "mode": "0644",
-            "overwrite": "backup_replace",
+            "overwrite": "same_hash_ok",
         }],
     }
     # Product identity and source generation remain separate from any BINS UUID.
