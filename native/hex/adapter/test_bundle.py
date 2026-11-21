@@ -111,7 +111,7 @@ class BundleFixture:
         path.write_bytes(raw)
         return path, sha(raw)
 
-    def product_lock(self, *, fixture=False, product_root_role):
+    def product_lock(self, *, fixture=True, product_root_role):
         """Build exact synthetic product-mode coordinates for existing tests.
 
         Production child_bundle validates release generation and independent
