@@ -460,6 +460,7 @@ def _release_distribution_receipt(manifest, transaction_receipt: Path, output: P
 
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
                    env: dict[str, str] | None = None,
+                   application_root: Path | None = None,
                    allowed_hosts: frozenset[str] | None = None,
                    fetch=None, fail_after_product: int | None = None):
     """Acquire all children, verify all bytes, then apply existing transactions.
@@ -472,7 +473,25 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    application_roles = tuple(
+        role for role in profile["ordered_roles"]
+        if any(entry.destination_scope == "application"
+               for entry in profile["products"][role][0].entries)
+    )
+    if application_roles:
+        _require(isinstance(application_root, Path),
+                 "BUNDLE_APPLICATION_ROOT_REQUIRED")
+        _require(application_root.is_absolute()
+                 and application_root.is_dir()
+                 and not application_root.is_symlink(),
+                 "BUNDLE_APPLICATION_ROOT_INVALID")
+        application_root = application_root.resolve(strict=True)
+    else:
+        _require(application_root is None,
+                 "BUNDLE_APPLICATION_ROOT_NOT_APPLICABLE")
     roots = xdg_roots(env)
+    if application_root is not None:
+        roots["application"] = application_root
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
     observed_machine = {
         "os": platform.system(), "architecture": platform.machine(), "family": "linux"
@@ -555,8 +574,18 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             plans = []
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
-                plans.append((plan_install(manifest, staged[role], env), roots,
-                              receipts[role]))
+                role_application_root = (
+                    application_root
+                    if any(entry.destination_scope == "application"
+                           for entry in manifest.entries)
+                    else None
+                )
+                plan = (
+                    plan_install(manifest, staged[role], env, role_application_root)
+                    if role_application_root is not None
+                    else plan_install(manifest, staged[role], env)
+                )
+                plans.append((plan, roots, receipts[role]))
             # A new destination/profile after download cannot bypass the
             # Installer's current pre-command qualification.
             try:
@@ -576,7 +605,30 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                     receipt = receipts[role]
                     _require(not receipt.exists() and not receipt.is_symlink(),
                              "BUNDLE_RECEIPT_ALREADY_EXISTS")
-                    apply_install(manifest, staged[role], receipt, env)
+                    role_application_root = (
+                        application_root
+                        if any(entry.destination_scope == "application"
+                               for entry in manifest.entries)
+                        else None
+                    )
+                    if role_application_root is not None:
+                        apply_install(manifest, staged[role], receipt, env,
+                                      role_application_root)
+                    else:
+                        apply_install(manifest, staged[role], receipt, env)
+                    plan = next(item[0] for item in plans
+                                if item[2] == receipt)
+                    for item in plan:
+                        root = roots.get(item.destination_scope)
+                        _require(root is not None,
+                                 "BUNDLE_READBACK_SCOPE_UNBOUND")
+                        destination = root / item.destination
+                        _require(not destination.is_symlink()
+                                 and destination.is_file()
+                                 and sha256_file(destination) == item.expected_sha256
+                                 and stat.S_IMODE(destination.stat().st_mode)
+                                     == item.expected_mode,
+                                 "BUNDLE_INSTALLED_READBACK_MISMATCH")
                     applied.append(receipt)
                     release_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".release.json")
                     release_result=_release_distribution_receipt(
@@ -618,7 +670,20 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                         failures.append(derived.name)
                 for receipt in reversed(applied):
                     try:
-                        rollback(receipt, env)
+                        receipt_doc = json.loads(
+                            receipt.read_text(encoding="utf-8")
+                        )
+                        needs_application_root = any(
+                            isinstance(item, dict)
+                            and item.get("destination_scope") == "application"
+                            for item in receipt_doc.get("entries", [])
+                        )
+                        if needs_application_root:
+                            _require(application_root is not None,
+                                     "BUNDLE_APPLICATION_ROOT_REQUIRED")
+                            rollback(receipt, env, application_root)
+                        else:
+                            rollback(receipt, env)
                     except Exception:
                         failures.append(receipt.name)
                 if failures:
@@ -635,6 +700,8 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 "release_distribution_receipts": release_receipts,
                 "dependency_binding_receipts": dependency_binding_receipts,
                 "filesystem_precommand_state": filesystem["state"],
+                "application_root_bound": application_root is not None,
+                "application_roles": list(application_roles),
                 "runtime_qualified": False, "authority_granted": False,
                 "device_connected": False, "child_services_started": False
             }
