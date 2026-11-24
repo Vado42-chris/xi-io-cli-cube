@@ -27,6 +27,7 @@ import re
 
 import framework_product_api_reader
 import framework_release_export
+import framework_release_reader
 from child_bundle import BundleError
 
 _CORE_HANDLE = handle
@@ -34,6 +35,7 @@ _CORE_HANDLE_REPAIR = handle_repair
 _FRAMEWORK_SERVER_ACTIONS = {
     "server_prepare", "server_apply", "hotpatch_prepare", "hotpatch_apply",
 }
+_FRAMEWORK_RELEASE_DISCOVERY_ACTION = "release_discover"
 _FRAMEWORK_REQUEST_FIELDS = {"framework_binding_receipt", "framework_generation"}
 _ACCEPTED_GENERATION = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
@@ -81,7 +83,58 @@ def handle_repair(req, base, p):
     return _CORE_HANDLE_REPAIR(req, base, p)
 
 
+def _framework_release_distribution(req):
+    demand(isinstance(req, dict), "FRAMEWORK_RELEASE_DISCOVERY_REQUEST_INVALID")
+    product_ref = req.get("product_ref")
+    consumer_ref = req.get("consumer_ref")
+    receipt = req.get("framework_binding_receipt")
+    generation = req.get("framework_generation")
+    demand(isinstance(product_ref, str) and bool(product_ref.strip()),
+           "FRAMEWORK_RELEASE_PRODUCT_REF_REQUIRED")
+    demand(isinstance(consumer_ref, str) and bool(consumer_ref.strip()),
+           "FRAMEWORK_RELEASE_CONSUMER_REF_REQUIRED")
+    demand(isinstance(receipt, str) and isinstance(generation, str),
+           "FRAMEWORK_RELEASE_BINDING_FIELDS_INCOMPLETE")
+    demand(bool(_ACCEPTED_GENERATION.fullmatch(generation)),
+           "FRAMEWORK_RELEASE_GENERATION_INVALID")
+    try:
+        export = framework_release_export.resolve_framework_release_distribution_module(
+            safe_path(Path(receipt)),
+            expected_framework_generation=generation,
+        )
+        reader = framework_release_reader.build_framework_release_distribution_reader(
+            framework_release_distribution_module=Path(export["release_distribution_module"]),
+        )
+        lock = reader(product_ref=product_ref.strip(), consumer_ref=consumer_ref.strip())
+    except (framework_release_export.FrameworkReleaseExportError,
+            BundleError, OSError, ValueError) as exc:
+        raise Refused("FRAMEWORK_RELEASE_DISTRIBUTION_UNVERIFIED") from exc
+    demand(isinstance(lock, dict)
+           and lock.get("schema") == "xiio.release-distribution-lock/v1",
+           "FRAMEWORK_RELEASE_DISTRIBUTION_INVALID")
+    demand(lock.get("product_ref") == product_ref.strip()
+           and lock.get("consumer_ref") == consumer_ref.strip(),
+           "FRAMEWORK_RELEASE_DISTRIBUTION_COORDINATE_MISMATCH")
+    demand(lock.get("lifecycle") == "DISTRIBUTABLE"
+           and lock.get("adopter_current") is True
+           and lock.get("effect_authority") is False
+           and lock.get("installed") is False,
+           "FRAMEWORK_RELEASE_DISTRIBUTION_NOT_CURRENT")
+    return {
+        "schema": "xiio.hex.release-discovery/v1",
+        "state": "QUALIFIED",
+        "product_ref": product_ref.strip(),
+        "consumer_ref": consumer_ref.strip(),
+        "framework_generation": generation,
+        "distribution": lock,
+        "effect_authority": False,
+        "provider_effect": False,
+    }
+
+
 def handle(req):
+    if isinstance(req, dict) and req.get("action") == _FRAMEWORK_RELEASE_DISCOVERY_ACTION:
+        return _framework_release_distribution(req)
     if not isinstance(req, dict) or req.get("action") not in _FRAMEWORK_SERVER_ACTIONS:
         return _CORE_HANDLE(req)
     context = _framework_product_api_context(req)
