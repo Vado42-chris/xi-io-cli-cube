@@ -111,6 +111,45 @@ class BundleFixture:
         path.write_bytes(raw)
         return path, sha(raw)
 
+    def product_lock(self, *, fixture=True, product_root_role):
+        """Build exact synthetic product-mode coordinates for existing tests.
+
+        Production child_bundle validates release generation and independent
+        descriptor bytes. Older suite fixtures cannot stand in for those
+        product-mode inputs. This helper never changes production admission.
+        """
+        for row in self.rows:
+            role = row["role"]
+            generation = row.setdefault(
+                "release_generation", hashlib.sha1(
+                    ("disposable-product-generation:" + role).encode()
+                ).hexdigest()
+            )
+            if role == product_root_role or "descriptor_ref" in row:
+                continue
+            manifest = json.loads((self.root / row["manifest"]).read_text())
+            payload = manifest["payload"][0]
+            descriptor = {
+                "schema": "xiio.installer-dependency-descriptor/v1",
+                "dependency_id": role,
+                "product_id": row["product_id"],
+                "owner_repo": "owner/" + role,
+                "accepted_generation": generation,
+                "runtime_exports": {
+                    "module": {
+                        "destination_scope": payload["destination_scope"],
+                        "destination": payload["destination"],
+                    }
+                },
+            }
+            name = role + ".descriptor.json"
+            raw = json.dumps(descriptor, sort_keys=True).encode()
+            (self.root / name).write_bytes(raw)
+            row["descriptor_ref"] = name
+            row["descriptor_sha256"] = sha(raw)
+        return self.lock(fixture=fixture, profile_mode="product",
+                         product_root_role=product_root_role)
+
     def fetch(self, url, output, limit):
         if url not in self.payloads:
             raise ValueError("UNEXPECTED_FIXTURE_URL")
@@ -328,7 +367,7 @@ class BundleTests(unittest.TestCase):
         f.child("bins", fixture=False).child("ward", fixture=False, depends_on=("bins",)).child(
             "sam-law", fixture=False, depends_on=("ward",)
         )
-        lock, digest = f.lock(fixture=False, profile_mode="product", product_root_role="sam-law")
+        lock, digest = f.product_lock(fixture=False, product_root_role="sam-law")
         profile = load_bundle_profile(lock)
         self.assertEqual(profile["profile_mode"], "product")
         self.assertEqual(profile["product_root_role"], "sam-law")
@@ -388,25 +427,25 @@ class BundleTests(unittest.TestCase):
     def test_product_profile_refuses_extra_unrelated_role_instead_of_silently_installing_it(self):
         f = self.fixture()
         f.child("dependency").child("selected", depends_on=("dependency",)).child("unrelated")
-        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        lock, _ = f.product_lock(product_root_role="selected")
         with self.assertRaisesRegex(BundleError, "BUNDLE_PRODUCT_PROFILE_NOT_EXACT_DEPENDENCY_CLOSURE"):
             load_bundle_profile(lock)
 
     def test_product_profile_requires_existing_selected_root(self):
         f = self.fixture()
         f.child("dependency")
-        lock, _ = f.lock(profile_mode="product", product_root_role="missing")
+        lock, _ = f.product_lock(product_root_role="missing")
         with self.assertRaisesRegex(BundleError, "BUNDLE_PRODUCT_ROOT_NOT_IN_PROFILE"):
             load_bundle_profile(lock)
 
     def test_product_profile_detects_transitive_missing_dependency_and_cycle(self):
         f = self.fixture()
         f.child("dependency", depends_on=("missing",)).child("selected", depends_on=("dependency",))
-        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        lock, _ = f.product_lock(product_root_role="selected")
         with self.assertRaisesRegex(BundleError, "BUNDLE_DEPENDENCY_NOT_IN_PROFILE"):
             load_bundle_profile(lock)
         f.rows[0]["depends_on"] = ["selected"]
-        lock, _ = f.lock(profile_mode="product", product_root_role="selected")
+        lock, _ = f.product_lock(product_root_role="selected")
         with self.assertRaisesRegex(BundleError, "BUNDLE_DEPENDENCY_CYCLE"):
             load_bundle_profile(lock)
 
