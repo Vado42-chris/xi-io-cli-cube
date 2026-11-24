@@ -26,6 +26,13 @@ pub enum InstallerRequest {
     PermissionReplace { plan_id: String, current_digest: String, new_profile: Value, approved: bool },
     #[serde(rename = "central_update_decision")]
     CentralUpdateDecision { plan_id: String, request: Value },
+    #[serde(rename = "release_discover")]
+    ReleaseDiscover {
+        product_ref: String,
+        consumer_ref: String,
+        framework_binding_receipt: String,
+        framework_generation: String,
+    },
     #[serde(rename = "service_plan")]
     ServicePlan { plan_id: String, service_ids: Vec<String>, service_action: String },
     #[serde(rename = "service_start")]
@@ -112,6 +119,9 @@ impl InstallerRequest {
             Self::SafeTaskApply { plan_id, proof_id, approval_digest, approved } =>
                 *approved && id(plan_id) && lower_hex(proof_id,32) && lower_hex(approval_digest,64),
             Self::Inspect { plan_id } => plan_id.as_deref().map(id).unwrap_or(true),
+            Self::ReleaseDiscover { product_ref, consumer_ref, framework_binding_receipt, framework_generation } =>
+                id(product_ref) && id(consumer_ref) && absolute(framework_binding_receipt)
+                && (lower_hex(framework_generation,40) || lower_hex(framework_generation,64)),
             Self::Readback { plan_id } => id(plan_id),
             Self::PrepareRepair { prefix, node, bin_dir } => absolute(prefix) && absolute(node) && absolute(bin_dir),
             Self::Prepare { prefix, node, components, permission_profile } => absolute(prefix) && absolute(node)
@@ -207,6 +217,23 @@ mod tests {
         assert!(valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"],"service_action":"stop"}"#));
         assert!(!valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"]}"#));
         assert!(!valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"],"service_action":"restart"}"#));
+    }
+    #[test] fn release_discovery_requires_bounded_product_and_verified_framework_coordinates() {
+        let base=serde_json::json!({
+            "action":"release_discover",
+            "product_ref":"sam-law",
+            "consumer_ref":"hex-installer",
+            "framework_binding_receipt":"/home/a/framework.binding.json",
+            "framework_generation":"a".repeat(40)
+        });
+        assert!(valid(&base.to_string()));
+        let mut wrong=base.clone();
+        wrong["framework_binding_receipt"]="relative.json".into();
+        assert!(!valid(&wrong.to_string()));
+        wrong=base.clone();wrong["framework_generation"]="A".repeat(40).into();
+        assert!(!valid(&wrong.to_string()));
+        wrong=base.clone();wrong["command"]="bash".into();
+        assert!(!valid(&wrong.to_string()));
     }
     #[test] fn framework_product_api_coordinates_are_bounded_and_paired() {
         let base=serde_json::json!({"action":"server_prepare","plan_id":"plan-1","package_root":"/home/a/package"});
