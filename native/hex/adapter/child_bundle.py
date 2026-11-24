@@ -616,19 +616,6 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                                       role_application_root)
                     else:
                         apply_install(manifest, staged[role], receipt, env)
-                    plan = next(item[0] for item in plans
-                                if item[2] == receipt)
-                    for item in plan:
-                        root = roots.get(item.destination_scope)
-                        _require(root is not None,
-                                 "BUNDLE_READBACK_SCOPE_UNBOUND")
-                        destination = root / item.destination
-                        _require(not destination.is_symlink()
-                                 and destination.is_file()
-                                 and sha256_file(destination) == item.expected_sha256
-                                 and stat.S_IMODE(destination.stat().st_mode)
-                                     == item.expected_mode,
-                                 "BUNDLE_INSTALLED_READBACK_MISMATCH")
                     applied.append(receipt)
                     release_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".release.json")
                     release_result=_release_distribution_receipt(
@@ -659,6 +646,23 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                         if binding_created:
                             derived_receipts.append(binding_path)
                         dependency_binding_receipts[role]={"path":str(binding_path),"receipt":binding}
+                    # Reopen the exact installed bytes after any dependency-binding
+                    # consumer has verified its exported files. This preserves the
+                    # existing drift/rollback classification while still proving the
+                    # final installed product bytes and modes independently.
+                    plan = next(item[0] for item in plans
+                                if item[2] == receipt)
+                    for item in plan:
+                        root = roots.get(item.destination_scope)
+                        _require(root is not None,
+                                 "BUNDLE_READBACK_SCOPE_UNBOUND")
+                        destination = root / item.destination
+                        _require(not destination.is_symlink()
+                                 and destination.is_file()
+                                 and sha256_file(destination) == item.expected_sha256
+                                 and stat.S_IMODE(destination.stat().st_mode)
+                                     == item.expected_mode,
+                                 "BUNDLE_INSTALLED_READBACK_MISMATCH")
                     if fail_after_product is not None and len(applied) == fail_after_product:
                         raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
             except Exception as cause:
