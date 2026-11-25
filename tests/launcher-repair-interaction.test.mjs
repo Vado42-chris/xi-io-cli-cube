@@ -42,8 +42,12 @@ test('repair controls require approval, dispatch once and retain uncertain outco
   assert.equal(node.value,'/existing/node');
   const approval=label('I approve only the displayed launcher repair').querySelector('input');
   assert.equal(approval.checked,true);
+  assert.equal(requests.filter(r=>r.action==='inspect').length,1,'only the installer inspects before Tools is opened');
   // Keep exact plan, runtime and consent while visiting another product and tools.
   for(const view of ['Tools','Maths','Library']){rail(view).click();await pause();assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);}
+  // Existing local tool panels inspect when Tools is first visited. Product
+  // navigation after that visit must not remount or reinspect the installer.
+  const inspectionsAfterTools=requests.filter(r=>r.action==='inspect').length;
   const click=async el=>{assert.ok(el);el.click();await pause();};
   const pageButton=text=>Array.from(shadow.querySelectorAll('button')).find(b=>b.textContent.trim().startsWith(text));
   await click(shadow.querySelector('[data-product-id="publisher"] button'));
@@ -59,7 +63,7 @@ test('repair controls require approval, dispatch once and retain uncertain outco
   assert.equal(node.value,'/existing/node');assert.equal(approval.checked,true);
   assert.match(panel.querySelector('[aria-label="Exact reviewed plan and receipts"]').textContent,/"plan_id": "p"/);
   assert.equal(requests.filter(r=>r.action==='prepare_repair').length,1);
-  assert.equal(requests.filter(r=>r.action==='inspect').length,1,'page changes never remount/reinspect');
+  assert.equal(requests.filter(r=>r.action==='inspect').length,inspectionsAfterTools,'Library/product page changes never remount/reinspect');
   assert.equal(requests.filter(r=>r.action==='apply_repair'||r.action==='apply'||r.action==='launch_cli').length,0,'navigation does not execute the approved plan');
   const apply=button('Repair this existing launcher');assert.equal(apply.disabled,false);apply.click();apply.click();await pause();
   assert.equal(requests.filter(r=>r.action==='apply_repair').length,1);assert.equal(apply.isConnected,false);assert.equal(button('Repair this existing launcher'),undefined);
@@ -69,7 +73,8 @@ test('repair controls require approval, dispatch once and retain uncertain outco
   assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);
   assert.match(panel.textContent,/Outcome uncertain/);assert.equal(button('Repair this existing launcher'),undefined);
   assert.ok(button('Check actual state'));assert.ok(!requests.some(r=>r.action==='apply'||r.action==='launch_cli'));
-  assert.ok(Array.from(panel.querySelectorAll('button')).every(b=>!/^Open CLI/.test(b.textContent.trim())||b.disabled),'uncertain binding cannot launch');
+  assert.ok(Array.from(panel.querySelectorAll('button')).every(b=>b.textContent.trim()!=='Open XI-IO CLI'||b.disabled),'uncertain binding cannot launch');
   assert.doesNotMatch(shadow.textContent,/Tools & Diagnostics|XI-IO Ecosystem Component Catalog/);
  }finally{dom.window.close();}
 });
+

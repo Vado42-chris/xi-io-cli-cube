@@ -46,6 +46,9 @@ test('built Library and product pages replace the retired catalog inside one nat
     const panel = shadow.querySelector('[aria-label="Native HEX installer"]');
     const slot = shadow.querySelector('[data-hex-installer-slot="cli"]');
     assert.ok(panel && slot && slot.contains(panel));
+    const layout = microsite.querySelector('.hex-workspace-layout.hex-ms-layout');
+    assert.ok(layout, 'mounted product composition retains the existing Empire lattice');
+    assert.equal(panel.closest('.hex-workspace-layout'), layout, 'installer inherits the retained layout variables');
     const rail = label => w.document.querySelector(`[data-window-rail-tabs] button[aria-label="${label}"]`);
     const selectedRail = label => assert.ok(rail(label)?.querySelector(':scope > div'), `${label} is selected`);
     const button = label => [...shadow.querySelectorAll('button')].find(el => el.textContent.trim().startsWith(label));
@@ -53,6 +56,7 @@ test('built Library and product pages replace the retired catalog inside one nat
       assert.doesNotMatch(shadow.textContent, /Tools & Diagnostics|XI-IO Ecosystem Component Catalog|Software reference catalog\./);
       assert.equal(shadow.querySelectorAll('[aria-label="Native HEX installer"]').length, 1);
       assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'), panel);
+      assert.equal(panel.closest('.hex-workspace-layout'), layout);
       assert.equal(w.document.querySelectorAll('[data-native-product="hex"]').length, 1);
     }
     async function click(el) {

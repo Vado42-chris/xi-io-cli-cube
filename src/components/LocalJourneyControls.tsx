@@ -2,7 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {createInstallerClient, nativeInstallerAvailable} from '../lib/nativeInstaller.mjs';
 
 /** Original onboarding steps backed by finite native actions, never browser simulation. */
-export default function LocalJourneyControls({step,workspace,planId,onPlanId}:{step:4|5;workspace:string;planId:string;onPlanId:(id:string)=>void}) {
+export default function LocalJourneyControls({step,workspace,planId,onPlanId,active=true}:{step:4|5;workspace:string;planId:string;onPlanId:(id:string)=>void;active?:boolean}) {
  const native=nativeInstallerAvailable();
  const [plans,setPlans]=useState<any[]>([]),[result,setResult]=useState<any>(null),[review,setReview]=useState<any>(null);
  const [history,setHistory]=useState<any[]>([]);
@@ -20,7 +20,7 @@ export default function LocalJourneyControls({step,workspace,planId,onPlanId}:{s
   }catch(e){if(context.current===requestedContext)setError(String(e instanceof Error?e.message:e));}finally{lock.current=false;setBusy(false);}
  }
  useEffect(()=>{setReview(null);setApproved(false);setResult(null);setAttempted(false);setHistory([]);},[workspace,planId,step]);
- useEffect(()=>{if(native)client({action:'inspect'}).then((v:any)=>setPlans(v.plans||[])).catch((e:Error)=>setError(e.message));},[]);
+ useEffect(()=>{let current=true;if(native&&active)client({action:'inspect'}).then((v:any)=>{if(current)setPlans(v.plans||[]);}).catch((e:Error)=>{if(current)setError(e.message);});return()=>{current=false;};},[native,active]);
  const selectedPlan=plans.find(p=>p.plan_id===planId);
  const eligible=selectedPlan?.phase==='INSTALLED_READBACK_VERIFIED'&&!selectedPlan?.do_not_retry;
  const reviewMatches=review?.plan_id===planId&&review?.workspace===workspace;
@@ -37,7 +37,7 @@ export default function LocalJourneyControls({step,workspace,planId,onPlanId}:{s
  </>:<>
  <button className={button} disabled={busy||!planId} onClick={()=>void request('safe_task_inspect')}>Inspect Saved File Tests</button>
  {history.length>0&&<div role="status"><p>Saved historical outcomes only; current fixture bytes were not inspected. Previously attempted proofs are never reexecuted.</p>{history.map(h=><p key={h.proof_id} className="font-mono break-all">{h.proof_id} · {h.state} · {h.directory||'Evidence unreadable'}</p>)}</div>}
- <p>Selected workspace: <span className="font-mono break-all">{workspace||'Choose a workspace in Step 3'}</span></p>
+ <p>Selected workspace: <span className="font-mono break-all">{workspace||'Choose a workspace folder above'}</span></p>
  <p>This reviewed local test creates its own exclusive disposable folder, writes and reopens a fixed file, applies the existing CLI CAS guard, refuses a stale edit, then removes only its unchanged fixture. Existing project files are not edited. This uses a cooperative same-host guard, not protection against concurrent noncooperating filesystem writers. This is not command-sandbox, remote BINS or Ward admission proof.</p>
  <button className={button} disabled={busy||!planId||!eligible||!workspace||attempted} onClick={()=>void request('safe_task_prepare',{workspace})}>Review Disposable File Test</button>
  {review&&reviewMatches&&<div className="space-y-2"><p className="font-mono break-all">Fixture: {review.directory}</p><ul>{review.changes?.map((c:string)=><li key={c}>{c}</li>)}</ul><label className="block"><input type="checkbox" checked={approved} disabled={busy||attempted} onChange={e=>setApproved(e.target.checked)}/> I approve this exact disposable file test and cleanup in the selected workspace.</label><button className={button} disabled={busy||!approved||attempted||!reviewMatches||!eligible} onClick={()=>{if(!reviewMatches)return;setAttempted(true);void request('safe_task_apply',{proof_id:review.proof_id,approval_digest:review.approval_digest,approved:true});}}>Run Approved File Test</button></div>}

@@ -73,7 +73,7 @@ export default function HexProductMicrosites({installer, route: controlledRoute,
     style={{'--workspace-plate-image': `url(${brandPlate})`} as React.CSSProperties}>
     <style>{coreStyles + '\n' + shellStyles + '\n' + styles}</style>
     <TabletBackdrop />
-    <div className="hex-ms-layout">
+    <div className="hex-workspace-layout hex-ms-layout">
       <div className="hex-ms-topline">
         <button type="button" className="hex-ms-library-link" onClick={() => navigate({productId: null, page: 'overview'})} aria-label="Back to Library"><Boxes size={18} aria-hidden="true" /><span>XI-IO <span className="hex-ms-topline-muted">/</span> Library</span></button>
         <button type="button" data-xiui="icon-button" className="hex-ms-theme" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} appearance`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} appearance`} onClick={() => setThemeMode(theme === 'dark' ? 'light' : 'dark')}>

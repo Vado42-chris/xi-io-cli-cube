@@ -28,7 +28,7 @@ function CubeProductContent({view, route, onNavigate}: {view: View; route: HexPr
         <HexProductMicrosites route={route} onNavigate={onNavigate} installer={<NativeInstallerPanel />} />
       </div>
       <div data-hex-workspace data-product-theme={theme} hidden={view !== 'tools'} style={{display: view === 'tools' ? undefined : 'none'}}>
-        <HexLocalTools />
+        <HexLocalTools active={view === 'tools'} />
       </div>
       <div data-hex-workspace data-product-theme={theme} hidden={view !== 'maths'} style={{display: view === 'maths' ? undefined : 'none'}} className="p-6">
         <Snap55Workbench />
