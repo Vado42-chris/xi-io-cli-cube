@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,50 @@ class Content(unittest.TestCase):
         with self.assertRaises(CAPTURE.Unverified):
             CAPTURE.select_content_controls(rows)
 
+    def test_empty_heading_name_uses_bounded_text_interface(self):
+        calls = []
+        value = 'Your XI-IO\nlibrary.'
+        class Heading:
+            def get_text_iface(self): return self
+            def get_character_count(self): return len(value)
+            def get_text(self, start, end):
+                calls.append((start, end))
+                return value[start:end]
+        rows = self.rows()
+        rows[1].update(name='', text=CAPTURE.read_heading_text(Heading()))
+        self.assertEqual(CAPTURE.select_content_controls(rows), rows)
+        self.assertEqual(calls, [(0, len(value))])
+        self.assertEqual(rows[1]['name'], '')
+        self.assertEqual(rows[1]['text'], value)
+
+    def test_wrong_or_hidden_heading_text_cannot_qualify(self):
+        for change in ({'text':'XI-IO Ecosystem Component Catalog'},
+                       {'name':'', 'text':'Your XI-IO library.', 'visible':False}):
+            with self.subTest(change=change):
+                rows = self.rows()
+                rows[1].update(change)
+                with self.assertRaisesRegex(CAPTURE.Unverified, '^HEX_LIBRARY_CONTENT_NOT_OBSERVED$'):
+                    CAPTURE.select_content_controls(rows)
+
+    def test_button_text_cannot_replace_its_semantic_name(self):
+        rows = self.rows()
+        rows[0].update(name='', text='Back to Library')
+        with self.assertRaisesRegex(CAPTURE.Unverified, '^HEX_LIBRARY_CONTENT_NOT_OBSERVED$'):
+            CAPTURE.select_content_controls(rows)
+
+    def test_heading_text_unavailable_or_over_budget_refuses(self):
+        class TooLarge:
+            def get_text_iface(self): return self
+            def get_character_count(self): return CAPTURE.MAX_CONTROL_TEXT + 1
+            def get_text(self, start, end): raise AssertionError('must refuse before reading')
+        with self.assertRaisesRegex(CAPTURE.Unverified, '^ACCESSIBILITY_HEADING_TEXT_BOUNDS$'):
+            CAPTURE.read_heading_text(TooLarge())
+        class Unavailable:
+            def get_text_iface(self): raise RuntimeError('provider unavailable')
+        with self.assertRaisesRegex(CAPTURE.Unverified, '^ACCESSIBILITY_HEADING_TEXT_UNAVAILABLE$'):
+            CAPTURE.read_heading_text(Unavailable())
+        self.assertIsNone(CAPTURE.read_heading_text(SimpleNamespace(get_text_iface=lambda: None)))
+
 
 class RetiredContent(unittest.TestCase):
     def rows(self):
@@ -61,6 +106,17 @@ class RetiredContent(unittest.TestCase):
         self.assertEqual(CAPTURE.select_retired_controls(rows), rows)
         with self.assertRaisesRegex(CAPTURE.Unverified, '^HEX_LIBRARY_CONTENT_NOT_OBSERVED$'):
             CAPTURE.select_content_controls(rows)
+
+    def test_retired_heading_text_preserves_same_exact_negative_control(self):
+        rows = self.rows()
+        rows[0].update(name='', text='XI-IO Ecosystem Component Catalog')
+        self.assertEqual(CAPTURE.select_retired_controls(rows), rows)
+        rows[0]['text'] = 'Your XI-IO library.'
+        with self.assertRaisesRegex(CAPTURE.Unverified, '^RETIRED_CATALOG_NOT_OBSERVED$'):
+            CAPTURE.select_retired_controls(rows)
+        rows[0].update(text='XI-IO Ecosystem Component Catalog', visible=False)
+        with self.assertRaisesRegex(CAPTURE.Unverified, '^RETIRED_CATALOG_NOT_OBSERVED$'):
+            CAPTURE.select_retired_controls(rows)
 
     def test_window_title_or_absent_rows_cannot_establish_red(self):
         for rows in ([], [{'name': 'XI-IO HEX', 'role': 'heading', 'visible': True}]):
@@ -104,6 +160,44 @@ class RetiredContent(unittest.TestCase):
             package.write_bytes(b'unit fixture, not released DEV12')
             with self.assertRaisesRegex(CAPTURE.Unverified, '^RETIRED_PACKAGE_DIGEST_MISMATCH$'):
                 CAPTURE.verify_retired_package(package, executable, proof)
+
+
+class Diagnostics(unittest.TestCase):
+    def native(self, rows, complete=True):
+        return SimpleNamespace(last_rows=rows, last_rows_complete=complete,
+                               last_observation_failure='HEX_LIBRARY_CONTENT_NOT_OBSERVED')
+
+    def test_unavailable_partial_and_observed_mismatch_are_distinct(self):
+        missing = CAPTURE.content_diagnostics(None)
+        self.assertEqual(missing['accessibility_state'], 'NOT_OBSERVED')
+        self.assertEqual(missing['last_observed_rows'], [])
+        rows = [{'role':'heading', 'name':'', 'text':'A different heading', 'visible':True}]
+        partial = CAPTURE.content_diagnostics(self.native(rows, complete=False))
+        observed = CAPTURE.content_diagnostics(self.native(rows))
+        self.assertEqual(partial['accessibility_state'], 'PARTIAL')
+        self.assertEqual(observed['accessibility_state'], 'COMPLETE')
+        self.assertEqual(observed['last_observed_rows'], rows)
+        heading = next(item for item in observed['missing_controls'] if item['role'] == 'heading')
+        self.assertEqual(heading['visible_role_count'], 1)
+        self.assertEqual(heading['visible_exact_matches'], 0)
+        self.assertTrue(all(value['ui_correctness'] == 'UNVERIFIED' for value in (missing, partial, observed)))
+
+    def test_hidden_match_and_bounded_diagnostics(self):
+        rows = [{'role':'heading', 'name':'', 'text':'Your XI-IO library.', 'visible':False}]
+        result = CAPTURE.content_diagnostics(self.native(rows))
+        heading = next(item for item in result['missing_controls'] if item['role'] == 'heading')
+        self.assertEqual(heading['status'], 'NOT_VISIBLE')
+        self.assertEqual(heading['hidden_exact_matches'], 1)
+        rows = [{'role':'heading', 'name':'n' * 700, 'text':'t' * 700, 'visible':True}
+                for _ in range(CAPTURE.MAX_DIAGNOSTIC_ROWS + 1)]
+        result = CAPTURE.content_diagnostics(self.native(rows))
+        self.assertTrue(result['rows_truncated'])
+        self.assertEqual(result['observed_control_count'], len(rows))
+        self.assertEqual(len(result['last_observed_rows']), CAPTURE.MAX_DIAGNOSTIC_ROWS)
+        for row in result['last_observed_rows']:
+            self.assertEqual(len(row['name']), CAPTURE.MAX_DIAGNOSTIC_TEXT)
+            self.assertEqual(len(row['text']), CAPTURE.MAX_DIAGNOSTIC_TEXT)
+            self.assertTrue(row['name_truncated'] and row['text_truncated'])
 
 
 class FrontendIdentity(unittest.TestCase):

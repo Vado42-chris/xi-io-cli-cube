@@ -50,14 +50,86 @@ DEV12_PACKAGE_SHA256 = '07115547bd5603882eca5f2b31593615162e6ae1e1573c8b2a863524
 DEV12_ELF_SHA256 = 'ea5059196651e3100ee0f08393de09337859d72c34fc629fd2292f45d00f4b12'
 DEV12_RELEASE_SOURCE = 'd160521cffd3ff7e627155050faeecc693ac76bc'
 DEV12_COMPILED_SOURCE = 'cd7716a1c40ca6b6fb7393fcedb8ae50f5a5a2b6'
+MAX_CONTROL_TEXT = 4096
+MAX_DIAGNOSTIC_ROWS = 128
+MAX_DIAGNOSTIC_TEXT = 512
+
+
+def read_heading_text(node):
+    """Read only an actual heading's bounded AT-SPI Text interface."""
+    try:
+        text = node.get_text_iface()
+        if text is None:
+            return None
+        count = text.get_character_count()
+        require(type(count) is int and 0 <= count <= MAX_CONTROL_TEXT,
+                'ACCESSIBILITY_HEADING_TEXT_BOUNDS')
+        value = text.get_text(0, count)
+        require(isinstance(value, str) and len(value) <= MAX_CONTROL_TEXT,
+                'ACCESSIBILITY_HEADING_TEXT_BOUNDS')
+        return value
+    except Unverified:
+        raise
+    except Exception:
+        raise Unverified('ACCESSIBILITY_HEADING_TEXT_UNAVAILABLE') from None
+
+
+def control_text(row):
+    # WebKit headings can expose visible text without an accessible name.
+    # Buttons still use their semantic name; no descendant-text search occurs.
+    text = row.get('text') if row['role'] == 'heading' else None
+    value = text if isinstance(text, str) and text.strip() else row['name']
+    return ' '.join(value.split())
+
+
+def control_matches(row, name, role, reference_card=False):
+    if row['role'] != role:
+        return False
+    label = control_text(row)
+    if reference_card:
+        return label.startswith(name + ' ') and 'Installed on this computer: not reported' in label
+    return label == name
+
+
+def content_diagnostics(native, retired=False):
+    """Keep bounded observations, without turning absent AX data into bad UI."""
+    rows = native.last_rows if native is not None else None
+    complete = native.last_rows_complete if native is not None else False
+    expected = [(name, role, False) for name, role in (RETIRED_CONTROLS if retired else EXPECTED_CONTROLS)]
+    if retired:
+        expected += [(name, 'button', True) for name in RETIRED_CARD_NAMES]
+    checks = []
+    for name, role, reference_card in expected:
+        matches = [row for row in (rows or []) if control_matches(row, name, role, reference_card)]
+        visible = sum(row['visible'] is True for row in matches)
+        hidden = len(matches) - visible
+        checks.append({'expected_name': name, 'role': role, 'reference_card': reference_card,
+                       'visible_exact_matches': visible, 'hidden_exact_matches': hidden,
+                       'visible_role_count': sum(row['role'] == role and row['visible'] is True for row in (rows or [])),
+                       'status': ('MATCHED' if visible == 1 else 'DUPLICATE' if visible > 1
+                                  else 'NOT_VISIBLE' if hidden else 'EXPECTED_CONTROL_NOT_OBSERVED')})
+    retained = []
+    for row in (rows or [])[:MAX_DIAGNOSTIC_ROWS]:
+        item = dict(row)
+        for field in ('name', 'text'):
+            if isinstance(item.get(field), str) and len(item[field]) > MAX_DIAGNOSTIC_TEXT:
+                item[field] = item[field][:MAX_DIAGNOSTIC_TEXT]
+                item[field + '_truncated'] = True
+        retained.append(item)
+    return {'accessibility_state': ('NOT_OBSERVED' if rows is None else 'COMPLETE' if complete else 'PARTIAL'),
+            'ui_correctness': 'UNVERIFIED',
+            'observed_control_count': len(rows or []), 'last_observed_rows': retained,
+            'rows_truncated': len(rows or []) > MAX_DIAGNOSTIC_ROWS,
+            'expected_control_checks': checks,
+            'missing_controls': [check for check in checks if check['status'] != 'MATCHED'],
+            'last_observation_failure': native.last_observation_failure if native is not None else None}
 
 
 def select_content_controls(rows):
     """Only exact, uniquely visible content controls satisfy readiness."""
     selected = []
     for name, role in EXPECTED_CONTROLS:
-        matches = [row for row in rows if ' '.join(row['name'].split()) == name
-                   and row['role'] == role and row['visible'] is True]
+        matches = [row for row in rows if control_matches(row, name, role) and row['visible'] is True]
         require(len(matches) == 1, 'HEX_LIBRARY_CONTENT_NOT_OBSERVED')
         selected.append(matches[0])
     return selected
@@ -66,16 +138,13 @@ def select_content_controls(rows):
 def select_retired_controls(rows):
     selected = []
     for name, role in RETIRED_CONTROLS:
-        matches = [row for row in rows if ' '.join(row['name'].split()) == name
-                   and row['role'] == role and row['visible'] is True]
+        matches = [row for row in rows if control_matches(row, name, role) and row['visible'] is True]
         require(len(matches) == 1, 'RETIRED_CATALOG_NOT_OBSERVED')
         selected.append(matches[0])
     # DEV12 uses named spans inside button cards, not headings. Require the
     # actual two card controls and their explicit reference-only state text.
     for name in RETIRED_CARD_NAMES:
-        matches = [row for row in rows if row['role'] == 'button' and row['visible'] is True
-                   and ' '.join(row['name'].split()).startswith(name + ' ')
-                   and 'Installed on this computer: not reported' in ' '.join(row['name'].split())]
+        matches = [row for row in rows if control_matches(row, name, 'button', True) and row['visible'] is True]
         require(len(matches) == 1, 'RETIRED_CATALOG_NOT_OBSERVED')
         selected.append(matches[0])
     # Failure on the SAME current Library selector, after positive observation
@@ -115,6 +184,9 @@ class Native:
         self.pid, self.window, self.elf = pid, window, elf
         self.expected_executable = str(Path(expected_executable).resolve())
         self.deadline = time.monotonic() + 60
+        self.last_rows = None
+        self.last_rows_complete = False
+        self.last_observation_failure = None
         self.identity = self.process_identity()
         self.guard()
         try:
@@ -156,12 +228,15 @@ class Native:
         return bounds.width > 0 and bounds.height > 0 and x <= bounds.x and y <= bounds.y and bounds.x + bounds.width <= x + width and bounds.y + bounds.height <= y + height
 
     def rows(self):
+        self.last_rows = None
+        self.last_rows_complete = False
         desktop = self.ax.get_desktop(0)
         applications = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
         applications = [app for app in applications if app.get_process_id() == self.pid]
         require(len(applications) == 1, 'ACCESSIBILITY_APPLICATION_UNVERIFIED')
         queue = [(applications[0], 0)]
         rows, visited = [], 0
+        self.last_rows = rows
         roles = {self.ax.Role.PUSH_BUTTON: 'button', self.ax.Role.HEADING: 'heading'}
         while queue:
             require(time.monotonic() < self.deadline, 'HEX_LIBRARY_OBSERVATION_DEADLINE')
@@ -171,16 +246,23 @@ class Native:
             role = roles.get(node.get_role())
             if role:
                 name = node.get_name() or ''
-                require(len(name) <= 4096, 'ACCESSIBILITY_NAME_BOUNDS')
+                require(len(name) <= MAX_CONTROL_TEXT, 'ACCESSIBILITY_NAME_BOUNDS')
                 visible = self.visible(node)
                 row = {'name': name, 'role': role, 'visible': visible}
+                rows.append(row)
+                if role == 'heading':
+                    try:
+                        row['text'] = read_heading_text(node)
+                    except Unverified as error:
+                        row['text_error'] = str(error)
+                        raise
                 if visible:
                     bounds = node.get_component_iface().get_extents(self.ax.CoordType.SCREEN)
                     row['bounds'] = [bounds.x, bounds.y, bounds.width, bounds.height]
-                rows.append(row)
             count = node.get_child_count()
             require(0 <= count <= 512, 'ACCESSIBILITY_CHILD_BOUNDS')
             queue.extend((node.get_child_at_index(i), depth + 1) for i in range(count))
+        self.last_rows_complete = True
         return rows
 
     def content(self):
@@ -209,6 +291,7 @@ class Native:
                 last = str(error)
             except subprocess.CalledProcessError:
                 last = 'HEX_LIBRARY_PIXELS_NOT_QUALIFIED'
+            self.last_observation_failure = last
             require(time.monotonic() < self.deadline, 'HEX_LIBRARY_OBSERVATION_DEADLINE')
             time.sleep(.25)
         raise Unverified(last)
@@ -242,6 +325,7 @@ class Native:
                 last = str(error)
             except subprocess.CalledProcessError:
                 last = 'RETIRED_CATALOG_PIXELS_OR_NAVIGATION_UNQUALIFIED'
+            self.last_observation_failure = last
             require(time.monotonic() < self.deadline, 'HEX_LIBRARY_OBSERVATION_DEADLINE')
             time.sleep(.25)
         raise Unverified(last)
@@ -274,6 +358,7 @@ def retired_main(args):
                'physical_target': 'GITHUB_HOSTED_UBUNTU_22_04_XVFB_EXTRACTED_PACKAGE',
                'package_installed': False, 'pop_os_acceptance': False,
                'product_install_actions_performed': False, 'release_promotion': False}
+    native = None
     try:
         verify_retired_package(package, executable, proof)
         receipt.update(package_identity_verified=True, extracted_elf_identity_verified=True,
@@ -289,6 +374,7 @@ def retired_main(args):
                        screenshot_sha256=visual['screenshot_sha256'])
     except Exception as error:
         receipt['execution_failure'] = str(error) if isinstance(error, Unverified) else type(error).__name__
+        receipt['content_diagnostics'] = content_diagnostics(native, retired=True)
         (proof / 'hex-dev12-ui-red.json').write_text(json.dumps(receipt, indent=2) + '\n')
         raise
     (proof / 'hex-dev12-ui-red.json').write_text(json.dumps(receipt, indent=2) + '\n')
@@ -310,6 +396,7 @@ def main():
                'physical_target': 'GITHUB_HOSTED_UBUNTU_22_04_XVFB',
                'pop_os_acceptance': False, 'product_install_actions_performed': False,
                'native_maths_click_readback': False, 'release_promotion': False}
+    native = None
     try:
         frontend = read_frontend_identity(frontend_path, source, elf)
         receipt['frontend_archive_sha256'] = frontend['frontend_archive_sha256']
@@ -321,6 +408,7 @@ def main():
                        capture=visual, screenshot_sha256=visual['screenshot_sha256'])
     except Exception as error:
         receipt['first_red'] = str(error) if isinstance(error, Unverified) else type(error).__name__
+        receipt['content_diagnostics'] = content_diagnostics(native)
         (proof / 'hex-library-render.json').write_text(json.dumps(receipt, indent=2) + '\n')
         raise
     (proof / 'hex-library-render.json').write_text(json.dumps(receipt, indent=2) + '\n')
