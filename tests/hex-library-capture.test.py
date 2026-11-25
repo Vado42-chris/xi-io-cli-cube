@@ -40,6 +40,15 @@ class Content(unittest.TestCase):
                     with self.assertRaises(CAPTURE.Unverified):
                         CAPTURE.select_content_controls(rows)
 
+    def test_library_cannot_pass_with_a_visible_retired_heading(self):
+        rows = self.rows()
+        retired = {'name': '', 'text': 'XI-IO Ecosystem Component Catalog',
+                   'role': 'heading', 'visible': True}
+        with self.assertRaisesRegex(CAPTURE.Unverified, '^HEX_RETIRED_CATALOG_EXPOSED$'):
+            CAPTURE.select_content_controls(rows + [retired])
+        retired['visible'] = False
+        self.assertEqual(CAPTURE.select_content_controls(rows + [retired]), rows)
+
     def test_duplicate_matching_control_refuses(self):
         with self.assertRaises(CAPTURE.Unverified):
             CAPTURE.select_content_controls(self.rows() + [self.rows()[0]])
@@ -166,6 +175,51 @@ class Diagnostics(unittest.TestCase):
     def native(self, rows, complete=True):
         return SimpleNamespace(last_rows=rows, last_rows_complete=complete,
                                last_observation_failure='HEX_LIBRARY_CONTENT_NOT_OBSERVED')
+
+    def test_live_collector_retains_raw_roles_without_granting_selector_credit(self):
+        class Role:
+            def __init__(self, name):
+                self.value_nick = name
+
+        button, heading, application, text = map(Role, ('push-button', 'heading', 'application', 'static'))
+        def ax_node(role, name, children=()):
+            bounds = SimpleNamespace(x=1, y=2, width=10, height=20)
+            return SimpleNamespace(
+                get_role=lambda: role, get_name=lambda: name,
+                get_child_count=lambda: len(children), get_child_at_index=children.__getitem__,
+                get_process_id=lambda: 50,
+                get_component_iface=lambda: SimpleNamespace(get_extents=lambda _: bounds),
+            )
+
+        for retired, rows, select, failure in (
+            (False, Content().rows(), CAPTURE.select_content_controls, 'HEX_LIBRARY_CONTENT_NOT_OBSERVED'),
+            (True, RetiredContent().rows(), CAPTURE.select_retired_controls, 'RETIRED_CATALOG_NOT_OBSERVED'),
+        ):
+            with self.subTest(retired=retired):
+                # Simulate the actual walking boundary, not invented qualifying headings.
+                # A static text node bearing the exact heading label must not qualify.
+                app = ax_node(application, '', [
+                    ax_node(text if row['role'] == 'heading' else button, row['name'])
+                    for row in rows
+                ])
+                native = CAPTURE.Native.__new__(CAPTURE.Native)
+                native.pid = 50
+                native.deadline = CAPTURE.time.monotonic() + 10
+                native.visible = lambda _: True
+                native.last_observation_failure = failure
+                native.ax = SimpleNamespace(
+                    get_desktop=lambda _: ax_node(application, '', [app]),
+                    Role=SimpleNamespace(PUSH_BUTTON=button, HEADING=heading),
+                    CoordType=SimpleNamespace(SCREEN=0))
+                observed = native.rows()
+                with self.assertRaisesRegex(CAPTURE.Unverified, '^' + failure + '$'):
+                    select(observed)
+                diagnostic = CAPTURE.content_diagnostics(native, retired=retired)
+                self.assertEqual(diagnostic['ui_correctness'], 'UNVERIFIED')
+                self.assertEqual(diagnostic['raw_role_counts'],
+                                 {'application': 1, 'push-button': len(rows) - 1, 'static': 1})
+                missing, = diagnostic['missing_controls']
+                self.assertEqual(missing['status'], 'EXPECTED_ROLE_NOT_EXPOSED')
 
     def test_unavailable_partial_and_observed_mismatch_are_distinct(self):
         missing = CAPTURE.content_diagnostics(None)

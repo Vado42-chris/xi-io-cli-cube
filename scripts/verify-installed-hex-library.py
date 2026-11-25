@@ -103,11 +103,14 @@ def content_diagnostics(native, retired=False):
         matches = [row for row in (rows or []) if control_matches(row, name, role, reference_card)]
         visible = sum(row['visible'] is True for row in matches)
         hidden = len(matches) - visible
+        role_exposed = any(row['role'] == role for row in (rows or []))
         checks.append({'expected_name': name, 'role': role, 'reference_card': reference_card,
                        'visible_exact_matches': visible, 'hidden_exact_matches': hidden,
                        'visible_role_count': sum(row['role'] == role and row['visible'] is True for row in (rows or [])),
                        'status': ('MATCHED' if visible == 1 else 'DUPLICATE' if visible > 1
-                                  else 'NOT_VISIBLE' if hidden else 'EXPECTED_CONTROL_NOT_OBSERVED')})
+                                  else 'NOT_VISIBLE' if hidden
+                                  else 'EXPECTED_ROLE_NOT_EXPOSED' if complete and not role_exposed
+                                  else 'EXPECTED_CONTROL_NOT_OBSERVED')})
     retained = []
     for row in (rows or [])[:MAX_DIAGNOSTIC_ROWS]:
         item = dict(row)
@@ -119,6 +122,8 @@ def content_diagnostics(native, retired=False):
     return {'accessibility_state': ('NOT_OBSERVED' if rows is None else 'COMPLETE' if complete else 'PARTIAL'),
             'ui_correctness': 'UNVERIFIED',
             'observed_control_count': len(rows or []), 'last_observed_rows': retained,
+            # Raw role inventory is diagnostic only. It never supplies a missing selector.
+            'raw_role_counts': dict(sorted(getattr(native, 'last_raw_role_counts', {}).items())),
             'rows_truncated': len(rows or []) > MAX_DIAGNOSTIC_ROWS,
             'expected_control_checks': checks,
             'missing_controls': [check for check in checks if check['status'] != 'MATCHED'],
@@ -132,6 +137,9 @@ def select_content_controls(rows):
         matches = [row for row in rows if control_matches(row, name, role) and row['visible'] is True]
         require(len(matches) == 1, 'HEX_LIBRARY_CONTENT_NOT_OBSERVED')
         selected.append(matches[0])
+    require(not any(row['visible'] is True and control_matches(row, name, role)
+                    for row in rows for name, role in RETIRED_CONTROLS),
+            'HEX_RETIRED_CATALOG_EXPOSED')
     return selected
 
 
@@ -152,6 +160,8 @@ def select_retired_controls(rows):
     try:
         select_content_controls(rows)
     except Unverified as error:
+        require(str(error) != 'HEX_RETIRED_CATALOG_EXPOSED',
+                'RETIRED_CATALOG_UNEXPECTEDLY_QUALIFIED')
         require(str(error) == 'HEX_LIBRARY_CONTENT_NOT_OBSERVED', 'RETIREMENT_REFUSAL_UNEXPECTED')
     else:
         raise Unverified('RETIRED_CATALOG_UNEXPECTEDLY_QUALIFIED')
@@ -230,6 +240,7 @@ class Native:
     def rows(self):
         self.last_rows = None
         self.last_rows_complete = False
+        self.last_raw_role_counts = {}
         desktop = self.ax.get_desktop(0)
         applications = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
         applications = [app for app in applications if app.get_process_id() == self.pid]
@@ -243,7 +254,13 @@ class Native:
             node, depth = queue.pop(0)
             visited += 1
             require(visited <= 2048 and depth < 40, 'ACCESSIBILITY_TREE_BOUNDS')
-            role = roles.get(node.get_role())
+            raw_role = node.get_role()
+            # Track only enum labels, not arbitrary user content; the tree walk bounds
+            # the denominator and the map does not change role interpretation.
+            role_nick = getattr(raw_role, 'value_nick', None) or 'unknown'
+            raw_counts = self.last_raw_role_counts
+            raw_counts[role_nick] = raw_counts.get(role_nick, 0) + 1
+            role = roles.get(raw_role)
             if role:
                 name = node.get_name() or ''
                 require(len(name) <= MAX_CONTROL_TEXT, 'ACCESSIBILITY_NAME_BOUNDS')
