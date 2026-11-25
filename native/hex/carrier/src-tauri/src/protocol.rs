@@ -18,6 +18,8 @@ pub enum InstallerRequest {
     PrepareRepair { prefix: String, node: String, bin_dir: String },
     #[serde(rename = "apply_repair")]
     ApplyRepair { plan_id: String, approval_digest: String, approved: bool },
+    #[serde(rename = "launch_cli")]
+    LaunchCli { plan_id: String, approval_digest: String, approved: bool, workspace: String },
     Prepare { prefix: String, node: String, components: Vec<String>, permission_profile: Value },
     Readback { plan_id: String },
     Apply { plan_id: String, approval_digest: String, approved: bool },
@@ -119,6 +121,8 @@ impl InstallerRequest {
                 && components.iter().all(|x| ["cli", "bins", "switchboard"].contains(&x.as_str()))
                 && components.iter().enumerate().all(|(i, x)| !components[..i].contains(x))
                 && bounded_object(permission_profile, 16 * 1024),
+            Self::LaunchCli { plan_id, approval_digest, approved, workspace } => *approved && id(plan_id)
+                && lower_hex(approval_digest,64) && absolute(workspace),
             Self::ApplyRepair { plan_id, approval_digest, approved }
             | Self::Apply { plan_id, approval_digest, approved }
             | Self::Rollback { plan_id, approval_digest, approved } => *approved && id(plan_id)
@@ -196,6 +200,16 @@ mod tests {
         let mut a=serde_json::json!({"action":"apply_repair","plan_id":"a".repeat(32),"approval_digest":"b".repeat(64),"approved":true});
         assert!(valid(&a.to_string())); a["approved"]=false.into(); assert!(!valid(&a.to_string()));
         a["approved"]=true.into(); a["approval_digest"]="stale".into(); assert!(!valid(&a.to_string()));
+    }
+    #[test] fn installed_cli_launch_is_finite_and_explicit() {
+        let request=serde_json::json!({"action":"launch_cli","plan_id":"a".repeat(32),"approval_digest":"b".repeat(64),"approved":true,"workspace":"/home/pilot/project"});
+        assert!(valid(&request.to_string()));
+        for (key,value) in [("approved",false.into()),("approval_digest","stale".into()),("plan_id","../other".into()),("workspace","../other".into())] {
+            let mut changed=request.clone();changed[key]=value;assert!(!valid(&changed.to_string()));
+        }
+        for key in ["command","executable","args","url","terminal","prefix","node"] {
+            let mut changed=request.clone();changed[key]="untrusted".into();assert!(!valid(&changed.to_string()));
+        }
     }
     #[test] fn approval_is_explicit_and_bound() {
         let mut value=serde_json::json!({"action":"apply","plan_id":"plan-1","approval_digest":"a".repeat(64),"approved":true});

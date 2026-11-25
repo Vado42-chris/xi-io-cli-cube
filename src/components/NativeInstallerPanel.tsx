@@ -6,7 +6,7 @@ import {availabilityFrom, availableSelection, canPrepareComponents, canRollbackP
 
 type Plan = {plan_id: string; phase: string; prefix?: string; components?: string[]; approval_digest?: string; payload_files?: number; payload_bytes?: number; created_at?: string; [key: string]: any};
 type PermissionProfile = {schema:'xiio.hex.permission-profile/v1';profile_id:string;capabilities:string[];service_scopes:string[];update_policy:'off'|'notify'|'review_each'|'auto_security';central_updates:boolean;remote_access:boolean;revoked:boolean};
-type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]; permission_profile: PermissionProfile} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true} | {action:'server_prepare';plan_id:string;package_root:string} | {action:'server_apply';plan_id:string;package_root:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'server_rollback';plan_id:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'permission_replace';plan_id:string;current_digest:string;new_profile:PermissionProfile;approved:true};
+type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]; permission_profile: PermissionProfile} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true} | {action:'launch_cli';plan_id:string;approval_digest:string;approved:true;workspace:string} | {action:'server_prepare';plan_id:string;package_root:string} | {action:'server_apply';plan_id:string;package_root:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'server_rollback';plan_id:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'permission_replace';plan_id:string;current_digest:string;new_profile:PermissionProfile;approved:true};
 
 /** Local native controls within the accepted Cube design, not another launcher. */
 export default function NativeInstallerPanel() {
@@ -54,8 +54,44 @@ export default function NativeInstallerPanel() {
   const [unknown, setUnknown] = useState(false);
   const [approval, setApproval] = useState(false);
   const [rollbackApproval, setRollbackApproval] = useState(false);
+  const [launchResult, setLaunchResult] = useState<any>(null);
+  const [launchBlocked, setLaunchBlocked] = useState(false);
+  const [launchWorkspace, setLaunchWorkspace] = useState('');
   const invoke = (command: string, args: object) => (globalThis as any).__TAURI__.core.invoke(command, args);
   const client = createInstallerClient(native ? invoke : undefined);
+
+  async function chooseLaunchWorkspace() {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true); setError('');
+    try {
+      const selected = await selectNativeDirectory('workspace');
+      if (selected !== null) {setLaunchWorkspace(selected); setLaunchResult(null);}
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function openCli() {
+    if (busyRef.current || !canOpen || !plan?.approval_digest) return;
+    const selected = plan;
+    const workspace = launchWorkspace;
+    busyRef.current = true; setBusy(true); setError('');
+    // A lost reply may follow a terminal opening. Never retry that effect
+    // automatically or replace the saved installation plan with a launch reply.
+    setLaunchBlocked(true); setLaunchResult(null);
+    try {
+      const result = await client({action: 'launch_cli', plan_id: selected.plan_id, approval_digest: selected.approval_digest!, approved: true, workspace});
+      if (result.state === 'CLI_LAUNCH_REQUESTED' && result.plan_id === selected.plan_id && result.workspace === workspace && result.launch_requested === true && result.runtime_ready === false && Number.isInteger(result.pid) && result.pid > 0 && typeof result.generation === 'string' && result.generation.length > 0) {
+        setLaunchResult(result); setLaunchBlocked(false);
+      } else if (result.state === 'CLI_LAUNCH_OUTCOME_UNCERTAIN' || (result.phase === 'CLI_LAUNCH_OUTCOME_UNCERTAIN' && result.do_not_retry === true)) {
+        setLaunchResult(result);
+      } else {
+        throw new Error('Launch response could not be verified. Check the terminal and actual installation state before opening again.');
+      }
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally { busyRef.current = false; setBusy(false); }
+  }
 
   async function runServer(request: Request) {
     if (busyRef.current) return;
@@ -95,6 +131,7 @@ export default function NativeInstallerPanel() {
         const terminal = ['INSTALLED_READBACK_VERIFIED', 'LAUNCHER_REPAIR_READBACK_VERIFIED', 'ROLLED_BACK'].includes(result.phase);
         setObserved(request.action !== 'inspect' && terminal);
         setUnknown(Boolean(result.do_not_retry) || ['APPLYING', 'APPLY_OUTCOME_UNCERTAIN', 'ROLLING_BACK', 'ROLLBACK_OUTCOME_UNCERTAIN', 'LAUNCHER_REPAIR_OUTCOME_UNCERTAIN'].includes(result.phase));
+        if (request.action === 'inspect' || (terminal && !result.do_not_retry)) {setLaunchResult(null); setLaunchBlocked(false);}
       } else {
         setHistory(result.plans || []);
         setPrefix(current => current || result.prefix_suggestion || '');
@@ -108,13 +145,16 @@ export default function NativeInstallerPanel() {
     } finally {busyRef.current = false; setBusy(false);}
   }
   useEffect(() => {if (native) void run({action: 'inspect'}, false);}, []);
-  function edit() {setPlan(null); setObserved(false); setApproval(false); setRollbackApproval(false);}
+  function edit() {setPlan(null); setObserved(false); setApproval(false); setRollbackApproval(false); setLaunchResult(null); setLaunchBlocked(false);}
   const status = installerStatus(plan, observed);
   const runtimeReady = reviewedRuntimeReady(plan);
   const readiness = installerReadiness(preflight, plan);
   const canApply = plan?.phase === 'PREPARED_NOT_INSTALLED' && !unknown && runtimeReady;
   const canRepair = plan?.phase === 'PREPARED_REPAIR_NOT_APPLIED' && !unknown;
   const canRollback = canRollbackPlan(plan, unknown);
+  const nodeVersion = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(plan?.node?.version || '');
+  const launchRuntimeReady = Boolean(nodeVersion && (+nodeVersion[1] > 22 || (+nodeVersion[1] === 22 && +nodeVersion[2] >= 13)) && plan?.node?.sha256 && plan?.node?.path?.startsWith('/') && (plan?.kind === 'launcher_repair' || runtimeReady));
+  const canOpen = Boolean(native && observed && !unknown && !plan?.do_not_retry && !launchBlocked && launchWorkspace.startsWith('/') && launchRuntimeReady && plan?.approval_digest && ['INSTALLED_READBACK_VERIFIED', 'LAUNCHER_REPAIR_READBACK_VERIFIED'].includes(plan?.phase || ''));
   const serviceGrant = Boolean(plan?.permission_profile?.capabilities?.includes('configure_services') && plan?.permission_profile?.capabilities?.includes('start_services'));
   const serverInstalled = serverResult?.state === 'INSTALLED_STARTED_READBACK_VERIFIED';
   const permissionProfile: PermissionProfile = {
@@ -182,6 +222,16 @@ export default function NativeInstallerPanel() {
         {canRepair && <><label className="block text-sm text-workspace-text"><input type="checkbox" checked={approval} disabled={busy} onChange={e => setApproval(e.target.checked)} /> I approve only the displayed launcher repair, original SHA and existing Node binding. No new runtime or CLI generation.</label><button className={button} disabled={busy || !approval} onClick={() => void run({action: 'apply_repair', plan_id: plan.plan_id, approval_digest: plan.approval_digest!, approved: true})}>Repair this existing launcher</button></>}
         {canApply && <><label className="block text-sm text-workspace-text"><input type="checkbox" checked={approval} disabled={busy} onChange={e => setApproval(e.target.checked)} /> I approve the exact displayed plan and target. This writes these files; it does not start services.</label><button className={button} disabled={busy || !approval} onClick={() => void run({action: 'apply', plan_id: plan.plan_id, approval_digest: plan.approval_digest!, approved: true})}>Install this reviewed plan</button></>}
         {(unknown || !['PREPARED_NOT_INSTALLED', 'PREPARED_REPAIR_NOT_APPLIED'].includes(plan.phase)) && <button className={button} disabled={busy} onClick={() => void run({action: 'readback', plan_id: plan.plan_id})}>Check actual state</button>}
+        {['INSTALLED_READBACK_VERIFIED', 'LAUNCHER_REPAIR_READBACK_VERIFIED'].includes(plan.phase) && <div className="space-y-2">
+          <label className="block text-sm">Project folder<input aria-label="CLI project folder" readOnly value={launchWorkspace} className="mt-1 w-full border border-workspace-border-strong bg-workspace-surface p-2 font-mono" /></label>
+          <button type="button" className={button} disabled={busy} onClick={() => void chooseLaunchWorkspace()}>Choose CLI project folder</button>
+          <button type="button" className={button} disabled={busy || !canOpen} onClick={() => void openCli()}>Open XI-IO CLI</button>
+          <p className="text-xs text-workspace-muted">Choose the project you want to work on, then open the CLI menu in this computer’s terminal. HEX checks the installed generation again before opening it.</p>
+          {!observed && <p className="text-xs text-workspace-muted">Check actual state to enable Open for this saved installation.</p>}
+          {launchResult?.state === 'CLI_LAUNCH_REQUESTED' && <p role="status" className="text-sm">Terminal launch requested for generation {launchResult.generation}. Continue in the terminal window.</p>}
+          {launchBlocked && !busy && <p role="status" className="text-sm">Open has not been confirmed. Check for an existing terminal, then check actual state before opening again.</p>}
+          {launchResult && <details className="hex-installer-disclosure text-xs"><summary>Launch result</summary><pre className="hex-detail-scroll text-workspace-muted">{JSON.stringify(launchResult, null, 2)}</pre></details>}
+        </div>}
         {plan.phase === 'INSTALLED_READBACK_VERIFIED' && !canRollback && !unknown && <p className="text-xs text-workspace-muted">Rollback is unavailable for this plan. The CLI requires a previous installed generation; this is not an uninstall operation.</p>}
         {canRollback && <><label className="block text-sm text-workspace-text"><input type="checkbox" checked={rollbackApproval} disabled={busy} onChange={e => setRollbackApproval(e.target.checked)} /> I have stopped services using these files. Restore the previous CLI generation using the existing CLI rollback and saved evidence. Unrelated data is retained; rollback does not stop processes.</label><button className={button} disabled={busy || !rollbackApproval} onClick={() => void run({action: 'rollback', plan_id: plan.plan_id, approval_digest: plan.approval_digest!, approved: true})}>Roll back this plan</button></>}
         {plan.phase === 'INSTALLED_READBACK_VERIFIED' && serviceGrant && !unknown && <div className="space-y-3 border-t border-workspace-border-strong pt-4">
