@@ -158,10 +158,16 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 python3-pil python3-gi gir1.2-atspi-2.0 at-spi2-core libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11
           rustup toolchain install 1.99.1 --profile minimal
           rustup default 1.99.1
           npm ci --prefix native/hex/carrier --no-audit --no-fund
+      - name: Retain existing capture refusals and qualify content-readiness evidence
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I -B scripts/verify-hex-capture.py --check-decoder
+          /usr/bin/python3 -I -B tests/hex-capture.test.py
+          /usr/bin/python3 -I -B tests/hex-library-capture.test.py
       - name: Build exact-source Tauri and Debian, no DEV9 carrier fallback
         run: |
           set -euo pipefail
@@ -173,6 +179,51 @@ jobs:
           sha256sum "${debs[0]}" | tee maths-native-deb.sha256
           dpkg-deb --contents "${debs[0]}" > maths-deb.contents
           grep -F 'xi-io-hex-dev' maths-deb.contents >/dev/null
+      - name: Retain the actual frontend consumed by this native package
+        run: |
+          set -euo pipefail
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          tar -C dist -czf hex-built-frontend.tgz .
+          /usr/bin/python3 -I -B - <<'PY'
+          import hashlib,json,os,pathlib,subprocess
+          root=pathlib.Path.cwd()
+          def sha(path):
+              h=hashlib.sha256()
+              with path.open('rb') as f:
+                  for chunk in iter(lambda:f.read(1024*1024),b''):h.update(chunk)
+              return h.hexdigest()
+          def files(directory):
+              out={}
+              for p in sorted(directory.rglob('*')):
+                  assert not p.is_symlink(),'FRONTEND_SYMLINK_REFUSED'
+                  if p.is_file():out[str(p.relative_to(directory))]={'bytes':p.stat().st_size,'sha256':sha(p)}
+              assert 'index.html' in out and len(out)>1,'FRONTEND_FILES_MISSING'
+              return out
+          frontend=files(root/'dist')
+          assert frontend==files(root/'native/hex/carrier/frontend'),'STAGED_FRONTEND_MISMATCH'
+          debs=list(root.glob('native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb'))
+          assert len(debs)==1,'ONE_NATIVE_PACKAGE_REQUIRED'
+          elf=root/'native/hex/carrier/src-tauri/target/release/xi-io-hex-dev'
+          os_release={}
+          for line in pathlib.Path('/etc/os-release').read_text().splitlines():
+              if '=' in line:
+                  key,value=line.split('=',1)
+                  if key in ('ID','VERSION_ID','PRETTY_NAME'):os_release[key]=value.strip('"')
+          receipt={
+              'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+              'source_tree':subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip(),
+              'github_sha':os.environ['GITHUB_SHA'],'github_run_id':os.environ['GITHUB_RUN_ID'],
+              'github_run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+              'package_version':subprocess.check_output(['dpkg-deb','--field',str(debs[0]),'Version'],text=True).strip(),
+              'frontend_files':frontend,'frontend_staged_match':True,
+              'frontend_archive_sha256':sha(root/'hex-built-frontend.tgz'),
+              'native_elf_sha256':sha(elf),'debian_package_sha256':sha(debs[0]),
+              'debian_package_name':debs[0].name,'build_os':os_release,
+              'qualification':'BUILT_FRONTEND_NOT_INSTALLED_ACCEPTANCE',
+              'pop_os_acceptance':False,'release_promotion':False}
+          (root/'hex-native-frontend-identity.json').write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+          PY
+          sha256sum hex-built-frontend.tgz hex-native-frontend-identity.json | tee hex-frontend-artifacts.sha256
       - name: Install actual candidate on disposable Linux and observe running window
         run: |
           set -euo pipefail
@@ -186,10 +237,15 @@ jobs:
           dpkg-query -S /usr/bin/xi-io-hex-dev
           test -x /usr/bin/xi-io-hex-dev
           sha256sum /usr/bin/xi-io-hex-dev | tee maths-installed-elf.sha256
+          cmp /usr/bin/xi-io-hex-dev native/hex/carrier/src-tauri/target/release/xi-io-hex-dev
+          export HEX_BUILD_SOURCE="$(git rev-parse HEAD)"
+          export HEX_INSTALLED_ELF_SHA="$(sha256sum /usr/bin/xi-io-hex-dev | cut -d' ' -f1)"
+          export HEX_FRONTEND_IDENTITY="$GITHUB_WORKSPACE/hex-native-frontend-identity.json"
           work="$(mktemp -d "${RUNNER_TEMP}/hex-maths-window.XXXXXXXX")"
           mkdir -p "$work/home" "$work/config" "$work/data" "$work/state" "$work/cache" "$work/runtime" "$work/tmp"
           chmod 0700 "$work"/{home,config,data,state,cache,runtime,tmp}
           export MATHS_WINDOW_WORK="$work"
+          set +e
           xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash -euo pipefail -c '
             export HOME="$MATHS_WINDOW_WORK/home"
             export XDG_CONFIG_HOME="$MATHS_WINDOW_WORK/config"
@@ -198,7 +254,11 @@ jobs:
             export XDG_CACHE_HOME="$MATHS_WINDOW_WORK/cache"
             export XDG_RUNTIME_DIR="$MATHS_WINDOW_WORK/runtime"
             export TMPDIR="$MATHS_WINDOW_WORK/tmp"
-            export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_COMPOSITING_MODE=1
+            export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 NO_AT_BRIDGE=0
+            # Same isolated WebKit-default observation mode as Cube #27.
+            # Do not force the old disabled-compositor prepaint path.
+            unset WEBKIT_DISABLE_COMPOSITING_MODE WEBKIT_DISABLE_DMABUF_RENDERER
+            timeout 5s gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null 2>&1 || true
             /usr/bin/xi-io-hex-dev >"$MATHS_WINDOW_WORK/stdout.log" 2>"$MATHS_WINDOW_WORK/stderr.log" &
             pid=$!
             trap '\''kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true'\'' EXIT
@@ -211,14 +271,122 @@ jobs:
             test -n "${window:-}" || { cat "$MATHS_WINDOW_WORK/stderr.log"; exit 32; }
             test "$(xdotool getwindowpid "$window")" = "$pid"
             test "$(xdotool getwindowname "$window")" = "XI-IO HEX"
-            scrot -z "$MATHS_WINDOW_WORK/installed-window.png"
-            test -s "$MATHS_WINDOW_WORK/installed-window.png"
+            set +e
+            timeout --signal=KILL 75s /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/scripts/verify-installed-hex-library.py" "$pid" "$window" "$HEX_INSTALLED_ELF_SHA" "$HEX_BUILD_SOURCE" "$MATHS_WINDOW_WORK" "$HEX_FRONTEND_IDENTITY"
+            observed=$?
+            set -e
+            if test "$observed" -ne 0; then
+              # Failure-only image is retained for review, never promoted.
+              scrot -z -o "$MATHS_WINDOW_WORK/hex-library-unqualified.png" || true
+              exit "$observed"
+            fi
+            test -s "$MATHS_WINDOW_WORK/hex-library-rendered.png"
             test -e "$MATHS_WINDOW_WORK/home"
           '
-          cp "$work/installed-window.png" maths-installed-window.png
-          cp "$work/stderr.log" maths-installed-window.stderr.log
+          observed=$?
+          set -e
+          for name in hex-library-render.json hex-library-rendered.png hex-library-unqualified.png; do
+            if test -f "$work/$name"; then cp "$work/$name" "$name"; fi
+          done
+          if test -f "$work/stderr.log"; then cp "$work/stderr.log" maths-installed-window.stderr.log; fi
+          if test -f "$work/stdout.log"; then cp "$work/stdout.log" maths-installed-window.stdout.log; fi
+          test "$observed" -eq 0 || exit "$observed"
+          cp hex-library-rendered.png maths-installed-window.png
           sha256sum maths-installed-window.png | tee maths-installed-window.sha256
-          printf 'SOURCE=%s\nINSTALLED_WINDOW_OBSERVED=true\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nARIES_INSTALL=NOT_PERFORMED\n' "$GITHUB_SHA"
+          printf 'SOURCE=%s\nNATIVE_LIBRARY_RENDER_OBSERVED=true\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nPOP_OS_ACCEPTANCE=NOT_PERFORMED\nARIES_INSTALL=NOT_PERFORMED\n' "$HEX_BUILD_SOURCE"
+      - name: Refuse the actual released DEV12 catalog with the same content observer
+        if: always()
+        run: |
+          set -euo pipefail
+          test "${GITHUB_ACTIONS:-}" = true
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          work="$(mktemp -d "${RUNNER_TEMP}/hex-dev12-retired-ui.XXXXXXXX")"
+          export HEX_DEV12_PROOF="$work"
+          set +e
+          (
+            set -euo pipefail
+            printf '%s\n' DOWNLOAD_EXACT_RELEASED_DEV12 > "$work/stage.txt"
+            package="$work/xi-io-hex-dev_0.1.0-dev.12_amd64.deb"
+            curl --fail --location --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 \
+              'https://github.com/Vado42-chris/xi-io-cli-cube/releases/download/xiio-hex-local-d160521c-dev12/xi-io-hex-dev_0.1.0-dev.12_amd64.deb' \
+              --output "$package"
+            printf '%s  %s\n' '07115547bd5603882eca5f2b31593615162e6ae1e1573c8b2a8635245337c700' "$package" | sha256sum --check
+            sha256sum "$package" > "$work/hex-dev12-package.sha256"
+            printf '%s\n' EXTRACT_EXACT_RELEASED_DEV12 > "$work/stage.txt"
+            mkdir "$work/payload"
+            dpkg-deb -x "$package" "$work/payload"
+            executable="$work/payload/usr/bin/xi-io-hex-dev"
+            test -x "$executable"
+            printf '%s  %s\n' 'ea5059196651e3100ee0f08393de09337859d72c34fc629fd2292f45d00f4b12' "$executable" | sha256sum --check
+            # Extraction only. The old package never replaces the installed candidate.
+            mkdir -p "$work/home" "$work/config" "$work/data" "$work/state" "$work/cache" "$work/runtime" "$work/tmp"
+            chmod 0700 "$work"/{home,config,data,state,cache,runtime,tmp}
+            printf '%s\n' LAUNCH_EXACT_RELEASED_DEV12 > "$work/stage.txt"
+            xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash -euo pipefail -c '
+              export HOME="$HEX_DEV12_PROOF/home"
+              export XDG_CONFIG_HOME="$HEX_DEV12_PROOF/config"
+              export XDG_DATA_HOME="$HEX_DEV12_PROOF/data"
+              export XDG_STATE_HOME="$HEX_DEV12_PROOF/state"
+              export XDG_CACHE_HOME="$HEX_DEV12_PROOF/cache"
+              export XDG_RUNTIME_DIR="$HEX_DEV12_PROOF/runtime"
+              export TMPDIR="$HEX_DEV12_PROOF/tmp"
+              export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 NO_AT_BRIDGE=0
+              unset WEBKIT_DISABLE_COMPOSITING_MODE WEBKIT_DISABLE_DMABUF_RENDERER
+              timeout 5s gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null 2>&1 || true
+              executable="$HEX_DEV12_PROOF/payload/usr/bin/xi-io-hex-dev"
+              package="$HEX_DEV12_PROOF/xi-io-hex-dev_0.1.0-dev.12_amd64.deb"
+              "$executable" >"$HEX_DEV12_PROOF/stdout.log" 2>"$HEX_DEV12_PROOF/stderr.log" &
+              pid=$!
+              trap '\''kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true'\'' EXIT
+              for i in $(seq 1 80); do
+                kill -0 "$pid" || { cat "$HEX_DEV12_PROOF/stderr.log"; exit 41; }
+                window=$(xdotool search --onlyvisible --pid "$pid" --name "^XI-IO HEX$" 2>/dev/null | head -n1 || true)
+                test -z "$window" || break
+                sleep 0.25
+              done
+              test -n "${window:-}" || { cat "$HEX_DEV12_PROOF/stderr.log"; exit 42; }
+              printf "%s\n" OBSERVE_RETIRED_CATALOG_AND_CURRENT_SELECTOR_REFUSAL > "$HEX_DEV12_PROOF/stage.txt"
+              set +e
+              timeout --signal=KILL 75s /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/scripts/verify-installed-hex-library.py" \
+                --retired-dev12 "$pid" "$window" "$HEX_DEV12_PROOF" "$package" "$executable"
+              observed=$?
+              set -e
+              if test "$observed" -ne 0; then
+                scrot -z -o "$HEX_DEV12_PROOF/hex-dev12-unqualified.png" || true
+                exit "$observed"
+              fi
+              test -s "$HEX_DEV12_PROOF/hex-dev12-retired-catalog.png"
+            '
+          ) > "$work/hex-dev12-executor.log" 2>&1
+          observed=$?
+          set -e
+          export HEX_DEV12_EXIT="$observed"
+          # A missing tool/download/window or interrupted observer is an executor
+          # failure. Preserve it without inventing a successful negative control.
+          /usr/bin/python3 -I -B - <<'PY'
+          import json,os,pathlib
+          proof=pathlib.Path(os.environ['HEX_DEV12_PROOF'])
+          receipt=proof/'hex-dev12-ui-red.json'
+          if not receipt.exists():
+              receipt.write_text(json.dumps({
+                  'state':'RELEASED_RETIRED_UI_RED_UNVERIFIED','red_established':False,
+                  'release_tag':'xiio-hex-local-d160521c-dev12',
+                  'expected_debian_package_sha256':'07115547bd5603882eca5f2b31593615162e6ae1e1573c8b2a8635245337c700',
+                  'candidate_verifier_source':os.environ['GITHUB_SHA'],
+                  'execution_failure':'DEV12_EXECUTOR_FAILED_BEFORE_OBSERVER_RETURN',
+                  'first_unmet_stage':(proof/'stage.txt').read_text().strip(),
+                  'exit_status':int(os.environ['HEX_DEV12_EXIT']),
+                  'physical_target':'GITHUB_HOSTED_UBUNTU_22_04_XVFB_EXTRACTED_PACKAGE',
+                  'package_installed':False,'pop_os_acceptance':False,
+                  'product_install_actions_performed':False,'release_promotion':False},indent=2)+'\n')
+          PY
+          for name in hex-dev12-ui-red.json hex-dev12-retired-catalog.png hex-dev12-unqualified.png hex-dev12-executor.log hex-dev12-package.sha256; do
+            if test -f "$work/$name"; then cp "$work/$name" "$name"; fi
+          done
+          if test -f "$work/stderr.log"; then cp "$work/stderr.log" hex-dev12-native.stderr.log; fi
+          if test -f "$work/stdout.log"; then cp "$work/stdout.log" hex-dev12-native.stdout.log; fi
+          cat hex-dev12-executor.log
+          test "$observed" -eq 0 || exit "$observed"
       - name: Preserve package and source-bound hosted acceptance receipts
         if: always()
         uses: actions/upload-artifact@v4
@@ -231,7 +399,21 @@ jobs:
             maths-installed-window.sha256
             maths-installed-window.png
             maths-installed-window.stderr.log
+            maths-installed-window.stdout.log
             maths-deb.contents
+            hex-built-frontend.tgz
+            hex-native-frontend-identity.json
+            hex-frontend-artifacts.sha256
+            hex-library-render.json
+            hex-library-rendered.png
+            hex-library-unqualified.png
+            hex-dev12-ui-red.json
+            hex-dev12-retired-catalog.png
+            hex-dev12-unqualified.png
+            hex-dev12-executor.log
+            hex-dev12-package.sha256
+            hex-dev12-native.stderr.log
+            hex-dev12-native.stdout.log
           if-no-files-found: warn
           retention-days: 14
 
