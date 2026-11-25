@@ -204,7 +204,7 @@ def load_bundle_profile(lock: Path, *,
             # A dependency descriptor is a different coordinate from the
             # product manifest, never an inferred field in manifest.raw.
             extra = set(row) - row_fields
-            _require(extra in ({"release_generation"},
+            _require(row_fields <= set(row) and extra in ({"release_generation"},
                                {"release_generation", "descriptor_ref", "descriptor_sha256"}),
                      "BUNDLE_PRODUCT_FIELDS_INVALID")
         else:

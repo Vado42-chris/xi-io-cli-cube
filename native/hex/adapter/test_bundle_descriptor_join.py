@@ -101,6 +101,17 @@ class ProductDescriptorReleaseJoinTests(unittest.TestCase):
         del self.f.rows[0]["release_generation"]
         self.assert_pre_effect_refusal("BUNDLE_PRODUCT_FIELDS_INVALID|BUNDLE_RELEASE_GENERATION_UNBOUND")
 
+    def test_missing_base_product_fields_refuse_before_fetch(self):
+        row = self.f.rows[0]
+        for field in ("role", "product_id", "manifest", "manifest_sha256",
+                      "depends_on", "payload_urls"):
+            with self.subTest(field=field):
+                value = row.pop(field)
+                try:
+                    self.assert_pre_effect_refusal("BUNDLE_PRODUCT_FIELDS_INVALID")
+                finally:
+                    row[field] = value
+
     def test_foreign_descriptor_identity_blocks_before_fetch(self):
         self.descriptor["product_id"] = "foreign-product"
         self.attach_descriptor()
