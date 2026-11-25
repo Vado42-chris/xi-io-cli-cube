@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from xiio_installer.discovery import xdg_roots
-from xiio_installer.dependency_binding import compile_dependency_binding_receipt
+from xiio_installer.dependency_binding import compile_dependency_binding_receipt, _dep, DependencyBindingError
 from xiio_installer.manifest import load_manifest, sha256_file, verify_payload
 from xiio_installer.transaction import (TransactionError, apply_install, plan_install,
     qualify_precommand_install_plans, qualify_precommand_manifests, rollback)
@@ -190,13 +190,25 @@ def load_bundle_profile(lock: Path, *,
     _require(isinstance(rows, list) and 0 < len(rows) <= 32,
              "BUNDLE_PRODUCT_COUNT_INVALID")
     products = {}
+    # Product-mode descriptors are exact, separately checked lock children.
+    # Strict Installer manifests never carry runtime_exports or release authority.
+    product_descriptors = {}
+    release_generations = {}
     product_ids = set()
     destinations = set()
     for row in rows:
-        _require(isinstance(row, dict) and set(row) ==
-                 {"role", "product_id", "manifest", "manifest_sha256",
-                  "depends_on", "payload_urls"},
-                 "BUNDLE_PRODUCT_FIELDS_INVALID")
+        row_fields = {"role", "product_id", "manifest", "manifest_sha256",
+                      "depends_on", "payload_urls"}
+        _require(isinstance(row, dict), "BUNDLE_PRODUCT_FIELDS_INVALID")
+        if profile_mode == "product":
+            # A dependency descriptor is a different coordinate from the
+            # product manifest, never an inferred field in manifest.raw.
+            extra = set(row) - row_fields
+            _require(row_fields <= set(row) and extra in ({"release_generation"},
+                               {"release_generation", "descriptor_ref", "descriptor_sha256"}),
+                     "BUNDLE_PRODUCT_FIELDS_INVALID")
+        else:
+            _require(set(row) == row_fields, "BUNDLE_PRODUCT_FIELDS_INVALID")
         role = row["role"]
         _require(isinstance(role, str) and SAFE_ID.fullmatch(role)
                  and role not in products, "BUNDLE_PRODUCT_ROLE_INVALID")
@@ -223,6 +235,58 @@ def load_bundle_profile(lock: Path, *,
                  "BUNDLE_PRODUCT_VERSION_INVALID")
         _require(manifest.product_id == product_id and manifest.fixture == fixture,
                  "BUNDLE_PRODUCT_MANIFEST_IDENTITY_MISMATCH")
+        if profile_mode == "product":
+            # Product mode refuses the historical manifest.raw shortcut even
+            # if a permissive old parser accepts the extra keys.
+            _require(not any(key in manifest.raw for key in
+                             ("accepted_generation", "runtime_exports",
+                              "dependency_id", "owner_repo")),
+                     "BUNDLE_PRODUCT_MANIFEST_METADATA_MISPLACED")
+            generation = row.get("release_generation")
+            _require(isinstance(generation, str) and
+                     re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", generation),
+                     "BUNDLE_RELEASE_GENERATION_UNBOUND")
+            release_generations[role] = generation
+            if "descriptor_ref" in row:
+                descriptor_ref = _safe_rel(row["descriptor_ref"],
+                                           "BUNDLE_DESCRIPTOR_PATH_INVALID")
+                descriptor_digest = row["descriptor_sha256"]
+                _require(isinstance(descriptor_digest, str) and
+                         SHA256.fullmatch(descriptor_digest),
+                         "BUNDLE_DESCRIPTOR_DIGEST_INVALID")
+                descriptor_path = lock.parent / descriptor_ref
+                _require(descriptor_path.resolve().is_relative_to(lock.parent.resolve())
+                         and not descriptor_path.is_symlink(),
+                         "BUNDLE_DESCRIPTOR_PATH_UNTRUSTED")
+                descriptor_bytes = _safe_existing_file(descriptor_path, MAX_LOCK_BYTES)
+                _require(_sha(descriptor_bytes) == descriptor_digest,
+                         "BUNDLE_DESCRIPTOR_DIGEST_MISMATCH")
+                try:
+                    descriptor = json.loads(descriptor_bytes)
+                except (ValueError, UnicodeError) as exc:
+                    raise BundleError("BUNDLE_DESCRIPTOR_JSON_INVALID") from exc
+                _require(isinstance(descriptor, dict),
+                         "BUNDLE_DESCRIPTOR_SCHEMA_INVALID")
+                try:
+                    dependency_id, owner_repo, accepted, exports = _dep(manifest, descriptor)
+                except DependencyBindingError as exc:
+                    raise BundleError("BUNDLE_DESCRIPTOR_CONTRACT_INVALID") from exc
+                _require(accepted == generation,
+                         "BUNDLE_DESCRIPTOR_RELEASE_GENERATION_MISMATCH")
+                product_descriptors[role] = {
+                    "ref": descriptor_ref,
+                    "sha256": descriptor_digest,
+                    "data": descriptor,
+                    "dependency_id": dependency_id,
+                    "owner_repo": owner_repo,
+                    "generation": accepted,
+                    "export_count": len(exports),
+                }
+            else:
+                # Every transitive runtime child must have a descriptor; a
+                # selected root without runtime exports needs none.
+                _require(role == product_root_role,
+                         "BUNDLE_RUNTIME_DEPENDENCY_DESCRIPTOR_REQUIRED")
         deps = row["depends_on"]
         _require(isinstance(deps, list) and len(deps) <= 32
                  and len(set(map(str, deps))) == len(deps)
@@ -275,7 +339,10 @@ def load_bundle_profile(lock: Path, *,
         "profile_id": profile_id, "fixture": fixture,
         "profile_mode": profile_mode, "product_root_role": product_root_role,
         "lock_sha256": _sha(raw), "ordered_roles": tuple(ordered),
-        "products": products, "release_source_observed": True,
+        "products": products,
+        "product_descriptors": product_descriptors,
+        "release_generations": release_generations,
+        "release_source_observed": True,
         "runtime_authority": False
     }
 
@@ -366,8 +433,12 @@ def _atomic_private_json(path: Path, value: dict) -> bool:
         if p.exists(): p.unlink()
     return True
 
-def _release_distribution_receipt(manifest, transaction_receipt: Path, output: Path) -> tuple[dict, bool] | None:
-    generation=str(manifest.raw.get("accepted_generation") or "").strip()
+def _release_distribution_receipt(manifest, transaction_receipt: Path, output: Path, *,
+                                  release_generation: str | None = None) -> tuple[dict, bool] | None:
+    # The current product lock supplies the generation. The original
+    # manifest.raw lookup survives only for historical suite compatibility.
+    generation = (release_generation if release_generation is not None
+                  else str(manifest.raw.get("accepted_generation") or "").strip())
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", generation):
         return None
     tx=json.loads(transaction_receipt.read_text(encoding="utf-8"))
@@ -389,6 +460,7 @@ def _release_distribution_receipt(manifest, transaction_receipt: Path, output: P
 
 def install_bundle(lock: Path, *, approved_lock_sha256: str,
                    env: dict[str, str] | None = None,
+                   application_root: Path | None = None,
                    allowed_hosts: frozenset[str] | None = None,
                    fetch=None, fail_after_product: int | None = None):
     """Acquire all children, verify all bytes, then apply existing transactions.
@@ -401,7 +473,25 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
     profile = load_bundle_profile(lock, allowed_hosts=allowed_hosts)
     _require(profile["lock_sha256"] == approved_lock_sha256,
              "BUNDLE_APPROVAL_DIGEST_MISMATCH")
+    application_roles = tuple(
+        role for role in profile["ordered_roles"]
+        if any(entry.destination_scope == "application"
+               for entry in profile["products"][role][0].entries)
+    )
+    if application_roles:
+        _require(isinstance(application_root, Path),
+                 "BUNDLE_APPLICATION_ROOT_REQUIRED")
+        _require(application_root.is_absolute()
+                 and application_root.is_dir()
+                 and not application_root.is_symlink(),
+                 "BUNDLE_APPLICATION_ROOT_INVALID")
+        application_root = application_root.resolve(strict=True)
+    else:
+        _require(application_root is None,
+                 "BUNDLE_APPLICATION_ROOT_NOT_APPLICABLE")
     roots = xdg_roots(env)
+    if application_root is not None:
+        roots["application"] = application_root
     state_root = roots["xdg_state"] / "xi-io" / "installer" / "bundles" / profile["profile_id"]
     observed_machine = {
         "os": platform.system(), "architecture": platform.machine(), "family": "linux"
@@ -484,8 +574,18 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
             plans = []
             for role in profile["ordered_roles"]:
                 manifest = profile["products"][role][0]
-                plans.append((plan_install(manifest, staged[role], env), roots,
-                              receipts[role]))
+                role_application_root = (
+                    application_root
+                    if any(entry.destination_scope == "application"
+                           for entry in manifest.entries)
+                    else None
+                )
+                plan = (
+                    plan_install(manifest, staged[role], env, role_application_root)
+                    if role_application_root is not None
+                    else plan_install(manifest, staged[role], env)
+                )
+                plans.append((plan, roots, receipts[role]))
             # A new destination/profile after download cannot bypass the
             # Installer's current pre-command qualification.
             try:
@@ -505,24 +605,64 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                     receipt = receipts[role]
                     _require(not receipt.exists() and not receipt.is_symlink(),
                              "BUNDLE_RECEIPT_ALREADY_EXISTS")
-                    apply_install(manifest, staged[role], receipt, env)
+                    role_application_root = (
+                        application_root
+                        if any(entry.destination_scope == "application"
+                               for entry in manifest.entries)
+                        else None
+                    )
+                    if role_application_root is not None:
+                        apply_install(manifest, staged[role], receipt, env,
+                                      role_application_root)
+                    else:
+                        apply_install(manifest, staged[role], receipt, env)
                     applied.append(receipt)
                     release_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".release.json")
-                    release_result=_release_distribution_receipt(manifest,receipt,release_path)
+                    release_result=_release_distribution_receipt(
+                        manifest,receipt,release_path,
+                        release_generation=profile["release_generations"].get(role))
                     release_value=None
                     if release_result is not None:
                         release_value,release_created=release_result
                         if release_created:
                             derived_receipts.append(release_path)
                         release_receipts[role]={"path":str(release_path),"receipt":release_value}
-                    if manifest.raw.get("runtime_exports"):
+                    descriptor_info = profile["product_descriptors"].get(role)
+                    # Old suite fixtures retain their legacy behavior. In
+                    # product mode ONLY the separately pinned descriptor can
+                    # authorize a binding projection.
+                    if descriptor_info is not None or (
+                        profile["profile_mode"] == "suite" and
+                        manifest.raw.get("runtime_exports")
+                    ):
                         tx=json.loads(receipt.read_text(encoding="utf-8"))
                         binding_path=state_root/(role+"-"+manifest.version.replace("/","-")+"-"+approved_lock_sha256[:12]+".binding.json")
-                        binding=compile_dependency_binding_receipt(manifest,tx,env,release_path if release_value is not None else None,binding_receipt_path=binding_path)
+                        binding=compile_dependency_binding_receipt(
+                            manifest,tx,env,
+                            release_path if release_value is not None else None,
+                            binding_receipt_path=binding_path,
+                            descriptor=descriptor_info["data"] if descriptor_info is not None else None)
                         binding_created=_atomic_private_json(binding_path,binding)
                         if binding_created:
                             derived_receipts.append(binding_path)
                         dependency_binding_receipts[role]={"path":str(binding_path),"receipt":binding}
+                    # Reopen the exact installed bytes after any dependency-binding
+                    # consumer has verified its exported files. This preserves the
+                    # existing drift/rollback classification while still proving the
+                    # final installed product bytes and modes independently.
+                    plan = next(item[0] for item in plans
+                                if item[2] == receipt)
+                    for item in plan:
+                        root = roots.get(item.destination_scope)
+                        _require(root is not None,
+                                 "BUNDLE_READBACK_SCOPE_UNBOUND")
+                        destination = root / item.destination
+                        _require(not destination.is_symlink()
+                                 and destination.is_file()
+                                 and sha256_file(destination) == item.expected_sha256
+                                 and stat.S_IMODE(destination.stat().st_mode)
+                                     == item.expected_mode,
+                                 "BUNDLE_INSTALLED_READBACK_MISMATCH")
                     if fail_after_product is not None and len(applied) == fail_after_product:
                         raise BundleError("BUNDLE_TEST_INJECTED_FAILURE")
             except Exception as cause:
@@ -534,7 +674,20 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                         failures.append(derived.name)
                 for receipt in reversed(applied):
                     try:
-                        rollback(receipt, env)
+                        receipt_doc = json.loads(
+                            receipt.read_text(encoding="utf-8")
+                        )
+                        needs_application_root = any(
+                            isinstance(item, dict)
+                            and item.get("destination_scope") == "application"
+                            for item in receipt_doc.get("entries", [])
+                        )
+                        if needs_application_root:
+                            _require(application_root is not None,
+                                     "BUNDLE_APPLICATION_ROOT_REQUIRED")
+                            rollback(receipt, env, application_root)
+                        else:
+                            rollback(receipt, env)
                     except Exception:
                         failures.append(receipt.name)
                 if failures:
@@ -551,6 +704,8 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
                 "release_distribution_receipts": release_receipts,
                 "dependency_binding_receipts": dependency_binding_receipts,
                 "filesystem_precommand_state": filesystem["state"],
+                "application_root_bound": application_root is not None,
+                "application_roles": list(application_roles),
                 "runtime_qualified": False, "authority_granted": False,
                 "device_connected": False, "child_services_started": False
             }
