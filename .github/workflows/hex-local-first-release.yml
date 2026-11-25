@@ -42,14 +42,17 @@ jobs:
           tag="$XIIO_HEX_RELEASE_TAG"
           out="$RUNNER_TEMP/xiio-local-first/publish"
           (cd "$out" && sha256sum -c SHA256SUMS)
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
-            echo "GIT_TAG_EXISTS_REFUSE_OVERWRITE"; exit 1
-          fi
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "RELEASE_EXISTS_REFUSE_OVERWRITE"; exit 1
-          fi
+          # Atomic creation refuses an existing tag and every API failure.
+          # A failed read is never interpreted as permission to reuse a tag.
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$tag" -f sha="$XIIO_HEX_SOURCE_SHA" \
+            > "$out/provider-tag-creation.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" \
+            --jq '.object | select(.type == "commit") | .sha' \
+            | grep -Fx "$XIIO_HEX_SOURCE_SHA"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
             --target "$XIIO_HEX_SOURCE_SHA" \
+            --verify-tag \
             --title 'XI-IO HEX local-first Linux DEV12 (d160521c)' \
             --notes-file "$out/INSTALL-LOCAL-FIRST.txt" \
             --prerelease --latest=false \

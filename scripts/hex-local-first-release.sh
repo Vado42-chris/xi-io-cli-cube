@@ -107,14 +107,16 @@ Tested merge: $tested_merge
 Package: $XIIO_HEX_PACKAGE_NAME
 SHA-256: $deb_sha
 
-Download from your Pop!_OS terminal:
+Download, verify, install and open from your Pop!_OS terminal.
+Paste this complete block; any failed step stops before the next one:
+(
+set -e
 curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output "$XIIO_HEX_PACKAGE_NAME" "$url/$XIIO_HEX_PACKAGE_NAME"
 curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output SHA256SUMS "$url/SHA256SUMS"
 sha256sum --check SHA256SUMS
-
-Install the verified local package, then open HEX:
 sudo apt install --no-remove "./$XIIO_HEX_PACKAGE_NAME"
 xi-io-hex-dev
+)
 
 No GitHub account, XI-IO sign-in, enrollment, Ward grant, tunnel or ChatGPT
 connection is required for this local download, installation or first launch.
