@@ -282,20 +282,97 @@ class RenderedText(unittest.TestCase):
             self.check('\u00e9'*(m.OCR_MAX_BYTES//2+1))
 
 class OcrExecutor(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name);tool=self.root/'hex-ocr-qualified'
+        self.binary=tool/'bin/tesseract';self.binary.parent.mkdir(parents=True)
+        self.binary.write_bytes(b'inert executor fixture');self.binary.chmod(0o755)
+        self.language=tool/'share/tessdata/eng.traineddata';self.language.parent.mkdir(parents=True)
+        self.language.write_bytes(b'X'*4113088)
+        self.runtime=self.root/'libfixture.so';self.runtime.write_bytes(b'inert runtime fixture')
+        self.archive=self.root/'hex-ocr-toolchain.tgz';self.archive.write_bytes(b'inert archive fixture')
+        self.path=self.root/'hex-ocr-identity.json'
+        def record(path,archive_path):
+            return {'path':str(path),'bytes':path.stat().st_size,'sha256':m.file_digest(path),'archive_path':archive_path}
+        language=record(self.language,'share/tessdata/eng.traineddata');language['git_blob']=m.OCR_LANGUAGE_BLOB
+        runtime=record(self.runtime,'runtime/'+m.file_digest(self.runtime)+'-'+self.runtime.name)
+        runtime['resolved_path']=runtime.pop('path')
+        self.version='tesseract 5.5.0\n leptonica-1.84.1\n'
+        self.identity={'schema':'xiio.hex.ocr-toolchain/v1','source_commit':'a'*40,'source_tree':'b'*40,
+            'github_run_id':'17','github_run_attempt':'1','tesseract_source_commit':m.OCR_SOURCE,
+            'leptonica_source_commit':m.OCR_IMAGE_SOURCE,'language_source_commit':m.OCR_LANGUAGE_SOURCE,
+            'version_first_line':'tesseract 5.5.0','version_full':self.version,
+            'executable':record(self.binary,'bin/tesseract'),'language':language,'runtime_files':[runtime],
+            'archive':{'file':self.archive.name,'bytes':self.archive.stat().st_size,'sha256':m.file_digest(self.archive)},
+            'static_ocr_libraries':True,'supported_input':'PNG','provider_effect':False,'pop_os_acceptance':False}
+        # Inert tool bytes test binding/refusals. They never execute or qualify a native run.
+        self.addCleanup(patch.stopall)
+        patch.object(m,'OCR_LANGUAGE_SHA256',language['sha256']).start()
+        self.env=patch.dict(m.os.environ,{'RUNNER_TEMP':str(self.root),'GITHUB_SHA':'a'*40,
+            'GITHUB_RUN_ID':'17','GITHUB_RUN_ATTEMPT':'1','HEX_OCR_BINDING':str(self.path)}).start()
+        self.write_identity()
+    def write_identity(self):
+        self.path.write_text(json.dumps(self.identity,sort_keys=True))
+        m.os.environ['HEX_OCR_BINDING_SHA256']=m.file_digest(self.path)
     def completed(self,stdout,code=0):return m.subprocess.CompletedProcess([],code,stdout,b'')
     def test_fixed_executor_preserves_raw_output_and_records_version(self):
         raw=b'XI-IO Software\nREVIEW INSTALLATION\n\x0c'
-        with patch.object(m.Path,'is_file',return_value=True),patch.object(m.os,'access',return_value=True),patch.object(m.subprocess,'run',side_effect=[self.completed(b'tesseract 5.5.0\n'),self.completed(raw)]) as run:
+        with patch.dict(m.os.environ,{'TESSDATA_PREFIX':'/wrong','LD_PRELOAD':'/wrong','LD_LIBRARY_PATH':'/wrong'}),patch.object(m.subprocess,'run',side_effect=[self.completed(self.version.encode()),self.completed(raw)]) as run:
             text,observed,version=m.read_ocr(Path('/tmp/owned-window.png'),20)
         self.assertEqual((text,observed,version),(raw.decode(),raw,'tesseract 5.5.0'))
-        self.assertEqual(run.call_args.args[0],['/usr/bin/tesseract','/tmp/owned-window.png','stdout','-l','eng','--psm','11'])
+        self.assertEqual(run.call_args.args[0],[str(self.binary),'/tmp/owned-window.png','stdout','--tessdata-dir',str(self.language.parent),'-l','eng','--psm','11'])
+        self.assertTrue(all(key not in run.call_args.kwargs['env'] for key in ('TESSDATA_PREFIX','LD_PRELOAD','LD_LIBRARY_PATH')))
     def test_missing_or_failed_ocr_executor_is_not_content_evidence(self):
-        with patch.object(m.Path,'is_file',return_value=False),patch.object(m.subprocess,'run') as run,self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_EXECUTOR_UNAVAILABLE$'):
+        self.binary.unlink()
+        with patch.object(m.subprocess,'run') as run,self.assertRaises((m.base.Unverified,OSError)):
             m.read_ocr(Path('/tmp/owned-window.png'),20)
         run.assert_not_called()
+        self.binary.write_bytes(b'inert executor fixture');self.binary.chmod(0o755)
         for result in [self.completed(b'',1),self.completed(b'\xff'),self.completed(b'x'*(m.OCR_MAX_BYTES+1)),m.subprocess.TimeoutExpired('tesseract',15)]:
-            with self.subTest(result=type(result).__name__),patch.object(m.Path,'is_file',return_value=True),patch.object(m.os,'access',return_value=True),patch.object(m.subprocess,'run',side_effect=[self.completed(b'tesseract 5.5.0\n'),result]),self.assertRaises(m.base.Unverified):
+            with self.subTest(result=type(result).__name__),patch.object(m.subprocess,'run',side_effect=[self.completed(self.version.encode()),result]),self.assertRaises(m.base.Unverified):
                 m.read_ocr(Path('/tmp/owned-window.png'),20)
+    def test_unbound_manifest_does_not_fall_back_to_system_ocr(self):
+        with patch.dict(m.os.environ,{'HEX_OCR_BINDING_SHA256':''}),patch.object(m.subprocess,'run') as run,self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_BINDING_REQUIRED$'):
+            m.read_ocr(Path('/tmp/owned-window.png'),20)
+        run.assert_not_called()
+    def test_old_executor_version_is_refused_before_image_read(self):
+        with patch.object(m.subprocess,'run',return_value=self.completed(b'tesseract 4.1.1\n')) as run,self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_VERSION_UNVERIFIED$'):
+            m.read_ocr(Path('/tmp/owned-window.png'),20)
+        self.assertEqual(run.call_count,1)
+    def test_changed_binary_or_runtime_is_refused_before_execution(self):
+        binding=m.load_ocr_toolchain()
+        for path in (self.binary,self.runtime):
+            original=path.read_bytes();path.write_bytes(original+b'changed')
+            with self.subTest(path=path.name),patch.object(m.subprocess,'run') as run,self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_BYTES_CHANGED$'):
+                m.read_ocr(Path('/tmp/owned-window.png'),20,toolchain=binding)
+            run.assert_not_called();path.write_bytes(original)
+    def test_language_change_during_read_cannot_qualify_output(self):
+        def image_read(*args,**kwargs):
+            self.language.write_bytes(b'Y'*4113088)
+            return self.completed(b'XI-IO Software\nREVIEW INSTALLATION\n')
+        calls=0
+        def dispatch(*args,**kwargs):
+            nonlocal calls
+            calls+=1
+            return self.completed(self.version.encode()) if calls==1 else image_read()
+        with patch.object(m.subprocess,'run',side_effect=dispatch),self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_BYTES_CHANGED$'):
+            m.read_ocr(Path('/tmp/owned-window.png'),20)
+    def test_foreign_run_and_language_selection_refuse(self):
+        original=json.loads(json.dumps(self.identity))
+        for key,value,category in [('github_run_id','18','RENDERED_OCR_RUN_MISMATCH'),('tesseract_source_commit','f'*40,'RENDERED_OCR_TOOLCHAIN_MISMATCH')]:
+            self.identity={**original,key:value};self.write_identity()
+            with self.subTest(key=key),self.assertRaisesRegex(m.base.Unverified,'^'+category+'$'):
+                m.load_ocr_toolchain()
+        self.identity=json.loads(json.dumps(original));self.identity['language']['sha256']='f'*64;self.write_identity()
+        with self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_SELECTION_MISMATCH$'):
+            m.load_ocr_toolchain()
+    def test_manifest_or_archive_mutation_refuses(self):
+        binding=m.load_ocr_toolchain();self.path.write_text(self.path.read_text()+' ')
+        with self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_BINDING_CHANGED$'):
+            m.verify_ocr_toolchain(binding)
+        self.write_identity();self.archive.write_bytes(b'changed archive')
+        with self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_ARCHIVE_UNVERIFIED$'):
+            m.load_ocr_toolchain()
 
 class RenderedCapture(unittest.TestCase):
     def setUp(self):

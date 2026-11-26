@@ -23,6 +23,11 @@ RETIRED_TITLE = 'XI-IO Ecosystem Component Catalog'
 UPSTREAM_TITLE = 'Craft App Suite'
 OCR_MAX_BYTES = 65536
 CAPTURE_MAX_BYTES = 16 * 1024 * 1024
+OCR_SOURCE = '64eab6c457b2337dd690746a5fde5c222b40d5f8'
+OCR_IMAGE_SOURCE = '7e803e73511fbd320f01314c141d35d2b8491dde'
+OCR_LANGUAGE_SOURCE = '87416418657359cb625c412a48b6e1d6d41c29bd'
+OCR_LANGUAGE_SHA256 = '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2'
+OCR_LANGUAGE_BLOB = 'bbef4675053b5b468cdb477053e28b1c698ba08e'
 DEV12_PACKAGE_SHA256 = '07115547bd5603882eca5f2b31593615162e6ae1e1573c8b2a8635245337c700'
 DEV12_ELF_SHA256 = 'ea5059196651e3100ee0f08393de09337859d72c34fc629fd2292f45d00f4b12'
 # These two complete button names were independently observed in the released
@@ -127,21 +132,112 @@ def require_rendered_text(matches, retired=False):
     base.require(matches['expected_labels_observed_once'],
                  'RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED' if retired else 'ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED')
 
-def read_ocr(crop, timeout, page_segmentation_mode=11):
-    """Use the fixed hosted executor and retain its uncorrected UTF-8 output."""
-    executable = '/usr/bin/tesseract'
-    base.require(Path(executable).is_file() and os.access(executable, os.X_OK), 'RENDERED_OCR_EXECUTOR_UNAVAILABLE')
+def verify_ocr_toolchain(binding):
+    """Reopen the selected executable, runtime and language bytes before use."""
+    base.require(isinstance(binding, dict) and isinstance(binding.get('identity'), dict),
+                 'RENDERED_OCR_BINDING_REQUIRED')
+    identity = binding['identity']
+    base.require(file_digest(binding['identity_path']) == binding['identity_sha256'],
+                 'RENDERED_OCR_BINDING_CHANGED')
+    base.require(json.loads(Path(binding['identity_path']).read_text(encoding='utf-8')) == identity,
+                 'RENDERED_OCR_BINDING_CHANGED')
+    entries = [(identity['executable']['path'], identity['executable']),
+               (identity['language']['path'], identity['language'])]
+    entries += [(row['resolved_path'], row) for row in identity['runtime_files']]
+    for path, row in entries:
+        candidate = Path(path)
+        base.require(candidate.is_absolute() and candidate.is_file() and candidate.stat().st_size == row['bytes']
+                     and file_digest(candidate) == row['sha256'], 'RENDERED_OCR_BYTES_CHANGED')
+    base.require(os.access(identity['executable']['path'], os.X_OK), 'RENDERED_OCR_EXECUTOR_UNAVAILABLE')
+
+def load_ocr_toolchain():
+    """Consume this run's prepared toolchain, never the ambient system OCR."""
+    path = Path(os.environ.get('HEX_OCR_BINDING', '/NONEXISTENT'))
+    expected = os.environ.get('HEX_OCR_BINDING_SHA256', '')
+    base.require(base.DIGEST.fullmatch(expected) and path.is_absolute()
+                 and path.name == 'hex-ocr-identity.json' and path.is_file()
+                 and 0 < path.stat().st_size <= 65536, 'RENDERED_OCR_BINDING_REQUIRED')
+    base.require(file_digest(path) == expected, 'RENDERED_OCR_BINDING_CHANGED')
+    try:
+        identity = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError, UnicodeError):
+        raise base.Unverified('RENDERED_OCR_BINDING_INVALID') from None
+    base.require(isinstance(identity, dict) and identity.get('schema') == 'xiio.hex.ocr-toolchain/v1',
+                 'RENDERED_OCR_BINDING_INVALID')
+    source, run, attempt = (os.environ.get(key, '') for key in ('GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))
+    base.require(base.SOURCE.fullmatch(source) and run.isdigit() and int(run) > 0
+                 and attempt.isdigit() and int(attempt) > 0
+                 and identity.get('source_commit') == source
+                 and identity.get('github_run_id') == run and identity.get('github_run_attempt') == attempt
+                 and isinstance(identity.get('source_tree'), str) and base.SOURCE.fullmatch(identity['source_tree']),
+                 'RENDERED_OCR_RUN_MISMATCH')
+    base.require(identity.get('tesseract_source_commit') == OCR_SOURCE
+                 and identity.get('leptonica_source_commit') == OCR_IMAGE_SOURCE
+                 and identity.get('language_source_commit') == OCR_LANGUAGE_SOURCE
+                 and identity.get('version_first_line') == 'tesseract 5.5.0'
+                 and isinstance(identity.get('version_full'), str)
+                 and 0 < len(identity['version_full'].encode()) <= 8192
+                 and identity['version_full'].splitlines()[0] == 'tesseract 5.5.0'
+                 and 'leptonica-1.84.1' in identity['version_full'], 'RENDERED_OCR_TOOLCHAIN_MISMATCH')
+    base.require(identity.get('static_ocr_libraries') is True and identity.get('supported_input') == 'PNG'
+                 and identity.get('provider_effect') is False and identity.get('pop_os_acceptance') is False,
+                 'RENDERED_OCR_SCOPE_INVALID')
+    root = Path(os.environ.get('RUNNER_TEMP', '/NONEXISTENT'))/'hex-ocr-qualified'
+    executable, language, runtime = (identity.get(key) for key in ('executable', 'language', 'runtime_files'))
+    base.require(isinstance(executable, dict) and isinstance(language, dict)
+                 and isinstance(runtime, list) and 1 <= len(runtime) <= 64, 'RENDERED_OCR_FILES_INVALID')
+    base.require(executable.get('path') == str(root/'bin/tesseract')
+                 and executable.get('archive_path') == 'bin/tesseract'
+                 and language.get('path') == str(root/'share/tessdata/eng.traineddata')
+                 and language.get('archive_path') == 'share/tessdata/eng.traineddata'
+                 and language.get('bytes') == 4113088 and language.get('sha256') == OCR_LANGUAGE_SHA256
+                 and language.get('git_blob') == OCR_LANGUAGE_BLOB, 'RENDERED_OCR_SELECTION_MISMATCH')
+    seen = set()
+    for row in [executable, language, *runtime]:
+        base.require(isinstance(row, dict) and type(row.get('bytes')) is int and 0 < row['bytes'] <= 128*1024*1024
+                     and isinstance(row.get('sha256'), str) and base.DIGEST.fullmatch(row['sha256']),
+                     'RENDERED_OCR_FILES_INVALID')
+    for row in runtime:
+        resolved = row.get('resolved_path')
+        base.require(isinstance(resolved, str) and Path(resolved).is_absolute() and resolved not in seen
+                     and row.get('archive_path') == 'runtime/'+row['sha256']+'-'+Path(resolved).name,
+                     'RENDERED_OCR_FILES_INVALID')
+        seen.add(resolved)
+    archive = identity.get('archive')
+    base.require(isinstance(archive, dict) and archive.get('file') == 'hex-ocr-toolchain.tgz'
+                 and type(archive.get('bytes')) is int and 0 < archive['bytes'] <= 256*1024*1024
+                 and isinstance(archive.get('sha256'), str) and base.DIGEST.fullmatch(archive['sha256']),
+                 'RENDERED_OCR_ARCHIVE_UNVERIFIED')
+    archived = path.with_name(archive['file'])
+    base.require(archived.is_file() and archived.stat().st_size == archive['bytes']
+                 and file_digest(archived) == archive['sha256'], 'RENDERED_OCR_ARCHIVE_UNVERIFIED')
+    binding = {'identity_path': str(path), 'identity_sha256': expected, 'identity': identity}
+    verify_ocr_toolchain(binding)
+    return binding
+
+def read_ocr(crop, timeout, page_segmentation_mode=11, toolchain=None):
+    """Use only the pinned tool and language data; retain uncorrected UTF-8."""
+    binding = load_ocr_toolchain() if toolchain is None else toolchain
+    verify_ocr_toolchain(binding)
+    identity = binding['identity']
+    executable = identity['executable']['path']
     base.require(timeout > 0, 'INTERACTION_DEADLINE')
     base.require(type(page_segmentation_mode) is int and page_segmentation_mode in (11, 3), 'RENDERED_OCR_MODE_INVALID')
     environment = dict(os.environ)
-    environment.pop('TESSDATA_PREFIX', None)
+    for key in ('TESSDATA_PREFIX', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT'):
+        environment.pop(key, None)
     environment['OMP_THREAD_LIMIT'] = '1'
+    environment['OMP_NUM_THREADS'] = '1'
+    environment['LC_ALL'] = 'C'
     try:
         version = subprocess.run([executable, '--version'], capture_output=True, timeout=min(timeout, 3), env=environment)
         base.require(version.returncode == 0 and 0 < len(version.stdout) <= 4096, 'RENDERED_OCR_VERSION_UNVERIFIED')
-        version_text = version.stdout.decode('utf-8').splitlines()[0]
-        base.require(version_text.startswith('tesseract ') and len(version_text) <= 256, 'RENDERED_OCR_VERSION_UNVERIFIED')
-        result = subprocess.run([executable, str(crop), 'stdout', '-l', 'eng', '--psm', str(page_segmentation_mode)],
+        version_full = version.stdout.decode('utf-8')
+        version_text = version_full.splitlines()[0]
+        base.require(version_full == identity['version_full'] and version_text == 'tesseract 5.5.0',
+                     'RENDERED_OCR_VERSION_UNVERIFIED')
+        result = subprocess.run([executable, str(crop), 'stdout', '--tessdata-dir', str(Path(identity['language']['path']).parent),
+                                 '-l', 'eng', '--psm', str(page_segmentation_mode)],
                                 capture_output=True, timeout=min(timeout, 15), env=environment)
         base.require(result.returncode == 0, 'RENDERED_OCR_EXECUTION_UNVERIFIED')
         base.require(len(result.stdout) <= OCR_MAX_BYTES, 'RENDERED_OCR_TEXT_BOUNDS')
@@ -149,6 +245,7 @@ def read_ocr(crop, timeout, page_segmentation_mode=11):
         text = raw.decode('utf-8')
     except (OSError, subprocess.SubprocessError, UnicodeError):
         raise base.Unverified('RENDERED_OCR_EXECUTION_UNVERIFIED') from None
+    verify_ocr_toolchain(binding)
     return text, raw, version_text
 
 class Software(base.Native):
@@ -165,6 +262,7 @@ class Software(base.Native):
                          candidate.parts[-3:] == ('usr', 'bin', 'xi-io-hex-dev'), category)
         self.expected_executable = str(candidate.resolve())
         super().__init__(pid, window, elf, source, proof)
+        self.ocr_toolchain = load_ocr_toolchain()
 
     def readiness_nodes(self, nodes):
         return [n for n in nodes if node_name(n) == INITIALIZED_NAME and n.get_role() == self.ax.Role.STATUS_BAR and self.visible(n)]
@@ -327,7 +425,8 @@ class Software(base.Native):
             self.command(['python3', '-I', '-B', str(Path(__file__).with_name('verify-hex-capture.py')), str(crop)])
         except (OSError, subprocess.SubprocessError):
             raise base.Unverified('RENDERED_WINDOW_PIXELS_UNVERIFIED') from None
-        text, raw, version = read_ocr(crop, self.deadline - time.monotonic(), page_segmentation_mode=11)
+        ocr_options = {'toolchain': self.ocr_toolchain} if hasattr(self, 'ocr_toolchain') else {}
+        text, raw, version = read_ocr(crop, self.deadline - time.monotonic(), page_segmentation_mode=11, **ocr_options)
         text_path = self.proof/(name + '-owned-window.ocr.txt')
         with text_path.open('xb') as stream:
             stream.write(raw)
@@ -336,7 +435,7 @@ class Software(base.Native):
         base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
         base.require(file_digest(screenshot) == screenshot_sha and file_digest(crop) == crop_sha,
                      'RENDERED_EVIDENCE_CHANGED')
-        layout_text, layout_raw, layout_version = read_ocr(crop, self.deadline - time.monotonic(), page_segmentation_mode=3)
+        layout_text, layout_raw, layout_version = read_ocr(crop, self.deadline - time.monotonic(), page_segmentation_mode=3, **ocr_options)
         base.require(layout_version == version, 'RENDERED_OCR_EXECUTOR_CHANGED')
         layout_path = self.proof/(name + '-owned-window.layout.ocr.txt')
         with layout_path.open('xb') as stream:
@@ -357,6 +456,12 @@ class Software(base.Native):
                             'raw_text_bytes': len(layout_raw), 'raw_text': layout_text},
             **rendered_text_matches(text, layout_text, retired=retired),
         }
+        if hasattr(self, 'ocr_toolchain'):
+            self.rendered_text_readback['ocr_toolchain'] = {
+                'identity_file': Path(self.ocr_toolchain['identity_path']).name,
+                'identity_sha256': self.ocr_toolchain['identity_sha256'],
+                'identity': self.ocr_toolchain['identity'],
+            }
         self.guard()
         base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
         base.require(file_digest(screenshot) == screenshot_sha and file_digest(crop) == crop_sha
