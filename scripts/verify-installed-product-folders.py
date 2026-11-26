@@ -132,22 +132,47 @@ def readback(profile, root, lock_sha, rows):
             "lock_sha256": lock_sha, "payload_sha256": observations, "transaction_count": len(transactions)}
 
 
-def window_id(pid, title, timeout=12):
+def search_windows(pid, title=None):
+    # xdotool joins selectors with OR unless --all is explicit.
+    command = ["xdotool", "search", "--all", "--onlyvisible", "--pid", str(pid)]
+    if title is not None:
+        command.extend(["--name", "^" + re.escape(title) + "$"])
+    found = subprocess.run(command, text=True, capture_output=True, timeout=3)
+    require(found.returncode in (0, 1), "X window query failed")
+    return [w for w in found.stdout.splitlines() if w.isdecimal()]
+
+
+def window_metadata(window):
+    def query(*command):
+        result = subprocess.run(command, text=True, capture_output=True, timeout=3)
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    relation = query("xprop", "-id", window, "WM_TRANSIENT_FOR")
+    parent_match = re.search(r"window id # (0x[0-9a-f]+)", relation, re.I)
+    parent = str(int(parent_match[1], 16)) if parent_match else None
+    return (query("xdotool", "getwindowpid", window), query("xdotool", "getwindowname", window)[:128], parent)
+
+
+def window_id(pid, title, timeout=12, *, transient_for=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        result = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(pid),
-                                 "--name", "^" + re.escape(title) + "$"], text=True, capture_output=True)
-        ids = result.stdout.splitlines()
-        if len(ids) == 1:
-            return ids[0]
+        exact = []
+        for xid in search_windows(pid, title):
+            owner, name, parent = window_metadata(xid)
+            if (owner == str(pid) and name == title and
+                    (transient_for is None or (xid != transient_for and parent == transient_for))):
+                exact.append(xid)
+        if len(exact) == 1:
+            return exact[0]
         time.sleep(.12)
-    raise RuntimeError("Visible native window missing: " + title)
+    seen = [(w, window_metadata(w)) for w in search_windows(pid)[:8]]
+    raise RuntimeError(f"Visible native window {title!r} with parent {transient_for!r} unavailable. HEX windows {seen!r}")
 
 
 def choose_folder(ui, folder, unverified):
     button = ui.wait(lambda: ui.find("Choose product folder", [ui.ax.Role.PUSH_BUTTON]))
     ui.click(button)
-    dialog = window_id(ui.pid, "Choose downloaded product folder")
+    dialog = window_id(ui.pid, "Choose downloaded product folder", transient_for=ui.window)
     ui.command(["xdotool", "windowfocus", "--sync", dialog])
 
     title = "Choose downloaded product folder"
@@ -159,8 +184,8 @@ def choose_folder(ui, folder, unverified):
 
     def guard_dialog():
         require(ui.command(["xdotool", "getwindowfocus"]) == dialog, "Chooser lost focus")
-        require(ui.command(["xdotool", "getwindowpid", dialog]) == str(ui.pid), "Wrong chooser process")
-        require(ui.command(["xdotool", "getwindowname", dialog]) == title, "Chooser title changed")
+        identity = window_metadata(dialog)
+        require(identity == (str(ui.pid), title, ui.window), f"Chooser identity changed: {identity!r}")
 
     def chooser_nodes():
         roots = [n for n in ui.nodes() if n.get_name() == title
@@ -221,12 +246,12 @@ def choose_folder(ui, folder, unverified):
     click_named("Select folder", (roles.PUSH_BUTTON,))
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        result = subprocess.run(["xdotool","search","--onlyvisible","--pid",str(ui.pid),"--name","^Choose downloaded product folder$"],capture_output=True)
-        if not result.stdout.strip():
+        if not search_windows(ui.pid, title):
             break
         time.sleep(.1)
     else:
-        raise RuntimeError("Folder chooser remained open")
+        seen = [(w, window_metadata(w)) for w in search_windows(ui.pid)[:8]]
+        raise RuntimeError(f"Folder chooser remained visible after accept. HEX windows {seen!r}")
     ui.command(["xdotool", "windowfocus", "--sync", ui.window])
     def selected_path_visible():
         if str(folder) in ui.text():
@@ -254,6 +279,10 @@ def main():
     elf = digest(executable.read_bytes())
     package_binding = hosted.frontend_binding(identity, source_sha, elf, args.package.resolve(), executable)
     hosted.installed_package_binding(executable, package_binding["package_version"])
+    exercise_installed_window(repo, hosted, source_sha, executable, elf, package_binding, proof, args.media)
+
+
+def exercise_installed_window(repo, hosted, source_sha, executable, elf, package_binding, proof, media):
     node = Path(shutil.which("node")).resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="hex-window-", dir=os.environ["RUNNER_TEMP"]) as tmp:
         work = Path(tmp)
@@ -268,7 +297,7 @@ def main():
         nvm_bin.mkdir(parents=True)
         shutil.copy2(node, nvm_bin / "node")
         framework = prepare_framework(repo, work)
-        folders = [f.resolve(strict=True) for f in args.media] if args.media else sample_products(work)
+        folders = [f.resolve(strict=True) for f in media] if media else sample_products(work)
         require(len(folders) >= 2 and len(set(folders)) == len(folders), "Two different product folders required")
         # Native GTK opens at HOME. Materialize the downloaded folders there
         # using ordinary, visible names so selection uses the real file list.
