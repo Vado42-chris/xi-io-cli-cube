@@ -137,7 +137,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
-      - name: Check out exact HEX maths generation
+      - name: Check out exact HEX content and native generation
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
@@ -158,16 +158,33 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 python3-pil python3-gi gir1.2-atspi-2.0 at-spi2-core libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11
-          rustup toolchain install 1.99.1 --profile minimal
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev patchelf python3 python3-pil tesseract-ocr python3-gi gir1.2-atspi-2.0 at-spi2-core libayatana-appindicator3-dev xvfb xdotool scrot dbus-x11
+          rustup toolchain install 1.99.1 --profile minimal --component clippy --target wasm32-unknown-unknown
           rustup default 1.99.1
           npm ci --prefix native/hex/carrier --no-audit --no-fund
+      - name: Read the exact recovered Artcraft runtime dependency
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: storytold/craft-launcher
+          ref: ec205366ebe42635e155b9ab246f036052fef406
+          path: .ci-donor/artcraft-launcher
+          persist-credentials: false
+      - name: Build and stage the existing hosted-canvas runtime
+        run: |
+          set -euo pipefail
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          bash scripts/qualify-artcraft-hosted-donor.sh "$GITHUB_WORKSPACE/.ci-donor/artcraft-launcher" "$GITHUB_WORKSPACE/tools/artcraft-launcher/lifecycle.patch" "$RUNNER_TEMP/hex-artcraft-hosted-donor"
+          node --test tests/artcraft-runtime-stage.test.mjs
+          node scripts/stage-artcraft-runtime.mjs
+          test -s public/donor/artcraft-launcher-web/launcher.js
+          test -s public/donor/artcraft-launcher-web/launcher_bg.wasm
       - name: Retain existing capture refusals and qualify content-readiness evidence
         run: |
           set -euo pipefail
           /usr/bin/python3 -I -B scripts/verify-hex-capture.py --check-decoder
           /usr/bin/python3 -I -B tests/hex-capture.test.py
           /usr/bin/python3 -I -B tests/hex-library-capture.test.py
+          /usr/bin/python3 -I -B tests/extracted-artcraft.test.py
       - name: Build exact-source Tauri and Debian, no DEV9 carrier fallback
         run: |
           set -euo pipefail
@@ -201,6 +218,8 @@ jobs:
               return out
           frontend=files(root/'dist')
           assert frontend==files(root/'native/hex/carrier/frontend'),'STAGED_FRONTEND_MISMATCH'
+          for asset in ('launcher.js','launcher_bg.wasm','LICENSE-APACHE','LICENSE-MIT','NOTICE','ATTRIBUTION.md','OFL-Inter.txt','OFL-Archivo.txt','OFL-GeistMono.txt'):
+              assert 'donor/artcraft-launcher-web/'+asset in frontend,'ARTCRAFT_PACKAGED_ASSET_MISSING'
           debs=list(root.glob('native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb'))
           assert len(debs)==1,'ONE_NATIVE_PACKAGE_REQUIRED'
           elf=root/'native/hex/carrier/src-tauri/target/release/xi-io-hex-dev'
@@ -219,6 +238,14 @@ jobs:
               'frontend_archive_sha256':sha(root/'hex-built-frontend.tgz'),
               'native_elf_sha256':sha(elf),'debian_package_sha256':sha(debs[0]),
               'debian_package_name':debs[0].name,'build_os':os_release,
+              'artcraft_recovery':{
+                  'cube_provider_revision':'86af5948722aefe2cf562e0efbe6c4373418f2ef',
+                  'runtime_source_revision':'ec205366ebe42635e155b9ab246f036052fef406',
+                  'lifecycle_patch_git_blob':'0e09a389078baa8ddf9750313727c1eaa5300b5b',
+                  'xiio_profile_patch_git_blob':subprocess.check_output(['git','hash-object','tools/artcraft-launcher/xiio-catalog.patch'],text=True).strip(),
+                  'hosted_profile':'xiio-hex',
+                  'body_git_blob':subprocess.check_output(['git','hash-object','src/components/ArtcraftLauncherBody.tsx'],text=True).strip(),
+                  'later_aries_revision_verified':False},
               'qualification':'BUILT_FRONTEND_NOT_INSTALLED_ACCEPTANCE',
               'pop_os_acceptance':False,'release_promotion':False}
           (root/'hex-native-frontend-identity.json').write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
@@ -241,6 +268,7 @@ jobs:
           export HEX_BUILD_SOURCE="$(git rev-parse HEAD)"
           export HEX_INSTALLED_ELF_SHA="$(sha256sum /usr/bin/xi-io-hex-dev | cut -d' ' -f1)"
           export HEX_FRONTEND_IDENTITY="$GITHUB_WORKSPACE/hex-native-frontend-identity.json"
+          export HEX_CANDIDATE_PACKAGE="$GITHUB_WORKSPACE/${debs[0]}"
           work="$(mktemp -d "${RUNNER_TEMP}/hex-maths-window.XXXXXXXX")"
           mkdir -p "$work/home" "$work/config" "$work/data" "$work/state" "$work/cache" "$work/runtime" "$work/tmp"
           chmod 0700 "$work"/{home,config,data,state,cache,runtime,tmp}
@@ -272,28 +300,29 @@ jobs:
             test "$(xdotool getwindowpid "$window")" = "$pid"
             test "$(xdotool getwindowname "$window")" = "XI-IO HEX"
             set +e
-            timeout --signal=KILL 75s /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/scripts/verify-installed-hex-library.py" "$pid" "$window" "$HEX_INSTALLED_ELF_SHA" "$HEX_BUILD_SOURCE" "$MATHS_WINDOW_WORK" "$HEX_FRONTEND_IDENTITY"
+            timeout --signal=KILL 115s /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/scripts/verify-extracted-artcraft.py" \
+              --installed "$pid" "$window" "$HEX_INSTALLED_ELF_SHA" "$HEX_BUILD_SOURCE" "$MATHS_WINDOW_WORK" /usr/bin/xi-io-hex-dev "$HEX_CANDIDATE_PACKAGE" "$HEX_FRONTEND_IDENTITY"
             observed=$?
             set -e
             if test "$observed" -ne 0; then
               # Failure-only image is retained for review, never promoted.
-              scrot -z -o "$MATHS_WINDOW_WORK/hex-library-unqualified.png" || true
+              scrot -z -o "$MATHS_WINDOW_WORK/software-unqualified.png" || true
               exit "$observed"
             fi
-            test -s "$MATHS_WINDOW_WORK/hex-library-rendered.png"
+            test -s "$MATHS_WINDOW_WORK/software-initialized.png"
             test -e "$MATHS_WINDOW_WORK/home"
           '
           observed=$?
           set -e
-          for name in hex-library-render.json hex-library-rendered.png hex-library-unqualified.png; do
+          for name in software-initialization.json software-initialized.png software-initialized-owned-window.png software-initialized-owned-window.ocr.txt software-unverified.png software-unqualified.png; do
             if test -f "$work/$name"; then cp "$work/$name" "$name"; fi
           done
           if test -f "$work/stderr.log"; then cp "$work/stderr.log" maths-installed-window.stderr.log; fi
           if test -f "$work/stdout.log"; then cp "$work/stdout.log" maths-installed-window.stdout.log; fi
           test "$observed" -eq 0 || exit "$observed"
-          cp hex-library-rendered.png maths-installed-window.png
+          cp software-initialized.png maths-installed-window.png
           sha256sum maths-installed-window.png | tee maths-installed-window.sha256
-          printf 'SOURCE=%s\nNATIVE_LIBRARY_RENDER_OBSERVED=true\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nPOP_OS_ACCEPTANCE=NOT_PERFORMED\nARIES_INSTALL=NOT_PERFORMED\n' "$HEX_BUILD_SOURCE"
+          printf 'SOURCE=%s\nARTCRAFT_RUNTIME_INITIALIZATION_OBSERVED=true\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nPOP_OS_ACCEPTANCE=NOT_PERFORMED\nARIES_INSTALL=NOT_PERFORMED\n' "$HEX_BUILD_SOURCE"
       - name: Refuse the actual released DEV12 catalog with the same content observer
         if: always()
         run: |
@@ -347,15 +376,15 @@ jobs:
               test -n "${window:-}" || { cat "$HEX_DEV12_PROOF/stderr.log"; exit 42; }
               printf "%s\n" OBSERVE_RETIRED_CATALOG_AND_CURRENT_SELECTOR_REFUSAL > "$HEX_DEV12_PROOF/stage.txt"
               set +e
-              timeout --signal=KILL 75s /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/scripts/verify-installed-hex-library.py" \
-                --retired-dev12 "$pid" "$window" "$HEX_DEV12_PROOF" "$package" "$executable"
+              timeout --signal=KILL 115s /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/scripts/verify-extracted-artcraft.py" \
+                --retired-dev12 "$pid" "$window" "$GITHUB_SHA" "$HEX_DEV12_PROOF" "$executable" "$package"
               observed=$?
               set -e
               if test "$observed" -ne 0; then
                 scrot -z -o "$HEX_DEV12_PROOF/hex-dev12-unqualified.png" || true
                 exit "$observed"
               fi
-              test -s "$HEX_DEV12_PROOF/hex-dev12-retired-catalog.png"
+              test -s "$HEX_DEV12_PROOF/software-retired-dev12.png"
             '
           ) > "$work/hex-dev12-executor.log" 2>&1
           observed=$?
@@ -380,7 +409,7 @@ jobs:
                   'package_installed':False,'pop_os_acceptance':False,
                   'product_install_actions_performed':False,'release_promotion':False},indent=2)+'\n')
           PY
-          for name in hex-dev12-ui-red.json hex-dev12-retired-catalog.png hex-dev12-unqualified.png hex-dev12-executor.log hex-dev12-package.sha256; do
+          for name in hex-dev12-ui-red.json software-retired-dev12.png software-retired-dev12-owned-window.png software-retired-dev12-owned-window.ocr.txt software-retired-dev12-unverified.png hex-dev12-unqualified.png hex-dev12-executor.log hex-dev12-package.sha256; do
             if test -f "$work/$name"; then cp "$work/$name" "$name"; fi
           done
           if test -f "$work/stderr.log"; then cp "$work/stderr.log" hex-dev12-native.stderr.log; fi
@@ -404,11 +433,17 @@ jobs:
             hex-built-frontend.tgz
             hex-native-frontend-identity.json
             hex-frontend-artifacts.sha256
-            hex-library-render.json
-            hex-library-rendered.png
-            hex-library-unqualified.png
+            software-initialization.json
+            software-initialized.png
+            software-initialized-owned-window.png
+            software-initialized-owned-window.ocr.txt
+            software-unverified.png
+            software-unqualified.png
             hex-dev12-ui-red.json
-            hex-dev12-retired-catalog.png
+            software-retired-dev12.png
+            software-retired-dev12-owned-window.png
+            software-retired-dev12-owned-window.ocr.txt
+            software-retired-dev12-unverified.png
             hex-dev12-unqualified.png
             hex-dev12-executor.log
             hex-dev12-package.sha256

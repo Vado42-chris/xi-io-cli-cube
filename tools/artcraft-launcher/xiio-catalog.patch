@@ -1,0 +1,877 @@
+diff --git a/apps/artcraft-launcher-web/src/main.rs b/apps/artcraft-launcher-web/src/main.rs
+--- a/apps/artcraft-launcher-web/src/main.rs
++++ b/apps/artcraft-launcher-web/src/main.rs
+@@ -8,6 +8,9 @@
+ 
+ #[cfg(target_arch = "wasm32")]
+ mod web;
++
++#[cfg(target_arch = "wasm32")]
++mod xiio;
+ 
+ #[cfg(target_arch = "wasm32")]
+ fn main() {
+diff --git a/apps/artcraft-launcher-web/src/web.rs b/apps/artcraft-launcher-web/src/web.rs
+--- a/apps/artcraft-launcher-web/src/web.rs
++++ b/apps/artcraft-launcher-web/src/web.rs
+@@ -1,6 +1,6 @@
+ //! The browser backend and entry point.
+ 
+-use std::cell::RefCell;
++use std::cell::{Cell, RefCell};
+ use std::rc::Rc;
+ 
+ use artcraft_launcher_core::details::{AppDetails, MAX_SCREENSHOT_BYTES, looks_like_jpeg};
+@@ -8,12 +8,20 @@
+ use artcraft_launcher_core::release::{self, Release};
+ use artcraft_launcher_core::{Arch, Os, Platform, SUITE, catalog, version};
+ use artcraft_launcher_ui_egui::{Host, LauncherUi, Settings};
++use artcraft_launcher_ui_egui::theme::ThemeChoice;
+ #[cfg(not(feature = "hosted-canvas"))]
+ use artcraft_launcher_ui_egui::i18n;
+ use wasm_bindgen::JsCast;
+ use wasm_bindgen_futures::JsFuture;
+ 
+ const SETTINGS_KEY: &str = "settings";
++const HOSTED_SETTINGS_KEY: &str = "xiio-hex-settings";
++
++struct HostedLaunch {
++    on_product_selected: js_sys::Function,
++    active: Rc<Cell<bool>>,
++    appearance: ThemeChoice,
++}
+ 
+ /// A host retains this handle for exactly as long as its supplied canvas lives.
+ /// It owns the real LauncherUi runner, not a parallel catalog or window.
+@@ -21,6 +29,7 @@
+ #[wasm_bindgen::prelude::wasm_bindgen]
+ pub struct LauncherHandle {
+     runner: eframe::WebRunner,
++    active: Rc<Cell<bool>>,
+ }
+ 
+ #[cfg(feature = "hosted-canvas")]
+@@ -28,6 +37,7 @@
+ impl LauncherHandle {
+     /// Stop callbacks, animation frames and graphics resources before removing the canvas.
+     pub fn destroy(&self) {
++        self.active.set(false);
+         self.runner.destroy();
+     }
+ }
+@@ -35,6 +45,7 @@
+ #[cfg(feature = "hosted-canvas")]
+ impl Drop for LauncherHandle {
+     fn drop(&mut self) {
++        self.active.set(false);
+         self.runner.destroy();
+     }
+ }
+@@ -44,23 +55,55 @@
+ /// The host must destroy/free a late result if it unmounted while awaiting startup.
+ #[cfg(feature = "hosted-canvas")]
+ #[wasm_bindgen::prelude::wasm_bindgen]
+-pub async fn mount_launcher(canvas: web_sys::HtmlCanvasElement) -> Result<LauncherHandle, wasm_bindgen::JsValue> {
++pub async fn mount_launcher(
++    canvas: web_sys::HtmlCanvasElement,
++    profile: String,
++    on_product_selected: js_sys::Function,
++    appearance: Option<String>,
++) -> Result<LauncherHandle, wasm_bindgen::JsValue> {
++    if profile != "xiio-hex" {
++        return Err(wasm_bindgen::JsValue::from_str("XIIO_CATALOG_PROFILE_REQUIRED"));
++    }
++    if !wasm_bindgen::JsValue::from(on_product_selected.clone()).is_function() {
++        return Err(wasm_bindgen::JsValue::from_str("XIIO_PRODUCT_SELECTION_CALLBACK_REQUIRED"));
++    }
++    let appearance = match appearance.as_deref() {
++        None => ThemeChoice::System,
++        Some("light") => ThemeChoice::Light,
++        Some("dark") => ThemeChoice::Dark,
++        _ => return Err(wasm_bindgen::JsValue::from_str("XIIO_APPEARANCE_INVALID")),
++    };
+     eframe::WebLogger::init(log::LevelFilter::Warn).ok();
+     let runner = eframe::WebRunner::new();
+-    start_runner(&runner, canvas).await?;
+-    Ok(LauncherHandle { runner })
+-}
+-
+-async fn start_runner(runner: &eframe::WebRunner, canvas: web_sys::HtmlCanvasElement) -> Result<(), wasm_bindgen::JsValue> {
++    let active = Rc::new(Cell::new(true));
++    let hosted = HostedLaunch { on_product_selected, active: active.clone(), appearance };
++    if let Err(error) = start_runner(&runner, canvas, Some(hosted)).await {
++        active.set(false);
++        return Err(error);
++    }
++    Ok(LauncherHandle { runner, active })
++}
++
++async fn start_runner(
++    runner: &eframe::WebRunner,
++    canvas: web_sys::HtmlCanvasElement,
++    hosted: Option<HostedLaunch>,
++) -> Result<(), wasm_bindgen::JsValue> {
+     let result = runner
+         .start(
+             canvas,
+             eframe::WebOptions::default(),
+-            Box::new(|cc| {
++            Box::new(move |cc| {
+                 let ctx = cc.egui_ctx.clone();
+-                let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
+-                let backend = WebBackend::new(ctx.clone());
+-                Ok(Box::new(WebApp { ui: LauncherUi::new(&ctx, Box::new(backend), settings) }))
++                let settings_key = if hosted.is_some() { HOSTED_SETTINGS_KEY } else { SETTINGS_KEY };
++                let mut settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, settings_key)).unwrap_or_default();
++                let ui = if let Some(host) = &hosted {
++                    settings.theme = host.appearance;
++                    LauncherUi::with_catalog(&ctx, Box::new(HostedBackend), settings, &crate::xiio::CATALOG)
++                } else {
++                    LauncherUi::new(&ctx, Box::new(WebBackend::new(ctx.clone())), settings)
++                };
++                Ok(Box::new(WebApp { ui, hosted, settings_key }))
+             }),
+         )
+         .await;
+@@ -126,7 +169,7 @@
+             return;
+         };
+         let runner = eframe::WebRunner::new();
+-        let result = start_runner(&runner, canvas).await;
++        let result = start_runner(&runner, canvas, None).await;
+         if let Some(loading) = document.get_element_by_id("launcher_loading") {
+             loading.remove();
+         }
+@@ -147,6 +190,46 @@
+ 
+ struct WebApp {
+     ui: LauncherUi,
++    hosted: Option<HostedLaunch>,
++    settings_key: &'static str,
++}
++
++impl WebApp {
++    fn dispatch_product_selections(&mut self) {
++        for product in self.ui.take_product_selections() {
++            let Some(hosted) = self.hosted.as_ref() else { continue };
++            if product != "cli" {
++                continue;
++            }
++            let callback = hosted.on_product_selected.clone();
++            let active = hosted.active.clone();
++            // Leave the eframe drawing stack before a host navigation can destroy this runner.
++            wasm_bindgen_futures::spawn_local(async move {
++                if !active.get() {
++                    return;
++                }
++                let selection = js_sys::Object::new();
++                let action = js_sys::Reflect::set(&selection, &"action".into(), &"review_installation".into());
++                let product = js_sys::Reflect::set(&selection, &"productId".into(), &"cli".into());
++                if matches!(action, Ok(true)) && matches!(product, Ok(true)) {
++                    let _ = callback.call1(&wasm_bindgen::JsValue::NULL, &selection);
++                }
++            });
++        }
++    }
++}
++
++/// Host-owned presentation has no network, package or native-effect implementation.
++struct HostedBackend;
++
++impl Backend for HostedBackend {
++    fn send(&mut self, _command: Command) {}
++    fn poll(&mut self) -> Vec<Event> { Vec::new() }
++    fn capabilities(&self) -> Capabilities {
++        Capabilities { manage_apps: false, reveal_label: "", self_update: false }
++    }
++    fn platform(&self) -> Option<Platform> { None }
++    fn now(&self) -> i64 { (js_sys::Date::now() / 1000.0) as i64 }
+ }
+ 
+ impl eframe::App for WebApp {
+@@ -156,6 +239,7 @@
+ 
+     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+         self.ui.ui(ui, &mut WebHost);
++        self.dispatch_product_selections();
+     }
+ 
+     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+@@ -163,7 +247,7 @@
+     }
+ 
+     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+-        eframe::set_value(storage, SETTINGS_KEY, &self.ui.settings);
++        eframe::set_value(storage, self.settings_key, &self.ui.settings);
+     }
+ }
+ 
+diff --git a/apps/artcraft-launcher-web/src/xiio.rs b/apps/artcraft-launcher-web/src/xiio.rs
+new file mode 100644
+--- /dev/null
++++ b/apps/artcraft-launcher-web/src/xiio.rs
+@@ -0,0 +1,57 @@
++//! XI-IO's finite presentation profile for the recovered Artcraft renderer.
++//!
++//! The first seven names/descriptions are copied from Cube main 1d762c005cf122b2c0e0e9c9ed9ef38417e535f6,
++//! src/App.tsx blob 9a2ea961dc1033a09fd3af01c5d2ac085dbf551c. SAM_LAW and Publisher descriptions
++//! were expressly requested for this slice. These keys are UI selections, not release identities.
++//! No repository, download, installed version or product grant is inferred from this catalog.
++
++use artcraft_launcher_core::catalog::AppKind;
++use artcraft_launcher_core::CraftApp;
++use artcraft_launcher_ui_egui::HostedCatalog;
++
++// Cube's accepted NativeProductWindowShell theme is cyan-500. No upstream logo is reused.
++const CYAN: [u8; 3] = [0x06, 0xb6, 0xd4];
++const CYAN_LIGHT_INK: [u8; 3] = [0x0e, 0x74, 0x90];
++const CYAN_DARK_INK: [u8; 3] = [0x67, 0xe8, 0xf9];
++
++const fn product(id: &'static str, name: &'static str, description: &'static str) -> CraftApp {
++    CraftApp {
++        id,
++        name,
++        tagline: description,
++        color: CYAN,
++        ink_light: CYAN_LIGHT_INK,
++        ink_dark: CYAN_DARK_INK,
++        repo: "",
++        former_ids: &[],
++        former_names: &[],
++        kind: AppKind::Official,
++        publisher: "XI-IO",
++        msi_publisher: None,
++        bundle: None,
++        former_bundles: &[],
++        site: Some(""),
++        mac_team: None,
++    }
++}
++
++const PRODUCTS: [CraftApp; 9] = [
++    product("cli", "XI-IO CLI", "Command-line tools for local projects and installation diagnostics."),
++    product("editor", "XI-IO Code Editor", "A project editing workspace under development."),
++    product("studio", "XI-IO Studio", "A desktop for opening and organizing XI-IO products and workspaces."),
++    product("web", "XI-IO Web Interface", "Browser-based product interfaces."),
++    product("switchboard", "Switchboard", "Connects products and devices through their configured services."),
++    product("bins", "BINS", "File search and version-custody components."),
++    product("ward", "Ward", "Permission and policy checks used by product operations."),
++    product("sam_law", "SAM_LAW", "Protected matter and document work"),
++    product("publisher", "Publisher", "Document composition and export"),
++];
++
++pub static CATALOG: HostedCatalog = HostedCatalog {
++    title: "XI-IO Software",
++    subtitle: "Software",
++    products: &PRODUCTS,
++    reviewable: &["cli"],
++    accent: [CYAN, CYAN_LIGHT_INK, CYAN_DARK_INK],
++    footer: "Choose a product. Installation review opens in HEX.",
++};
+diff --git a/crates/ui-egui/src/app.rs b/crates/ui-egui/src/app.rs
+--- a/crates/ui-egui/src/app.rs
++++ b/crates/ui-egui/src/app.rs
+@@ -100,6 +100,8 @@
+     Launch(String),
+     /// Re-run the manual update check, clearing the auto-update back-off.
+     CheckNow,
++    /// A product selection for the embedding host, never an install or launch.
++    ReviewProduct(String),
+     /// A message a UI interaction asked to show.
+     Toast {
+         text: String,
+@@ -135,6 +137,8 @@
+ }
+ 
+ pub struct LauncherUi {
++    pub(crate) hosted: Option<&'static crate::HostedCatalog>,
++    product_selections: Vec<String>,
+     pub(crate) backend: Box<dyn Backend>,
+     pub settings: Settings,
+     pub(crate) entries: Vec<AppEntry>,
+@@ -237,6 +241,7 @@
+     /// `fonts_ready` starts false, so the first `ui` pass is a gate that draws nothing and flushes
+     /// any action queued before it.
+     pub fn new(ctx: &egui::Context, backend: Box<dyn Backend>, settings: Settings) -> Self {
++        theme::set_catalog_accent(ctx, None);
+         let lang = effective_lang(&settings.language);
+         let cjk_font = lang.needs_cjk_font().then_some(lang);
+         theme::install_fonts(ctx, cjk_font);
+@@ -246,6 +251,8 @@
+         let mut settings = settings;
+         settings.migrate();
+         Self {
++            hosted: None,
++            product_selections: Vec::new(),
+             backend,
+             settings,
+             entries: SUITE.iter().map(AppEntry::new).collect(),
+@@ -290,10 +297,48 @@
+         }
+     }
+ 
++    /// Reuses the renderer with explicit host-owned presentation and no release/install authority.
++    pub fn with_catalog(
++        ctx: &egui::Context,
++        backend: Box<dyn Backend>,
++        mut settings: Settings,
++        catalog: &'static crate::HostedCatalog,
++    ) -> Self {
++        settings.filter = Filter::All;
++        settings.hidden.clear();
++        settings.hide_community_apps = false;
++        settings.check_every = crate::settings::CheckEvery::Never;
++        settings.auto_update = false;
++        settings.notify = false;
++        settings.versions.clear();
++        settings.last_check = None;
++        if !matches!(settings.sort, SortKey::Suite | SortKey::Name) {
++            settings.sort = SortKey::Suite;
++            settings.sort_descending = false;
++        }
++        let mut ui = Self::new(ctx, backend, settings);
++        ui.entries = catalog.products.iter().map(AppEntry::new).collect();
++        ui.hosted = Some(catalog);
++        theme::set_catalog_accent(ctx, Some(catalog.accent));
++        ui
++    }
++
++    /// The embedding host consumes navigation intents separately from backend commands.
++    pub fn take_product_selections(&mut self) -> Vec<String> {
++        std::mem::take(&mut self.product_selections)
++    }
++
++    pub(crate) fn review_product(&mut self, id: &str) {
++        if self.hosted.is_some_and(|catalog| catalog.can_review(id)) {
++            self.act(UiAction::ReviewProduct(id.to_string()));
++        }
++    }
++
+     /// Moves the UI to another window's context: fonts, image loaders, the theme and the animation
+     /// timings belong to a context, and toasts and the next look at the OS's animation setting are
+     /// timed on its clock.
+     pub fn attach(&mut self, ctx: &egui::Context) {
++        theme::set_catalog_accent(ctx, self.hosted.map(|catalog| catalog.accent));
+         theme::install_fonts(ctx, self.cjk_font);
+         egui_extras::install_image_loaders(ctx);
+         self.fonts_ready = false;
+@@ -329,6 +374,7 @@
+ 
+     /// Looks for updates now (the tray's "Check for Updates").
+     pub fn check_now(&mut self) {
++        if self.hosted.is_some() { return; }
+         self.auto_update_attempted.clear();
+         self.backend.send(Command::CheckForUpdates { force: true });
+         self.backend.send(Command::Detect);
+@@ -336,7 +382,7 @@
+     }
+ 
+     pub(crate) fn send(&mut self, command: Command) {
+-        self.backend.send(command);
++        if self.hosted.is_none() { self.backend.send(command); }
+     }
+ 
+     /// The toolbar's check button. The side effects run once, when the pass flushes.
+@@ -354,7 +400,9 @@
+     /// once per visible frame; equal commands queued by distinct controls in one pass are separate
+     /// intents and are both kept.
+     pub(crate) fn act_command(&mut self, command: Command) {
+-        self.act(UiAction::Command(command));
++        if self.hosted.is_none() {
++            self.act(UiAction::Command(command));
++        }
+     }
+ 
+     /// Starts a visible frame: only a completed `run_ui` advances the frame number, so all discarded
+@@ -383,6 +431,12 @@
+                 continue;
+             }
+             match action {
++                UiAction::ReviewProduct(id) => {
++                    if self.hosted.is_some_and(|catalog| catalog.can_review(id)) {
++                        self.product_selections.push(id.clone());
++                    }
++                }
++                UiAction::Command(_) | UiAction::Launch(_) | UiAction::CheckNow if self.hosted.is_some() => {}
+                 UiAction::Command(command) => self.backend.send(command.clone()),
+                 UiAction::Launch(id) => {
+                     let opened = self.settings.launches.entry(id.clone()).or_insert(0);
+@@ -485,6 +539,10 @@
+         // Messages made here (toasts, alerts) are drawn later, so use the language the UI can
+         // actually show: English where the system has no CJK face for the preference.
+         set_current(effective_lang(&self.settings.language));
++        if self.hosted.is_some() {
++            // The host owns package and installed-state readback. The catalog never polls releases.
++            return;
++        }
+         self.configure();
+         // A kept version's card notes a newer release; that needs the app's published list.
+         self.request_pinned_lists();
+@@ -851,8 +909,10 @@
+                     ui.add_space(16.0);
+                 });
+             });
+-        self.details_drawer(&ctx);
+-        self.dialogs(&ctx, host);
++        if self.hosted.is_none() {
++            self.details_drawer(&ctx);
++            self.dialogs(&ctx, host);
++        }
+         self.flush_actions();
+         self.draw_toasts(&ctx);
+         if host.title_bar() == TitleBar::Custom {
+@@ -877,7 +937,7 @@
+         let manage = self.caps.manage_apps;
+         // The grid offers its own few orders (`views::grid_sort_now`); the table sorts by its columns.
+         let grid = self.settings.view == ViewMode::Grid;
+-        let (sort, desc) = if grid { crate::views::grid_sort_now(&self.settings) } else { (self.settings.sort, self.settings.sort_descending) };
++        let (sort, desc) = if grid { self.grid_sort_choice() } else { (self.settings.sort, self.settings.sort_descending) };
+         let dir = |o: std::cmp::Ordering| if desc { o.reverse() } else { o };
+         // Empty cells (not installed, no release) go last whichever way the column sorts.
+         let opt = |a: Option<std::cmp::Ordering>, a_some: bool, b_some: bool| match (a_some, b_some) {
+@@ -1078,6 +1138,39 @@
+         (LauncherUi::new(&ctx, Box::new(backend), settings), sent, ctx)
+     }
+ 
++    #[test]
++    fn hosted_review_is_navigation_only_and_replayed_passes_do_not_duplicate_it() {
++        static PRODUCTS: [artcraft_launcher_core::CraftApp; 1] = [artcraft_launcher_core::CraftApp {
++            id: "cli", name: "XI-IO CLI", tagline: "Local project tools", ..SUITE[0]
++        }];
++        static CATALOG: crate::HostedCatalog = crate::HostedCatalog {
++            title: "XI-IO Software", subtitle: "Software", products: &PRODUCTS,
++            reviewable: &["cli"], accent: [[0x06, 0xb6, 0xd4]; 3], footer: "Installation review opens in HEX.",
++        };
++        let sent = Rc::new(RefCell::new(Vec::new()));
++        let ctx = egui::Context::default();
++        let settings = Settings { language: "en".into(), ..Settings::default() };
++        let mut launcher = LauncherUi::with_catalog(&ctx, Box::new(Recorder { sent: sent.clone() }), settings, &CATALOG);
++        launcher.logic(&ctx, &mut NoHost);
++        launcher.check_now();
++        launcher.send(Command::Install { app: "cli".into() });
++        launcher.act_command(Command::Install { app: "cli".into() });
++        launcher.launch_app("cli");
++        launcher.check_now_from_ui();
++        launcher.review_product("sam_law");
++        launcher.review_product("cli");
++        launcher.begin_ui_frame(&ctx);
++        launcher.flush_actions();
++        assert_eq!(launcher.take_product_selections(), ["cli"]);
++        assert!(sent.borrow().is_empty());
++        assert!(launcher.entries.iter().all(|entry| entry.installed.is_none() && entry.latest.is_none()));
++        // A discarded egui pass repeats the same click in the same visible frame.
++        launcher.review_product("cli");
++        launcher.flush_actions();
++        assert!(launcher.take_product_selections().is_empty());
++        assert!(sent.borrow().is_empty());
++    }
++
+     /// One `run_ui` pass at a chosen input time, exactly like the native shell's callback order.
+     fn frame(launcher: &mut LauncherUi, ctx: &egui::Context, time: f64) {
+         let input = egui::RawInput {
+diff --git a/crates/ui-egui/src/hosted_catalog.rs b/crates/ui-egui/src/hosted_catalog.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/ui-egui/src/hosted_catalog.rs
+@@ -0,0 +1,28 @@
++//! Host-supplied presentation for the existing renderer.
++//!
++//! These values describe visible choices only. They contain no installed-state,
++//! package, release, download, capability or authorization receipt.
++
++use artcraft_launcher_core::CraftApp;
++
++/// A finite, source-owned catalog supplied explicitly by an embedding product.
++pub struct HostedCatalog {
++    pub title: &'static str,
++    pub subtitle: &'static str,
++    pub products: &'static [CraftApp],
++    /// Product selections that the host may turn into an installation review.
++    pub reviewable: &'static [&'static str],
++    /// Surface, light-ink and dark-ink accents from the host's existing brand.
++    pub accent: [[u8; 3]; 3],
++    pub footer: &'static str,
++}
++
++impl HostedCatalog {
++    pub fn can_review(&self, id: &str) -> bool {
++        self.reviewable.contains(&id) && self.products.iter().any(|app| app.id == id)
++    }
++
++    pub fn availability(&self, id: &str) -> &'static str {
++        if self.can_review(id) { "Installation review available" } else { "Package unavailable in this build" }
++    }
++}
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -26,6 +26,7 @@
+ pub mod i18n;
+ pub mod icons;
+ mod install_target;
++mod hosted_catalog;
+ mod local_time;
+ pub mod model;
+ mod motion;
+@@ -39,6 +40,7 @@
+ mod widgets;
+ 
+ pub use app::{Host, LauncherUi, TitleBar};
++pub use hosted_catalog::HostedCatalog;
+ pub use i18n::{
+     Lang, LangInfo, current, detect_system_lang_in_background, fmt, has, lang_from_tag, message, msg, set_current, set_system_locales, system_lang,
+     t, t_id, tn, tr, tr_ctx, tr_id, trn,
+diff --git a/crates/ui-egui/src/theme.rs b/crates/ui-egui/src/theme.rs
+--- a/crates/ui-egui/src/theme.rs
++++ b/crates/ui-egui/src/theme.rs
+@@ -116,8 +116,16 @@
+         bad: hex(0xb3261e),
+     };
+ 
++    fn with_catalog_accent(mut self, ctx: &egui::Context) -> Self {
++        if let Some([surface, light, dark]) = ctx.data(|d| d.get_temp::<[[u8; 3]; 3]>(egui::Id::new("hosted-catalog-accent"))) {
++            self.accent = rgb(surface);
++            self.accent_ink = rgb(if self.dark { dark } else { light });
++        }
++        self
++    }
++
+     pub fn get(ctx: &egui::Context) -> Self {
+-        if ctx.theme() == egui::Theme::Dark { Self::DARK } else { Self::LIGHT }
++        (if ctx.theme() == egui::Theme::Dark { Self::DARK } else { Self::LIGHT }).with_catalog_accent(ctx)
+     }
+ 
+     pub fn hairline(&self) -> Stroke {
+@@ -202,10 +210,22 @@
+     v
+ }
+ 
++/// The embedding catalog supplies its existing brand accent; standalone contexts keep ArtCraft's.
++pub(crate) fn set_catalog_accent(ctx: &egui::Context, accent: Option<[[u8; 3]; 3]>) {
++    let key = egui::Id::new("hosted-catalog-accent");
++    ctx.data_mut(|d| {
++        if let Some(accent) = accent {
++            d.insert_temp(key, accent);
++        } else {
++            d.remove::<[[u8; 3]; 3]>(key);
++        }
++    });
++}
++
+ /// Applies both appearances (egui switches between them with the theme preference).
+ pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
+-    ctx.set_visuals_of(egui::Theme::Dark, visuals(&Tokens::DARK));
+-    ctx.set_visuals_of(egui::Theme::Light, visuals(&Tokens::LIGHT));
++    ctx.set_visuals_of(egui::Theme::Dark, visuals(&Tokens::DARK.with_catalog_accent(ctx)));
++    ctx.set_visuals_of(egui::Theme::Light, visuals(&Tokens::LIGHT.with_catalog_accent(ctx)));
+     ctx.set_theme(match choice {
+         ThemeChoice::System => egui::ThemePreference::System,
+         ThemeChoice::Dark => egui::ThemePreference::Dark,
+diff --git a/crates/ui-egui/src/views.rs b/crates/ui-egui/src/views.rs
+--- a/crates/ui-egui/src/views.rs
++++ b/crates/ui-egui/src/views.rs
+@@ -91,6 +91,14 @@
+             ui.spacing_mut().item_spacing.x = 0.0;
+             if bar == TitleBar::MacOs {
+                 ui.add_space(TRAFFIC_LIGHTS_W);
++            }
++            if let Some(catalog) = self.hosted {
++                ui.add_space(20.0);
++                ui.label(widgets::heading(catalog.title, 20.0, t.accent_ink));
++                widgets::rule(ui, h);
++                ui.add_space(16.0);
++                widgets::hud(ui, catalog.subtitle, t.muted);
++                return;
+             }
+             // The ArtCraft wordmark exactly as supplied, in its own cell.
+             let logo = vec2(14.0 * crate::icons::ARTCRAFT_LOGO_ASPECT, 14.0);
+@@ -209,7 +217,9 @@
+     fn toolbar_row(&mut self, ui: &mut Ui, t: &Tokens, updates: usize) -> bool {
+         let mut compact = false;
+         ui.horizontal(|ui| {
+-            self.refresh_button(ui);
++            if self.hosted.is_none() {
++                self.refresh_button(ui);
++            }
+             // Hiding an app is only undone from here, so the way back to the hidden ones stays
+             // while there are any: a toggle, lit while the hidden apps are what the page shows.
+             if !self.settings.hidden.is_empty() {
+@@ -277,16 +287,30 @@
+         }
+     }
+ 
++    pub(crate) fn grid_sort_choice(&self) -> (SortKey, bool) {
++        if self.hosted.is_some() && self.settings.sort == SortKey::Suite {
++            (SortKey::Suite, false)
++        } else {
++            grid_sort_now(&self.settings)
++        }
++    }
++
+     /// The grid's sort combo box. It writes the chosen key and direction directly (not through the
+     /// action queue) and carries an accessible "Sort" name.
+     fn sort_picker(&mut self, ui: &mut Ui) {
++        let choice = self.grid_sort_choice();
++        let label = if self.hosted.is_some() && choice.0 == SortKey::Suite { "Product order" } else { grid_sort_label(choice) };
++        let choices = if self.hosted.is_some() {
++            vec![(SortKey::Suite, false), (SortKey::Name, false), (SortKey::Name, true)]
++        } else { GRID_SORTS.to_vec() };
+         craft_ui::ComboBox::from_id_salt("sort")
+-            .selected_text(RichText::new(grid_sort_label(grid_sort_now(&self.settings))).size(13.0))
++            .selected_text(RichText::new(label).size(13.0))
+             .width(190.0)
+             .show_ui(ui, |ui| {
+-                let current = grid_sort_now(&self.settings);
+-                for choice in GRID_SORTS {
+-                    if ui.selectable_label(current == choice, grid_sort_label(choice)).clicked() {
++                let current = self.grid_sort_choice();
++                for choice in choices {
++                    let label = if self.hosted.is_some() && choice.0 == SortKey::Suite { "Product order" } else { grid_sort_label(choice) };
++                    if ui.selectable_label(current == choice, label).clicked() {
+                         self.settings.sort = choice.0;
+                         self.settings.sort_descending = choice.1;
+                     }
+@@ -340,6 +364,11 @@
+ 
+     pub(crate) fn footer(&mut self, ui: &mut Ui) {
+         let t = Tokens::get(ui.ctx());
++        if let Some(catalog) = self.hosted {
++            let width = ui.available_width();
++            widgets::hud_elided(ui, catalog.footer, t.faint, width);
++            return;
++        }
+         let now = self.backend.now();
+         let status = if self.checking {
+             tl!("Checking for updates…").to_string()
+@@ -465,7 +494,7 @@
+         let app_color = if installed { rgb(app.color) } else { t.muted.lerp_to_gamma(rgb(app.color), lift) };
+         // The whole card opens the app's page. Added before the card's own links and buttons, so
+         // they sit on top of it and keep their clicks.
+-        if AppDetails::by_id(id).is_some() {
++        if self.hosted.is_none() && AppDetails::by_id(id).is_some() {
+             let open = ui.interact(rect, ui.scope_id().with(("card-open", id)), Sense::click());
+             open.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, fmt(tl!("{name} details"), &[("name", app.name)])));
+             if open.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+@@ -493,18 +522,22 @@
+             let mut strip_ui = ui.new_child(
+                 egui::UiBuilder::new().max_rect(strip.shrink2(vec2(CARD_PAD, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)),
+             );
+-            if !version.is_empty() {
+-                let github_w = widgets::hud_galley(&strip_ui, &format!("{} ↗", tl!("GitHub")), t.muted).size().x;
+-                let room = (strip_ui.available_width() - github_w - 16.0).max(0.0);
+-                let highlight = if in_colour { t.app_ink(app) } else { t.muted };
+-                let spans: Vec<(&str, egui::Color32)> =
+-                    version.iter().map(|(text, lit)| (text.as_str(), if *lit { highlight } else { t.muted })).collect();
+-                widgets::hud_elided_spans(&mut strip_ui, &spans, room);
+-            }
+-            strip_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+-                ui.spacing_mut().item_spacing.x = 16.0;
+-                widgets::hud_link(ui, tl!("GitHub"), &app.repo_url());
+-            });
++            if let Some(catalog) = self.hosted {
++                widgets::hud(&mut strip_ui, catalog.subtitle, t.faint);
++            } else {
++                if !version.is_empty() {
++                    let github_w = widgets::hud_galley(&strip_ui, &format!("{} ↗", tl!("GitHub")), t.muted).size().x;
++                    let room = (strip_ui.available_width() - github_w - 16.0).max(0.0);
++                    let highlight = if in_colour { t.app_ink(app) } else { t.muted };
++                    let spans: Vec<(&str, egui::Color32)> =
++                        version.iter().map(|(text, lit)| (text.as_str(), if *lit { highlight } else { t.muted })).collect();
++                    widgets::hud_elided_spans(&mut strip_ui, &spans, room);
++                }
++                strip_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
++                    ui.spacing_mut().item_spacing.x = 16.0;
++                    widgets::hud_link(ui, tl!("GitHub"), &app.repo_url());
++                });
++            }
+         }
+ 
+         let inner = Rect::from_min_max(egui::pos2(rect.left() + CARD_PAD, strip.bottom() + 18.0), rect.max - vec2(CARD_PAD, CARD_PAD));
+@@ -518,18 +551,20 @@
+             const GAP: f32 = 4.0;
+             // The slot is as tall as the text beside it when that is taller, so the two share a centre.
+             let block = lines_height(ui, &[&name, &tagline], GAP);
+-            let (slot, icon_response) = ui.allocate_exact_size(vec2(ICON, block.max(ICON)), Sense::hover());
+-            icon_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, fmt(tl!("{name} icon"), &[("name", app.name)])));
+-            // The icon rises a little on hover, over a soft drop shadow (the site's only shadow).
+-            let icon_rect = Rect::from_center_size(slot.center(), vec2(ICON, ICON)).translate(vec2(0.0, -4.0 * lift));
+-            ui.painter().add(
+-                egui::epaint::Shadow { offset: [0, 6], blur: 14, spread: 0, color: Color32::from_black_alpha(71) }
+-                    .as_shape(icon_rect.shrink(4.0), CornerRadius::same(12)),
+-            );
+-            if let Some(icon) = crate::icons::app_image(ui.ctx(), app.id, in_colour) {
+-                icon.paint_at(ui, icon_rect);
+-            }
+-            ui.add_space(6.0);
++            if self.hosted.is_none() {
++                let (slot, icon_response) = ui.allocate_exact_size(vec2(ICON, block.max(ICON)), Sense::hover());
++                icon_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, fmt(tl!("{name} icon"), &[("name", app.name)])));
++                // The icon rises a little on hover, over a soft drop shadow (the site's only shadow).
++                let icon_rect = Rect::from_center_size(slot.center(), vec2(ICON, ICON)).translate(vec2(0.0, -4.0 * lift));
++                ui.painter().add(
++                    egui::epaint::Shadow { offset: [0, 6], blur: 14, spread: 0, color: Color32::from_black_alpha(71) }
++                        .as_shape(icon_rect.shrink(4.0), CornerRadius::same(12)),
++                );
++                if let Some(icon) = crate::icons::app_image(ui.ctx(), app.id, in_colour) {
++                    icon.paint_at(ui, icon_rect);
++                }
++                ui.add_space(6.0);
++            }
+             centered_lines(ui, &[&name, &tagline], GAP, |ui| {
+                 // The name's row is as tall as its text, not as a button.
+                 ui.spacing_mut().interact_size.y = 0.0;
+@@ -541,31 +576,35 @@
+             });
+         });
+         ui.add_space(14.0);
+-        // Installed and up to date needs no badge: the strip has the version, and the group says the rest.
+-        if !matches!(status, AppStatus::UpToDate | AppStatus::Installed) {
+-            ui.horizontal(|ui| {
+-                let (text, tone) = model::entry_status_text(&entry, &status, self.caps.manage_apps);
+-                let r = widgets::badge(ui, &text, widgets::tone_color(&t, tone));
+-                if let Some(f) = entry.failure() {
+-                    r.on_hover_text(fmt(tl!("Couldn't check for updates: {f}"), &[("f", f)]));
+-                }
+-            });
+-            ui.add_space(8.0);
+-        }
+-        // Until a version is known, the sentence that says why (no release yet, installed…) stays.
+-        if version.is_empty() {
+-            let line = version_line(&entry, &status);
+-            if !line.trim().is_empty() {
+-                ui.label(RichText::new(line).size(12.5).color(t.muted));
++        if let Some(catalog) = self.hosted {
++            ui.add(egui::Label::new(RichText::new(catalog.availability(id)).size(13.0).color(t.muted)).wrap());
++        } else {
++            // Installed and up to date needs no badge: the strip has the version, and the group says the rest.
++            if !matches!(status, AppStatus::UpToDate | AppStatus::Installed) {
++                ui.horizontal(|ui| {
++                    let (text, tone) = model::entry_status_text(&entry, &status, self.caps.manage_apps);
++                    let r = widgets::badge(ui, &text, widgets::tone_color(&t, tone));
++                    if let Some(f) = entry.failure() {
++                        r.on_hover_text(fmt(tl!("Couldn't check for updates: {f}"), &[("f", f)]));
++                    }
++                });
+                 ui.add_space(8.0);
+             }
+-        }
+-        if let Some(details) = AppDetails::by_id(id) {
+-            crate::card_parts::blurb(ui, details.headline, t.muted, 4);
+-        }
+-        if let Some(line) = crate::card_parts::last_updated(&entry) {
+-            ui.add_space(6.0);
+-            ui.add(egui::Label::new(RichText::new(line).size(12.5).color(t.faint)).selectable(false));
++            // Until a version is known, the sentence that says why (no release yet, installed…) stays.
++            if version.is_empty() {
++                let line = version_line(&entry, &status);
++                if !line.trim().is_empty() {
++                    ui.label(RichText::new(line).size(12.5).color(t.muted));
++                    ui.add_space(8.0);
++                }
++            }
++            if let Some(details) = AppDetails::by_id(id) {
++                crate::card_parts::blurb(ui, details.headline, t.muted, 4);
++            }
++            if let Some(line) = crate::card_parts::last_updated(&entry) {
++                ui.add_space(6.0);
++                ui.add(egui::Label::new(RichText::new(line).size(12.5).color(t.faint)).selectable(false));
++            }
+         }
+         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+             ui.horizontal(|ui| self.actions(ui, &entry, &status, inner.width()));
+@@ -588,15 +627,14 @@
+         let span = ui.available_rect_before_wrap().x_range();
+ 
+         egui::Frame::new().fill(t.bg).stroke(t.hairline()).inner_margin(egui::Margin::symmetric(16, 0)).show(ui, |ui| {
+-            TableBuilder::new(ui)
++            let table = TableBuilder::new(ui)
+                 .striped(false)
+                 .vscroll(false)
+                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                 .column(Column::remainder().at_least(220.0).clip(true))
+-                .column(Column::exact(176.0))
+-                .column(Column::exact(150.0))
+-                .column(Column::exact(132.0))
+-                .column(Column::exact(104.0))
++                .column(Column::exact(if self.hosted.is_some() { 240.0 } else { 176.0 }));
++            let table = if self.hosted.is_some() { table } else { table.column(Column::exact(150.0)).column(Column::exact(132.0)) };
++            table.column(Column::exact(104.0))
+                 .column(Column::exact(206.0))
+                 .header(42.0, |header| self.table_header(header, &mut sort_clicked, &t, span, clip))
+                 .body(|body| self.table_rows(body, ids, &t, (title_h, tagline_h), now, (span, clip)));
+@@ -674,14 +712,19 @@
+         span: egui::emath::Rangef,
+         clip: egui::Rect,
+     ) {
+-        for (key, label) in [
+-            (Some(SortKey::Name), tl!("App")),
+-            (Some(SortKey::Status), tl!("Status")),
+-            (None, tr_ctx(current(), "column", "Version")),
+-            (Some(SortKey::Released), tr_ctx(current(), "column", "Released")),
+-            (None, tr_ctx(current(), "column", "Author")),
+-            (None, ""),
+-        ] {
++        let columns = if self.hosted.is_some() {
++            vec![(Some(SortKey::Name), "Product"), (None, "Availability"), (None, "Publisher"), (None, "")]
++        } else {
++            vec![
++                (Some(SortKey::Name), tl!("App")),
++                (Some(SortKey::Status), tl!("Status")),
++                (None, tr_ctx(current(), "column", "Version")),
++                (Some(SortKey::Released), tr_ctx(current(), "column", "Released")),
++                (None, tr_ctx(current(), "column", "Author")),
++                (None, ""),
++            ]
++        };
++        for (key, label) in columns {
+             header.col(|ui| {
+                 if key == Some(SortKey::Name) {
+                     Self::table_rule(ui, t, span, clip);
+@@ -711,8 +754,10 @@
+             body.row(62.0, |mut row| {
+                 row.col(|ui| self.table_app_cell(ui, &entry, id, i < last, t, (fonts.0, fonts.1, rule.0, rule.1)));
+                 row.col(|ui| self.table_status_cell(ui, &entry, &status, t));
+-                row.col(|ui| self.table_version_cell(ui, &entry, &status, t));
+-                row.col(|ui| self.table_released_cell(ui, &entry, now, t));
++                if self.hosted.is_none() {
++                    row.col(|ui| self.table_version_cell(ui, &entry, &status, t));
++                    row.col(|ui| self.table_released_cell(ui, &entry, now, t));
++                }
+                 row.col(|ui| {
+                     ui.label(RichText::new(entry.app.publisher).color(t.muted));
+                 });
+@@ -739,7 +784,7 @@
+             Self::table_rule(ui, t, span, clip);
+         }
+         // Clicking the app's cell opens its page (the content is added after, so it wins any hit).
+-        if AppDetails::by_id(id).is_some() {
++        if self.hosted.is_none() && AppDetails::by_id(id).is_some() {
+             let open = ui.interact(ui.max_rect(), ui.scope_id().with(("row-open", id)), Sense::click());
+             open.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, fmt(tl!("{name} details"), &[("name", entry.app.name)])));
+             if open.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+@@ -765,6 +810,10 @@
+ 
+     /// The status column: one badge, with the check failure (if any) in its tooltip.
+     fn table_status_cell(&self, ui: &mut Ui, entry: &AppEntry, status: &AppStatus, t: &Tokens) {
++        if let Some(catalog) = self.hosted {
++            ui.add(egui::Label::new(RichText::new(catalog.availability(entry.app.id)).color(t.muted)).wrap());
++            return;
++        }
+         // Installed is all it says: being up to date is the absence of an update.
+         let (text, tone) = if *status == AppStatus::UpToDate && entry.job.is_none() && entry.paused.is_none() {
+             model::status_text(&AppStatus::Installed, self.caps.manage_apps)
+@@ -858,6 +907,14 @@
+     /// The main button and the `⋯` menu beside it. `links_in_menu` is false where the page shows
+     /// the website, GitHub and releases links as buttons of its own.
+     pub(crate) fn actions_in(&mut self, ui: &mut Ui, entry: &AppEntry, status: &AppStatus, width: f32, links_in_menu: bool) {
++        if let Some(catalog) = self.hosted {
++            if catalog.can_review(entry.app.id)
++                && widgets::button(ui, "Review installation", Kind::Primary, width).clicked()
++            {
++                self.review_product(entry.app.id);
++            }
++            return;
++        }
+         let id = entry.app.id.to_string();
+         // One square button (the menu) beside the main one.
+         let gap = ui.spacing().item_spacing.x;

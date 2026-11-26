@@ -17,14 +17,16 @@ test('generated dependency bytes match canonical source custody',()=>{
  }
 });
 test('Cube is self-contained and shares one existing appearance store',()=>{
- const app=read('../src/components/HexProductMicrosites.tsx'),host=read('../src/SharedProductHost.tsx');
- assert.match(app,/useThemeMode, setThemeMode.*from '\.\.\/shared\/window-frame.mjs'/);
- assert.doesNotMatch(app,/\[theme, setTheme\] = useState/);
+ const app=read('../src/components/ArtcraftLauncherBody.tsx'),host=read('../src/SharedProductHost.tsx');
+ assert.match(host,/NativeProductWindowShell[^\n]*useThemeMode[^\n]*from '\.\/shared\/window-frame.mjs'/);
+ assert.doesNotMatch(app+host,/\[theme, setTheme\] = useState/);
  assert.doesNotMatch(app+host,/\.\.\/\.\.\/shared-node/);
  assert.match(host,/NativeProductWindowShell.*from '\.\/shared\/window-frame.mjs'/);
  assert.match(host,/controlsAvailable=\{nativeInstallerAvailable\(\)\}/);
  assert.match(host,/attachShadow\(\{\s*mode:\s*['"]open['"]\s*\}\)/);
- assert.match(host,/<HexProductMicrosites\b/);
+ assert.match(host,/<ArtcraftLauncherBody\b/);
+ assert.match(host,/loadModule=\{loadPackagedArtcraftLauncher\}/);
+ assert.doesNotMatch(host,/import\s+HexProductMicrosites\b|<HexProductMicrosites\b/,'new editorial microsites do not replace the recovered Artcraft body');
  assert.doesNotMatch(host,/import\s+App\b|<App\b/,'deprecated App is not the mounted application');
  assert.equal((host.match(/<NativeInstallerPanel\b/g)||[]).length,1,'one existing installer is injected');
  assert.doesNotMatch(app,/Traffic Light Window Dots|bg-rose-500\/80/);
@@ -44,15 +46,15 @@ test('preview remains one rendered host with no automatic extra windows',()=>{
 });
 
 test('workspace omits rejected announcements and unsupported marketing claims',()=>{
- const app=read('../src/components/HexProductMicrosites.tsx');
+ const app=read('../src/components/ArtcraftLauncherBody.tsx'),host=read('../src/SharedProductHost.tsx');
  assert.doesNotMatch(app,/Usability &amp; Architecture Audit Corrections Applied|100% Private|zero monthly fees|>Rosetta Lexicon<|setShowRosetta|data-preview-probe|Host CLI Proof Recorded|CLI Proof Logged|Auditor Navigation:/);
- assert.doesNotMatch(app,/Tools &amp; Diagnostics|Tools & Diagnostics|XI-IO Ecosystem Component Catalog|Software reference catalog\./);
- assert.match(app,/data-hex-installer-slot="cli"/);
- assert.match(app,/\{installer\}/,'existing installer occupies the persistent composition slot');
+ assert.doesNotMatch(app+host,/Tools &amp; Diagnostics|Tools & Diagnostics|XI-IO Ecosystem Component Catalog|Software reference catalog\./);
+ assert.equal((host.match(/<NativeInstallerPanel\b/g)||[]).length,1,'existing installer retains one independent instance');
+ assert.match(app,/<canvas[^>]*aria-label="HEX software marketplace"/);
 });
 
 test('product styling uses the current family baseline, not a hardcoded slate/amber skin',()=>{
- const files=['../src/components/HexProductMicrosites.tsx','../src/components/NativeInstallerPanel.tsx','../src/components/RollbackHistory.tsx'];
+ const files=['../src/components/ArtcraftLauncherBody.tsx','../src/components/NativeInstallerPanel.tsx','../src/components/RollbackHistory.tsx'];
  for(const p of files){const body=read(p); assert.doesNotMatch(body,/(?:bg|text|border)-(?:slate|amber)-/); assert.doesNotMatch(body,/text-(?:emerald|red|rose)-[123]00/); assert.doesNotMatch(body,/bg-(?:emerald|rose|red|blue|purple)-9[05]0/);}
  const css=read('../src/styles/product-workspace.css');
  for(const token of ['#050505','rgba(12,12,13,.96)','#f4f4f2','#c1c1c1','--chroma-hue,188','prefers-reduced-motion'])assert.ok(css.includes(token));
@@ -66,13 +68,13 @@ test('original carved plate is bundled locally with exact source custody',()=>{
  assert.equal(bytes.length,1107994);
  assert.equal(createHash('sha256').update(bytes).digest('hex'),'0cdfc4c4674c60856fdcf316b8d0ea82d54ae7b72ab6d7aa0a70aee0da9d1733');
  assert.equal(createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`),bytes])).digest('hex'),'0dab949092b553360bf5884674686569d38b43de');
- assert.match(read('../src/components/HexProductMicrosites.tsx'),/import brandPlate from '\.\.\/assets\/brand\/7d133412d_blue-bg\.png'/);
+ assert.match(read('../src/SharedProductHost.tsx'),/assets\/brand\/7d133412d_blue-bg\.png/);
  assert.match(read('../src/styles/product-workspace.css'),/grayscale\(100%\) brightness\(\.72\) contrast\(1\.08\)/);
 });
 
 test('product backdrop retains existing parallax layers with reduced-motion and cleanup',()=>{
  const app=read('../src/components/TabletBackdrop.tsx'),css=read('../src/styles/product-workspace.css');
- assert.match(read('../src/components/HexProductMicrosites.tsx'),/<TabletBackdrop \/>/);
+ assert.match(read('../src/SharedProductHost.tsx'),/<TabletBackdrop\b/);
  for(const coefficient of ['*-34','*-22','*-.018'])assert.ok(app.includes(coefficient));
  assert.match(read('../src/lib/backdropMotion.mjs'),/\*\.055/);
  for(const cleanup of ["motion.dispose()","removeEventListener('pointermove'","removeEventListener('scroll'","removeEventListener('change'","removeEventListener('pagehide'","removeEventListener('pageshow'"])assert.ok(app.includes(cleanup));
@@ -89,17 +91,16 @@ test('reading content is not dimmed by the decorative native glass ring',()=>{
  assert.match(css,/background-color: transparent !important/);
  assert.match(read('../src/main.tsx'),/hex-native-surface.css/);
 });
-test('microsite appearance and accessibility remain bound to the shared visual system',()=>{
- const app=read('../src/components/HexProductMicrosites.tsx'),css=read('../src/styles/product-workspace.css');
- const micrositeCss=read('../src/styles/hex-product-microsites.css');
- assert.match(app,/data-product-theme=\{theme\}/);
- assert.match(app,/useThemeMode\(\)/);assert.match(app,/setThemeMode\(/);
- assert.match(app,/\.\.\/shared\/xiui\/core\.css\?inline/);
- assert.match(app,/\.\.\/shared\/xiui\/shell\.css\?inline/);
- assert.match(micrositeCss,/--xiui-text:\s*var\(--workspace-text/);
- assert.match(micrositeCss,/min-height:\s*48px/);
- assert.match(micrositeCss,/prefers-reduced-motion/);
- assert.match(micrositeCss,/forced-colors:\s*active/);
+test('Artcraft content uses the local canvas mount and shared host appearance',()=>{
+ const app=read('../src/components/ArtcraftLauncherBody.tsx'),host=read('../src/SharedProductHost.tsx'),css=read('../src/styles/product-workspace.css');
+ assert.match(host,/data-product-theme=\{theme\}/);
+ assert.match(host,/useThemeMode\(\)/);assert.match(host,/setThemeMode\(/);
+ assert.match(app,/mountArtcraftLauncher.*from '\.\.\/lib\/artcraftLauncherMount.mjs'/);
+ assert.match(app,/data-artcraft-mount-status=\{status\}/);
+ assert.match(app,/aria-label=\{status === 'mounted' \? 'HEX software marketplace initialized' : undefined\}/);
+ assert.match(app,/lifecycle \|\| local.current/);
+ const lifecycle=host.match(/lifecycle=\{([A-Za-z_$][\w$]*)\.current\}/);
+ assert.ok(lifecycle,'the canvas receives a host-owned lifecycle');
+ assert.match(host,new RegExp('const\\s+'+lifecycle[1]+'\\s*=\\s*useRef(?:<|\\()'),'the lifecycle owner survives view changes');
  assert.doesNotMatch(css,/animation:[^;]*infinite/);assert.doesNotMatch(css,/transition: transform 80ms/);assert.doesNotMatch(css,/backdrop-filter: blur/);
- assert.doesNotMatch(micrositeCss,/animation:[^;]*infinite/);
 });

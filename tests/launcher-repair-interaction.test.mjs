@@ -22,13 +22,12 @@ test('repair controls require approval, dispatch once and retain uncertain outco
   throw Error('unexpected '+req.action);
  }}};
  try{
-  const mod=new SourceTextModule(source,{context:dom.getInternalVMContext()});await mod.link(()=>{throw Error('external module');});await mod.evaluate();await pause();
+  const mod=new SourceTextModule(source,{context:dom.getInternalVMContext(),importModuleDynamically:async()=>{throw Error('ARTCRAFT_TEST_EXECUTOR_NO_WASM');}});await mod.link(()=>{throw Error('external module');});await mod.evaluate();await pause();
   const shadow=w.document.querySelector('[data-hex-product-content]').shadowRoot;
   const rail=text=>Array.from(w.document.querySelectorAll('[data-window-rail-tabs] button')).find(b=>b.getAttribute('aria-label')===text);
-  const slot=shadow.querySelector('[data-hex-installer-slot="cli"]');
-  const panel=shadow.querySelector('[aria-label="Native HEX installer"]');assert.ok(panel&&slot);
-  assert.equal(slot.hidden,true,'Library retains one hidden installer before navigation');
-  rail('Install').click();await pause();assert.equal(slot.hidden,false);
+  const panel=shadow.querySelector('[aria-label="Native HEX installer"]');assert.ok(panel);
+  assert.ok(panel.closest('[hidden]'),'Software retains one hidden installer before navigation');
+  rail('Install').click();await pause();assert.equal(panel.closest('[hidden]'),null);
   assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);
   assert.doesNotMatch(shadow.textContent,/Tools & Diagnostics|XI-IO Ecosystem Component Catalog/);
   const label=text=>Array.from(panel.querySelectorAll('label')).find(l=>l.textContent.includes(text));
@@ -44,32 +43,27 @@ test('repair controls require approval, dispatch once and retain uncertain outco
   assert.equal(approval.checked,true);
   assert.equal(requests.filter(r=>r.action==='inspect').length,1,'only the installer inspects before Tools is opened');
   // Keep exact plan, runtime and consent while visiting another product and tools.
-  for(const view of ['Tools','Maths','Library']){rail(view).click();await pause();assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);}
+  for(const view of ['Tools','Maths','Software']){rail(view).click();await pause();assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);}
   // Existing local tool panels inspect when Tools is first visited. Product
   // navigation after that visit must not remount or reinspect the installer.
   const inspectionsAfterTools=requests.filter(r=>r.action==='inspect').length;
-  const click=async el=>{assert.ok(el);el.click();await pause();};
-  const pageButton=text=>Array.from(shadow.querySelectorAll('button')).find(b=>b.textContent.trim().startsWith(text));
-  await click(shadow.querySelector('[data-product-id="publisher"] button'));
-  await click(pageButton('View requirements'));
-  assert.equal(slot.hidden,true,'Publisher requirements cannot expose the CLI plan');
-  assert.ok(shadow.querySelector('[aria-label="Installation unavailable"]'));
-  await click(shadow.querySelector('button[aria-label="Back to Library"]'));
-  await click(shadow.querySelector('[data-product-id="cli"] button'));
-  await click(pageButton('View requirements'));
-  await click(pageButton('Review installation'));
-  assert.equal(slot.hidden,false);assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);
+  assert.ok(shadow.querySelector('canvas[aria-label="HEX software marketplace"]'));
+  assert.equal(shadow.querySelector('[data-hex-microsites]'),null);
+  assert.ok(panel.closest('[hidden]'));
+  rail('Install').click();await pause();
+  assert.equal(panel.closest('[hidden]'),null);
+  assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);
   assert.equal(panel.querySelector('[aria-label="Node executable"]'),node);
   assert.equal(node.value,'/existing/node');assert.equal(approval.checked,true);
   assert.match(panel.querySelector('[aria-label="Exact reviewed plan and receipts"]').textContent,/"plan_id": "p"/);
   assert.equal(requests.filter(r=>r.action==='prepare_repair').length,1);
-  assert.equal(requests.filter(r=>r.action==='inspect').length,inspectionsAfterTools,'Library/product page changes never remount/reinspect');
+  assert.equal(requests.filter(r=>r.action==='inspect').length,inspectionsAfterTools,'Software/Install view changes never remount/reinspect');
   assert.equal(requests.filter(r=>r.action==='apply_repair'||r.action==='apply'||r.action==='launch_cli').length,0,'navigation does not execute the approved plan');
   const apply=button('Repair this existing launcher');assert.equal(apply.disabled,false);apply.click();apply.click();await pause();
   assert.equal(requests.filter(r=>r.action==='apply_repair').length,1);assert.equal(apply.isConnected,false);assert.equal(button('Repair this existing launcher'),undefined);
   finish({ok:true,result:{plan_id:'p',phase:'LAUNCHER_REPAIR_OUTCOME_UNCERTAIN',do_not_retry:true}});await pause();
   assert.match(panel.textContent,/Outcome uncertain/);assert.equal(button('Repair this existing launcher'),undefined);
-  rail('Library').click();await pause();rail('Install').click();await pause();
+  rail('Software').click();await pause();rail('Install').click();await pause();
   assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);
   assert.match(panel.textContent,/Outcome uncertain/);assert.equal(button('Repair this existing launcher'),undefined);
   assert.ok(button('Check actual state'));assert.ok(!requests.some(r=>r.action==='apply'||r.action==='launch_cli'));
@@ -114,20 +108,20 @@ for (const phase of ['INSTALLED_READBACK_VERIFIED', 'LAUNCHER_REPAIR_READBACK_VE
   };
   w.__TAURI__ = {core:{invoke}}; w.__TAURI_INTERNALS__ = {invoke};
   try {
-   const mod = new SourceTextModule(source, {context:dom.getInternalVMContext()});
+   const mod = new SourceTextModule(source, {context:dom.getInternalVMContext(),importModuleDynamically:async()=>{throw Error('ARTCRAFT_TEST_EXECUTOR_NO_WASM');}});
    await mod.link(() => {throw Error('external module');}); await mod.evaluate(); await pause();
    const shadow = w.document.querySelector('[data-hex-product-content]').shadowRoot;
    const panel = shadow.querySelector('[aria-label="Native HEX installer"]'); assert.ok(panel);
    const rail = label => [...w.document.querySelectorAll('[data-window-rail-tabs] button')].find(el => el.getAttribute('aria-label') === label);
    const button = label => [...panel.querySelectorAll('button')].find(el => el.textContent.trim() === label);
-   const pageButton = label => [...shadow.querySelectorAll('button')].find(el => el.textContent.trim().startsWith(label));
    const launchCount = () => requests.filter(req => req.action === 'launch_cli').length;
    const planBytes = () => panel.querySelector('[aria-label="Exact reviewed plan and receipts"]')?.textContent;
    const cannotOpen = () => assert.ok(!button('Open XI-IO CLI') || button('Open XI-IO CLI').disabled, 'fresh eligible installed state is required');
    async function click(el) {assert.ok(el, 'requested control exists'); el.click(); await pause();}
 
    assert.equal(launchCount(), 0);
-   await click(pageButton('Explore XI-IO CLI')); await click(pageButton('View requirements')); await click(pageButton('Review installation'));
+   assert.ok(shadow.querySelector('canvas[aria-label="HEX software marketplace"]'));
+   await click(rail('Install'));
    assert.equal(launchCount(), 0, 'product navigation never launches');
    const history = panel.querySelector('[aria-label="Saved installation and repair history"]'); assert.ok(history);
    history.closest('details').open = true; await click(history.querySelector('button'));
@@ -162,7 +156,7 @@ for (const phase of ['INSTALLED_READBACK_VERIFIED', 'LAUNCHER_REPAIR_READBACK_VE
    assert.equal(launchCount(), 1, 'double click dispatches one finite request');
    assert.deepEqual(requests.filter(req => req.action === 'launch_cli')[0], {action:'launch_cli', plan_id:installedPlan.plan_id, approval_digest:installedPlan.approval_digest, workspace:'/fixture/project', approved:true});
    assert.equal(planBytes(), savedPlan, 'pending launch preserves the installation plan'); cannotOpen();
-   await click(rail('Library')); await click(rail('Install'));
+   await click(rail('Software')); await click(rail('Install'));
    assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'), panel);
    assert.equal(panel.querySelector('[aria-label="CLI project folder"]'), project);
    assert.equal(project.value, '/fixture/project', 'product navigation retains the selected project folder');
@@ -188,7 +182,7 @@ for (const phase of ['INSTALLED_READBACK_VERIFIED', 'LAUNCHER_REPAIR_READBACK_VE
     }
     button('Open XI-IO CLI')?.click(); await pause();
     assert.equal(launchCount(), before + 1, 'launch cannot retry before readback');
-    await click(rail('Library')); await click(rail('Install'));
+    await click(rail('Software')); await click(rail('Install'));
     cannotOpen(); assert.equal(launchCount(), before + 1, 'navigation cannot clear the launch block');
     assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'), panel);
    }

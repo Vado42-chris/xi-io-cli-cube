@@ -99,7 +99,7 @@
   pointer-events: none;
 }
 [data-hex-workspace] .hex-product-toolbar,
-[data-hex-workspace]:not([data-hex-microsites]) .hex-workspace-layout section,
+[data-hex-workspace] .hex-workspace-layout section,
 [data-hex-workspace] .hex-installer-panel {
   border: 1px solid var(--workspace-border-strong);
   background-color: var(--workspace-surface);

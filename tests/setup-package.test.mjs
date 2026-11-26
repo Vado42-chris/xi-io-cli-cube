@@ -12,14 +12,19 @@ const script = readFileSync(root + 'dist/' + html.match(/<script[^>]+src="([^"]+
 const pause = () => new Promise(resolve => setTimeout(resolve, 40));
 
 // Actual compiled UI with controlled native responses, not installed proof.
-for (const native of [false, true]) test('Library to CLI installation preserves package truth and requires review, native=' + native, async () => {
+for (const native of [false, true]) test('Software to CLI installation preserves package truth and requires review, native=' + native, async () => {
   const dom = new JSDOM('<div id="root"></div>', {url: 'https://hex.fixture.invalid', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: new VirtualConsole().sendTo(console)});
-  const w = dom.window, requests = [], chooserReplies = [{cancelled: true}, {cancelled: false, path: '/fixture/selected-cli'}, {cancelled: true}];
+  const w = dom.window, requests = [], productOpenRequests = [], chooserReplies = [{cancelled: true}, {cancelled: false, path: '/fixture/selected-cli'}, {cancelled: true}];
   w.matchMedia = media => ({media, matches: true, addEventListener(){}, removeEventListener(){}, addListener(){}, removeListener(){}});
   w.ResizeObserver = class {observe(){} disconnect(){}};
   if (native) {
     const invoke = async (command, args) => {
       if (command === 'native_product_window') return {maximized: false, fullscreen: false};
+      if (command === 'native_product_open') {
+        productOpenRequests.push(JSON.parse(JSON.stringify(args)));
+        assert.deepEqual(productOpenRequests.at(-1), {productId: 'sam_law'});
+        throw Error('NATIVE_PRODUCT_OPEN_REGISTRY_UNBOUND');
+      }
       if (command === 'native_select_directory') {
         assert.deepEqual(JSON.parse(JSON.stringify(args)), {purpose: 'installation'});
         return chooserReplies.shift();
@@ -31,23 +36,24 @@ for (const native of [false, true]) test('Library to CLI installation preserves 
     w.__TAURI__ = {core: {invoke}}; w.__TAURI_INTERNALS__ = {invoke};
   }
   try {
-    const mod = new SourceTextModule(script, {context: dom.getInternalVMContext()});
+    const mod = new SourceTextModule(script, {context: dom.getInternalVMContext(), importModuleDynamically: async () => {throw Error('ARTCRAFT_TEST_EXECUTOR_NO_WASM');}});
     await mod.link(() => {throw Error('external');}); await mod.evaluate(); await pause();
     const shadow = w.document.querySelector('[data-hex-product-content]').shadowRoot;
-    const microsite = shadow.querySelector('[data-hex-microsites]');
     const panel = shadow.querySelector('[aria-label="Native HEX installer"]');
-    const slot = shadow.querySelector('[data-hex-installer-slot="cli"]');
-    assert.ok(microsite && panel && slot);
-    assert.equal(microsite.getAttribute('data-product-page'), 'library'); assert.equal(slot.hidden, true);
+    assert.ok(panel && panel.closest('[hidden]'));
+    assert.ok(shadow.querySelector('canvas[aria-label="HEX software marketplace"]'));
+    assert.equal(shadow.querySelector('[data-hex-microsites]'), null);
     assert.doesNotMatch(shadow.textContent, /Tools & Diagnostics|XI-IO Ecosystem Component Catalog/);
     const button = text => [...shadow.querySelectorAll('button')].find(el => el.textContent.trim().startsWith(text));
+    const rail = label => w.document.querySelector(`[data-window-rail-tabs] button[aria-label="${label}"]`);
     async function click(el) {assert.ok(el); el.click(); await pause();}
-    await click(button('Explore XI-IO CLI')); await click(button('View requirements'));
-    const requirements = shadow.querySelector('[data-product-primitive="PlatformRequirements"]');
-    assert.match(requirements.textContent, /account is not required for local installation/i);
-    assert.match(requirements.textContent, /selected Node/); assert.equal(slot.hidden, true);
-    await click(button('Review installation'));
-    assert.equal(slot.hidden, false); assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'), panel);
+    assert.equal(button('Open SAM_LAW in HEX'), undefined, 'unbound products never expose a launch action');
+    assert.deepEqual(productOpenRequests, []);
+    await click(rail('Install'));
+    assert.equal(panel.closest('[hidden]'), null);
+    assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'), panel);
+    assert.equal(shadow.querySelector('[aria-label="HEX launcher body"]'), null);
+    assert.match(panel.textContent, /No sign-in required/);
     assert.ok(w.document.querySelector('[data-window-rail-tabs] button[aria-label="Install"] > div'));
     if (native) {
       for (let i = 0; i < 30 && !panel.querySelector('[aria-label="Node executable"]')?.value; i++) await pause();
@@ -67,12 +73,16 @@ for (const native of [false, true]) test('Library to CLI installation preserves 
       assert.match(panel.textContent, /browser preview cannot inspect, install or roll back/);
       assert.equal(requests.length, 0); assert.equal(panel.querySelector('[aria-label="Node executable"]'), null);
     }
-    await click(shadow.querySelector('button[aria-label="Back to Library"]'));
-    await click(shadow.querySelector('[data-product-id="publisher"] button')); await click(button('View requirements'));
-    assert.ok(shadow.querySelector('[aria-label="Installation unavailable"]'));
-    assert.equal(slot.hidden, true, 'unbound Publisher cannot reuse a CLI plan');
-    assert.ok([...shadow.querySelectorAll('main button')].every(el => !/^Open\b/i.test(el.textContent.trim()) || el.disabled));
+    const folder = panel.querySelector('[aria-label="Installation folder"]');
+    await click(rail('Software'));
+    assert.ok(shadow.querySelector('canvas[aria-label="HEX software marketplace"]'));
+    assert.ok(panel.closest('[hidden]'));
     assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'), panel);
+    await click(rail('Install'));
+    assert.equal(panel.closest('[hidden]'), null);
+    assert.equal(panel.querySelector('[aria-label="Installation folder"]'), folder);
+    if (native) assert.equal(folder.value, '/fixture/selected-cli');
+    assert.equal(productOpenRequests.length, native ? 1 : 0, 'navigation does not reopen an unbound product');
     assert.ok(requests.every(request => request.action === 'inspect'));
     assert.doesNotMatch(shadow.textContent, /Tools & Diagnostics|XI-IO Ecosystem Component Catalog/);
   } finally { w.close(); }
