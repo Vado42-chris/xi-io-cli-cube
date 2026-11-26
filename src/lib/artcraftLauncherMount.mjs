@@ -3,7 +3,7 @@
 // This does not select assets, authorize effects or replace the donor UI.
 const owners = new WeakMap();
 
-export function mountArtcraftLauncher({canvas, loadModule, onProductSelected = () => {}, appearance = 'light'}) {
+export function mountArtcraftLauncher({canvas, loadModule, onProductSelected = (_selection) => {}, appearance = 'light'}) {
   const Canvas = canvas?.ownerDocument?.defaultView?.HTMLCanvasElement;
   if (!Canvas || !(canvas instanceof Canvas) || !canvas.isConnected)
     throw new Error('ARTCRAFT_CONNECTED_CANVAS_REQUIRED');
