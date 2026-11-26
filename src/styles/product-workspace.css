@@ -261,3 +261,60 @@
   [data-hex-workspace] .hex-grid-quarters > * { grid-column: span 3; }
 }
 [data-hex-workspace] .hex-responsive-grid > .hex-grid-full { grid-column: 1 / -1; }
+
+/* HEX's Artcraft host keeps the shared frame outside this shadow root.
+ * The launcher owns its canvas. Carry its paper/ink hierarchy into the
+ * native review, tools and Maths, without drawing any art behind text. */
+:host([data-hex-product-content="artcraft-hosted"]) [data-hex-workspace] {
+  --workspace-canvas: #161a20;
+  --workspace-surface: #242b34;
+  --workspace-text: #f2f4f8;
+  --workspace-muted: #bfcbd8;
+  --workspace-border: #495768;
+  --workspace-border-strong: #8295aa;
+  --workspace-focus: #96e3ea;
+  --workspace-inverse: #122129;
+  --workspace-success: #b0ead5;
+  --workspace-danger: #ffd0c8;
+  --workspace-control: #303c49;
+  --workspace-control-hover: #3a4959;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+  min-height: var(--xi-window-viewport-height, 100%);
+}
+:host([data-hex-product-content="artcraft-hosted"]) [data-hex-workspace][data-product-theme="light"] {
+  --workspace-canvas: #f0efec;
+  --workspace-surface: #fffefa;
+  --workspace-text: #192430;
+  --workspace-muted: #475968;
+  --workspace-border: #bac4ca;
+  --workspace-border-strong: #687982;
+  --workspace-focus: #075f72;
+  --workspace-inverse: #fffefa;
+  --workspace-success: #146049;
+  --workspace-danger: #8a2822;
+  --workspace-control: #e2e9ed;
+  --workspace-control-hover: #d5e1e7;
+}
+:host([data-hex-product-content="artcraft-hosted"]) .hex-product-toolbar {
+  background: var(--workspace-surface);
+  border-bottom: 1px solid var(--workspace-border);
+  padding: .5rem clamp(.875rem, 2.5vw, 2rem);
+}
+:host([data-hex-product-content="artcraft-hosted"]) [data-tablet-surface] {
+  background: var(--workspace-canvas);
+  isolation: isolate;
+}
+:host([data-hex-product-content="artcraft-hosted"]) [data-tablet-surface] > .ca-brand-field {
+  display: none;
+}
+:host([data-hex-product-content="artcraft-hosted"]) .hex-workspace-layout {
+  max-width: 78rem;
+  margin-inline: auto;
+  padding: clamp(.875rem, 2.5vw, 2rem);
+}
+:host([data-hex-product-content="artcraft-hosted"]) :is(.hex-installer-panel, [data-hex-local-tools]) {
+  color: var(--workspace-text);
+  background: var(--workspace-surface);
+  border: 1px solid var(--workspace-border);
+}
