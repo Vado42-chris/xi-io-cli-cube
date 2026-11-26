@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 spec = importlib.util.spec_from_file_location('hex_native', Path(__file__).with_name('verify-installed-snap55.py'))
@@ -17,7 +18,7 @@ spec.loader.exec_module(base)
 
 INITIALIZED_NAME = 'HEX software marketplace initialized'
 ARTCRAFT_TITLE = 'XI-IO Software'
-ARTCRAFT_INSTALL_ACTION = 'Review installation'
+ARTCRAFT_INSTALL_ACTION = 'REVIEW INSTALLATION'
 RETIRED_TITLE = 'XI-IO Ecosystem Component Catalog'
 UPSTREAM_TITLE = 'Craft App Suite'
 OCR_MAX_BYTES = 65536
@@ -98,34 +99,40 @@ def node_name(node):
     base.require(isinstance(name, str) and len(name) <= 4096, 'ACCESSIBILITY_NAME_BOUNDS')
     return ' '.join(name.split())
 
-def rendered_text_matches(text, retired=False):
+def rendered_text_matches(text, layout_text, retired=False):
     """Exact visible labels, with whitespace normalization only, never OCR repair."""
-    base.require(isinstance(text, str) and len(text.encode('utf-8')) <= OCR_MAX_BYTES,
-                 'RENDERED_OCR_TEXT_BOUNDS')
-    normalized = ' '.join(text.split())
     labels = (ARTCRAFT_TITLE, ARTCRAFT_INSTALL_ACTION, RETIRED_TITLE, UPSTREAM_TITLE)
-    matches = {label: len(re.findall(r'(?<![A-Za-z0-9])(?:' +
-               '|'.join(map(re.escape, (label, label.upper()) if label == ARTCRAFT_INSTALL_ACTION else (label,))) +
-               r')(?![A-Za-z0-9])', normalized)) for label in labels}
+    matches = {}
+    for mode, raw in (('primary', text), ('layout', layout_text)):
+        base.require(isinstance(raw, str) and len(raw.encode('utf-8')) <= OCR_MAX_BYTES,
+                     'RENDERED_OCR_TEXT_BOUNDS')
+        normalized = ' '.join(raw.split())
+        matches[mode] = {label: len(re.findall(r'(?<![A-Za-z0-9])' + re.escape(label) + r'(?![A-Za-z0-9])', normalized))
+                        for label in labels}
     expected = (RETIRED_TITLE,) if retired else (ARTCRAFT_TITLE, ARTCRAFT_INSTALL_ACTION)
     forbidden = (ARTCRAFT_TITLE, ARTCRAFT_INSTALL_ACTION, UPSTREAM_TITLE) if retired else (RETIRED_TITLE, UPSTREAM_TITLE)
+    assigned = {'primary': [RETIRED_TITLE] if retired else [ARTCRAFT_TITLE],
+                'layout': [] if retired else [ARTCRAFT_INSTALL_ACTION]}
     return {'normalization': 'whitespace-only', 'expected_labels': list(expected),
-            'forbidden_labels': list(forbidden), 'exact_match_counts': matches,
-            'expected_labels_observed_once': all(matches[label] == 1 for label in expected),
-            'forbidden_labels_absent': all(matches[label] == 0 for label in forbidden)}
+            'expected_pass_labels': assigned, 'forbidden_labels': list(forbidden), 'exact_match_counts': matches,
+            'expected_labels_observed_once': all(matches[mode][label] == 1 for mode in assigned for label in assigned[mode]),
+            'expected_labels_unique_in_each_pass': all(matches[mode][label] <= 1 for mode in matches for label in expected),
+            'forbidden_labels_absent': all(matches[mode][label] == 0 for mode in matches for label in forbidden)}
 
 def require_rendered_text(matches, retired=False):
     base.require(matches['forbidden_labels_absent'],
                  'RETIRED_DEV12_MIXED_RENDERED_CONTENT' if retired else 'ARTCRAFT_MIXED_RENDERED_CONTENT')
+    base.require(matches['expected_labels_unique_in_each_pass'],
+                 'RETIRED_DEV12_RENDERED_TEXT_AMBIGUOUS' if retired else 'ARTCRAFT_RENDERED_TEXT_AMBIGUOUS')
     base.require(matches['expected_labels_observed_once'],
                  'RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED' if retired else 'ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED')
 
-def read_ocr(crop, timeout, mode=11):
+def read_ocr(crop, timeout, page_segmentation_mode=11):
     """Use the fixed hosted executor and retain its uncorrected UTF-8 output."""
     executable = '/usr/bin/tesseract'
     base.require(Path(executable).is_file() and os.access(executable, os.X_OK), 'RENDERED_OCR_EXECUTOR_UNAVAILABLE')
     base.require(timeout > 0, 'INTERACTION_DEADLINE')
-    base.require(mode in (11, 3), 'RENDERED_OCR_MODE_INVALID')
+    base.require(type(page_segmentation_mode) is int and page_segmentation_mode in (11, 3), 'RENDERED_OCR_MODE_INVALID')
     environment = dict(os.environ)
     environment.pop('TESSDATA_PREFIX', None)
     environment['OMP_THREAD_LIMIT'] = '1'
@@ -134,7 +141,7 @@ def read_ocr(crop, timeout, mode=11):
         base.require(version.returncode == 0 and 0 < len(version.stdout) <= 4096, 'RENDERED_OCR_VERSION_UNVERIFIED')
         version_text = version.stdout.decode('utf-8').splitlines()[0]
         base.require(version_text.startswith('tesseract ') and len(version_text) <= 256, 'RENDERED_OCR_VERSION_UNVERIFIED')
-        result = subprocess.run([executable, str(crop), 'stdout', '-l', 'eng', '--psm', str(mode)],
+        result = subprocess.run([executable, str(crop), 'stdout', '-l', 'eng', '--psm', str(page_segmentation_mode)],
                                 capture_output=True, timeout=min(timeout, 15), env=environment)
         base.require(result.returncode == 0, 'RENDERED_OCR_EXECUTION_UNVERIFIED')
         base.require(len(result.stdout) <= OCR_MAX_BYTES, 'RENDERED_OCR_TEXT_BOUNDS')
@@ -184,28 +191,107 @@ class Software(base.Native):
         roles = [self.ax.Role.PUSH_BUTTON, self.ax.Role.PAGE_TAB]
         self.click(self.wait(lambda: self.find('Software', roles)))
 
-    def painted_capture(self, name, controls):
-        """Reuse the native deadline while prepaint pixels become observable."""
-        checker = Path(__file__).with_name('verify-hex-capture.py')
-        command = ['python3', '-I', '-B', str(checker), str(self.proof/(name + '.png'))]
-        def observe():
-            self.guard()
-            controls()
-            geometry = tuple(self.geometry)
-            try:
-                image = self.capture(name)
-            except subprocess.CalledProcessError as error:
-                category = error.stderr.strip() if isinstance(error.stderr, str) else ''
-                if error.cmd != command or category not in {'PNG_BLANK_OR_PREPAINT', 'PNG_FLAT_FRAME_NO_UI_TEXTURE'}:
-                    raise
-                self.guard()
-                controls()
-                raise base.Unverified(category) from None
-            self.guard()
-            base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
-            controls()
-            return image, geometry
-        return self.wait(observe)
+    def promote_attempt(self, parent, attempt, name):
+        reading = self.rendered_text_readback
+        files = {
+            name + '.png': reading['screenshot_sha256'],
+            name + '-owned-window.png': reading['crop_sha256'],
+            name + '-owned-window.ocr.txt': reading['raw_text_sha256'],
+            name + '-owned-window.layout.ocr.txt': reading['layout_pass']['raw_text_sha256'],
+        }
+        base.require(all(not (parent/file).exists() and not (parent/file).is_symlink() for file in files),
+                     'ARTCRAFT_PROOF_PATH_EXISTS')
+        for file, expected in files.items():
+            source, target = attempt/file, parent/file
+            base.require(file_digest(source) == expected, 'RENDERED_EVIDENCE_CHANGED')
+            with source.open('rb') as incoming, target.open('xb') as outgoing:
+                for chunk in iter(lambda: incoming.read(1024 * 1024), b''):
+                    outgoing.write(chunk)
+            base.require(file_digest(source) == file_digest(target) == expected, 'RENDERED_PROMOTION_MISMATCH')
+
+    def observe_rendered(self, name, controls, retired=False):
+        """Retry only prepaint or missing text, never reuse a previous frame."""
+        parent = self.proof
+        attempts = parent/(name + '-attempts')
+        manifest = parent/(name + '-attempts.json')
+        base.require(not attempts.exists() and not attempts.is_symlink()
+                     and not manifest.exists() and not manifest.is_symlink(), 'ARTCRAFT_PROOF_PATH_EXISTS')
+        attempts.mkdir(mode=0o700)
+        rows, accepted = [], None
+        retryable = {'PNG_BLANK_OR_PREPAINT', 'PNG_FLAT_FRAME_NO_UI_TEXTURE',
+                     'RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED' if retired else 'ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED'}
+        last = 'RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED' if retired else 'ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED'
+        try:
+            for index in range(1, 41):
+                base.require(time.monotonic() < self.deadline, 'INTERACTION_DEADLINE')
+                attempt = Path(tempfile.mkdtemp(prefix=f'{index:02d}-', dir=attempts))
+                self.proof = attempt
+                if hasattr(self, 'rendered_text_readback'):
+                    del self.rendered_text_readback
+                error, image, observed = None, None, None
+                self.stage = 'software-retired-body-capture' if retired else 'software-initialized-capture'
+                try:
+                    self.guard()
+                    controls()
+                    geometry = tuple(self.geometry)
+                    image = self.capture(name)
+                    self.guard()
+                    base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
+                    controls()
+                    self.stage = 'software-retired-rendered-title' if retired else 'software-rendered-xiio-content'
+                    self.rendered_content(name, image, geometry, retired=retired)
+                    self.guard()
+                    base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
+                    observed = controls()
+                except subprocess.CalledProcessError as failure:
+                    checker = Path(__file__).with_name('verify-hex-capture.py')
+                    command = ['python3', '-I', '-B', str(checker), str(attempt/(name + '.png'))]
+                    category = failure.stderr.strip() if isinstance(failure.stderr, str) else ''
+                    error = base.Unverified(category) if failure.cmd == command and category in {'PNG_BLANK_OR_PREPAINT', 'PNG_FLAT_FRAME_NO_UI_TEXTURE'} else failure
+                except Exception as failure:
+                    error = failure
+                finally:
+                    self.proof = parent
+                category = str(error) if isinstance(error, base.Unverified) else type(error).__name__ if error else None
+                can_retry = isinstance(error, base.Unverified) and category in retryable
+                record = {'schema': 'xiio.hex.rendered-artcraft-attempt/v1', 'attempt': index,
+                          'outcome': 'RETRYABLE' if can_retry else 'REFUSED' if error else 'OBSERVED',
+                          'failure_category': category,
+                          'files': {path.name: {'bytes': path.stat().st_size, 'sha256': file_digest(path)}
+                                    for path in sorted(attempt.iterdir()) if path.is_file()}}
+                if hasattr(self, 'rendered_text_readback'):
+                    record['rendered_text_readback'] = self.rendered_text_readback
+                record_path = attempt/'attempt.json'
+                with record_path.open('x') as stream:
+                    json.dump(record, stream, sort_keys=True)
+                rows.append({'attempt': index, 'directory': attempt.relative_to(parent).as_posix(),
+                             'outcome': record['outcome'], 'failure_category': category,
+                             'record_sha256': file_digest(record_path)})
+                if error:
+                    if not can_retry:
+                        raise error
+                    # A missing pixel/text result never excuses changed authority
+                    # or controls before another capture is attempted.
+                    self.guard()
+                    controls()
+                    last = category
+                    base.require(time.monotonic() < self.deadline, 'INTERACTION_DEADLINE')
+                    if index < 40:
+                        time.sleep(.2)
+                    continue
+                self.promote_attempt(parent, attempt, name)
+                accepted = attempt.relative_to(parent).as_posix()
+                return image, observed
+            raise base.Unverified(last)
+        finally:
+            self.proof = parent
+            summary = {'schema': 'xiio.hex.rendered-artcraft-attempts/v1', 'max_attempts': 40,
+                       'accepted_attempt': accepted, 'attempts': rows}
+            with manifest.open('x') as stream:
+                json.dump(summary, stream, sort_keys=True)
+            self.rendered_attempts = {'manifest_file': manifest.name, 'manifest_sha256': file_digest(manifest),
+                                     'attempts_directory': attempts.name, 'attempt_count': len(rows),
+                                     'accepted_attempt': accepted}
 
     def rendered_content(self, name, screenshot_sha, geometry, retired=False):
         """Read only the owned window pixels from this guarded fresh capture."""
@@ -241,44 +327,41 @@ class Software(base.Native):
             self.command(['python3', '-I', '-B', str(Path(__file__).with_name('verify-hex-capture.py')), str(crop)])
         except (OSError, subprocess.SubprocessError):
             raise base.Unverified('RENDERED_WINDOW_PIXELS_UNVERIFIED') from None
-        def observed_pass(mode, filename):
-            args = (crop, self.deadline - time.monotonic())
-            text, raw, version = read_ocr(*args) if mode == 11 else read_ocr(*args, mode=mode)
-            path = self.proof/filename
-            with path.open('xb') as stream:
-                stream.write(raw)
-            return {'page_segmentation_mode': mode, 'backend_version': version,
-                    'raw_text_file': path.name, 'raw_text_sha256': base.sha(raw),
-                    'raw_text_bytes': len(raw), 'raw_text': text,
-                    **rendered_text_matches(text, retired=retired)}
-        primary = observed_pass(11, name + '-owned-window.ocr.txt')
-        passes = [primary]
-        # A second segmentation of the same bytes may recover a high-contrast
-        # CTA missed by sparse text recognition, never by joining different frames.
-        if not retired and primary['forbidden_labels_absent'] and not primary['expected_labels_observed_once']:
-            self.guard()
-            base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
-            base.require(file_digest(crop) == crop_sha, 'RENDERED_EVIDENCE_CHANGED')
-            passes.append(observed_pass(3, name + '-owned-window.ocr-psm3.txt'))
-        counts = {label: max(row['exact_match_counts'][label] for row in passes)
-                  for label in primary['exact_match_counts']}
+        text, raw, version = read_ocr(crop, self.deadline - time.monotonic(), page_segmentation_mode=11)
+        text_path = self.proof/(name + '-owned-window.ocr.txt')
+        with text_path.open('xb') as stream:
+            stream.write(raw)
+        text_sha = base.sha(raw)
+        self.guard()
+        base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
+        base.require(file_digest(screenshot) == screenshot_sha and file_digest(crop) == crop_sha,
+                     'RENDERED_EVIDENCE_CHANGED')
+        layout_text, layout_raw, layout_version = read_ocr(crop, self.deadline - time.monotonic(), page_segmentation_mode=3)
+        base.require(layout_version == version, 'RENDERED_OCR_EXECUTOR_CHANGED')
+        layout_path = self.proof/(name + '-owned-window.layout.ocr.txt')
+        with layout_path.open('xb') as stream:
+            stream.write(layout_raw)
+        layout_sha = base.sha(layout_raw)
         self.rendered_text_readback = {
-            'schema': 'xiio.hex.rendered-artcraft-text/v1', 'content_verified': False,
+            'schema': 'xiio.hex.rendered-artcraft-text/v2', 'content_verified': False,
             'observation_mode': 'retired-dev12' if retired else 'candidate',
-            'backend': 'tesseract', 'language': 'eng',
+            'backend': 'tesseract', 'backend_version': version, 'language': 'eng', 'page_segmentation_mode': 11,
             'screenshot_file': screenshot.name, 'screenshot_sha256': screenshot_sha,
             'screenshot_dimensions': list(size), 'owned_window_geometry': list(geometry),
             'crop_file': crop.name, 'crop_sha256': crop_sha, 'crop_rectangle': [x, y, width, height],
-            'image_transform': 'owned-window-crop-only', **primary, 'ocr_passes': passes,
-            'exact_match_counts': counts,
-            'expected_labels_observed_once': all(counts[label] == 1 for label in primary['expected_labels']),
-            'forbidden_labels_absent': all(counts[label] == 0 for label in primary['forbidden_labels']),
+            'image_transform': 'owned-window-crop-only',
+            'raw_text_file': text_path.name, 'raw_text_sha256': text_sha, 'raw_text_bytes': len(raw), 'raw_text': text,
+            'layout_pass': {'backend': 'tesseract', 'backend_version': layout_version, 'language': 'eng',
+                            'page_segmentation_mode': 3, 'crop_sha256': crop_sha,
+                            'raw_text_file': layout_path.name, 'raw_text_sha256': layout_sha,
+                            'raw_text_bytes': len(layout_raw), 'raw_text': layout_text},
+            **rendered_text_matches(text, layout_text, retired=retired),
         }
         self.guard()
         base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
         base.require(file_digest(screenshot) == screenshot_sha and file_digest(crop) == crop_sha
-                     and all(file_digest(self.proof/row['raw_text_file']) == row['raw_text_sha256']
-                             for row in passes), 'RENDERED_EVIDENCE_CHANGED')
+                     and file_digest(text_path) == text_sha and file_digest(layout_path) == layout_sha,
+                     'RENDERED_EVIDENCE_CHANGED')
         require_rendered_text(self.rendered_text_readback, retired=retired)
         self.rendered_text_readback['content_verified'] = True
 
@@ -286,12 +369,7 @@ class Software(base.Native):
         self.open_software()
         self.stage = 'software-generated-module-initialization'
         self.wait(self.initialized)
-        self.stage = 'software-initialized-capture'
-        image, geometry = self.painted_capture('software-initialized', self.initialized)
-        self.stage = 'software-rendered-xiio-content'
-        self.rendered_content('software-initialized', image, geometry)
-        self.guard()
-        self.initialized()
+        image, _ = self.observe_rendered('software-initialized', self.initialized)
         return image
 
     def retired_controls(self):
@@ -317,23 +395,7 @@ class Software(base.Native):
         self.open_software()
         self.stage = 'software-retired-reference-readback'
         self.wait(self.retired_controls)
-        self.stage = 'software-retired-body-capture'
-        for attempt in range(4):
-            name = 'software-retired-dev12' if attempt == 0 else f'software-retired-dev12-attempt-{attempt+1}'
-            image, geometry = self.painted_capture(name, self.retired_controls)
-            self.stage = 'software-retired-rendered-title'
-            try:
-                self.rendered_content(name, image, geometry, retired=True)
-            except base.Unverified as error:
-                if str(error) != 'RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED' or attempt == 3:
-                    raise
-                self.guard()
-                self.retired_controls()
-                base.require(time.monotonic() < self.deadline, 'INTERACTION_DEADLINE')
-                time.sleep(.2)
-                continue
-            self.guard()
-            return image, self.retired_controls()
+        return self.observe_rendered('software-retired-dev12', self.retired_controls, retired=True)
 
 def main():
     args = sys.argv[1:]
@@ -406,8 +468,14 @@ def main():
         receipt['last_stage'] = native.stage
         if hasattr(native, 'rendered_text_readback'):
             receipt['rendered_text_readback'] = native.rendered_text_readback
+        if hasattr(native, 'rendered_attempts'):
+            receipt['rendered_attempts'] = native.rendered_attempts
         if code != 0:
-            try: receipt['failure_screenshot_sha256'] = native.capture('software-retired-dev12-unverified' if retired else 'software-unverified')
+            try:
+                name = 'software-retired-dev12-unverified' if retired else 'software-unverified'
+                base.require(proof is not None and not (proof/(name+'.png')).exists()
+                             and not (proof/(name+'.png')).is_symlink(), 'ARTCRAFT_PROOF_PATH_EXISTS')
+                receipt['failure_screenshot_sha256'] = native.capture(name)
             except Exception: receipt['failure_capture_verified'] = False
     if proof is not None:
         path = proof/('hex-dev12-ui-red.json' if retired else 'software-initialization.json')

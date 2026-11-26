@@ -235,34 +235,48 @@ class RetiredBody(unittest.TestCase):
             self.assertEqual(receipt['failure_category'],'PNG_BLANK_OR_PREPAINT')
 
 class RenderedText(unittest.TestCase):
-    positive = 'XI-IO Software\nXI-IO CLI\nReview installation'
+    positive = 'XI-IO Software\nXI-IO CLI\nREVIEW INSTALLATION'
     retired = 'XI-IO Ecosystem Component Catalog\nXI-IO CLI\nXI-IO Code Editor'
-    def check(self,text,retired=False):
-        result=m.rendered_text_matches(text,retired=retired)
+    def check(self,text,retired=False,layout=None):
+        result=m.rendered_text_matches(text,text if layout is None else layout,retired=retired)
         m.require_rendered_text(result,retired=retired)
         return result
     def test_current_canvas_requires_both_actual_labels(self):
-        result=self.check('XI-IO\nSoftware\nReview\ninstallation')
-        self.assertEqual(result['expected_labels'],['XI-IO Software','Review installation'])
-        for text in ['', '   \n', 'XI-IO Software', 'Review installation', 'XI-IO Software Review installation Review installation']:
+        result=self.check('XI-IO\nSoftware',layout='REVIEW\nINSTALLATION')
+        self.assertEqual(result['expected_labels'],['XI-IO Software','REVIEW INSTALLATION'])
+        for text in ['', '   \n', 'XI-IO Software', 'REVIEW INSTALLATION']:
             with self.subTest(text=text),self.assertRaisesRegex(m.base.Unverified,'^ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED$'):
                 self.check(text)
     def test_current_canvas_refuses_retired_or_upstream_mixture(self):
         for title in (m.RETIRED_TITLE,m.UPSTREAM_TITLE):
-            with self.subTest(title=title),self.assertRaisesRegex(m.base.Unverified,'^ARTCRAFT_MIXED_RENDERED_CONTENT$'):
-                self.check(self.positive+'\n'+title)
+            for mode in ('primary','layout'):
+                with self.subTest(title=title,mode=mode),self.assertRaisesRegex(m.base.Unverified,'^ARTCRAFT_MIXED_RENDERED_CONTENT$'):
+                    self.check(self.positive+('\n'+title if mode=='primary' else ''),layout=self.positive+('\n'+title if mode=='layout' else ''))
     def test_no_fuzzy_brand_or_action_repairs(self):
-        for text in ['XI-1O Software Review installation','xi-io software Review installation','XI-IO Software Review instal1ation','XI-IO Softwares Review installation']:
+        for text in ['XI-1O Software REVIEW INSTALLATION','xi-io software REVIEW INSTALLATION','XI-IO Software REVIEW INSTALLAT1ON','XI-IO Softwares REVIEW INSTALLATION','XI-IO Software Review installation','XI-IO Software Installation review available']:
             with self.subTest(text=text),self.assertRaises(m.base.Unverified):self.check(text)
     def test_dev12_requires_its_actual_title_without_current_or_upstream_content(self):
         result=self.check(self.retired,retired=True)
         self.assertEqual(result['expected_labels'],[m.RETIRED_TITLE])
-        for text in ['', 'XI-IO CLI XI-IO Code Editor', m.RETIRED_TITLE+' '+m.RETIRED_TITLE]:
+        for text in ['', 'XI-IO CLI XI-IO Code Editor']:
             with self.subTest(text=text),self.assertRaisesRegex(m.base.Unverified,'^RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED$'):
                 self.check(text,retired=True)
         for forbidden in (m.ARTCRAFT_TITLE,m.ARTCRAFT_INSTALL_ACTION,m.UPSTREAM_TITLE):
-            with self.subTest(forbidden=forbidden),self.assertRaisesRegex(m.base.Unverified,'^RETIRED_DEV12_MIXED_RENDERED_CONTENT$'):
-                self.check(self.retired+'\n'+forbidden,retired=True)
+            for mode in ('primary','layout'):
+                with self.subTest(forbidden=forbidden,mode=mode),self.assertRaisesRegex(m.base.Unverified,'^RETIRED_DEV12_MIXED_RENDERED_CONTENT$'):
+                    self.check(self.retired+('\n'+forbidden if mode=='primary' else ''),retired=True,layout=self.retired+('\n'+forbidden if mode=='layout' else ''))
+    def test_duplicate_expected_text_in_either_pass_is_ambiguous(self):
+        for retired in (False,True):
+            good=self.retired if retired else self.positive
+            code='RETIRED_DEV12_RENDERED_TEXT_AMBIGUOUS' if retired else 'ARTCRAFT_RENDERED_TEXT_AMBIGUOUS'
+            for mode in ('primary','layout'):
+                with self.subTest(retired=retired,mode=mode),self.assertRaisesRegex(m.base.Unverified,'^'+code+'$'):
+                    self.check(good+('\n'+good if mode=='primary' else ''),retired=retired,layout=good+('\n'+good if mode=='layout' else ''))
+    def test_labels_must_be_read_by_their_assigned_pass(self):
+        with self.assertRaisesRegex(m.base.Unverified,'^ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED$'):
+            self.check('REVIEW INSTALLATION',layout='XI-IO Software')
+        with self.assertRaisesRegex(m.base.Unverified,'^RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED$'):
+            self.check('Setup',retired=True,layout=self.retired)
     def test_ocr_text_has_a_byte_budget(self):
         with self.assertRaisesRegex(m.base.Unverified,'^RENDERED_OCR_TEXT_BOUNDS$'):
             self.check('\u00e9'*(m.OCR_MAX_BYTES//2+1))
@@ -270,7 +284,7 @@ class RenderedText(unittest.TestCase):
 class OcrExecutor(unittest.TestCase):
     def completed(self,stdout,code=0):return m.subprocess.CompletedProcess([],code,stdout,b'')
     def test_fixed_executor_preserves_raw_output_and_records_version(self):
-        raw=b'XI-IO Software\nReview installation\n\x0c'
+        raw=b'XI-IO Software\nREVIEW INSTALLATION\n\x0c'
         with patch.object(m.Path,'is_file',return_value=True),patch.object(m.os,'access',return_value=True),patch.object(m.subprocess,'run',side_effect=[self.completed(b'tesseract 5.5.0\n'),self.completed(raw)]) as run:
             text,observed,version=m.read_ocr(Path('/tmp/owned-window.png'),20)
         self.assertEqual((text,observed,version),(raw.decode(),raw,'tesseract 5.5.0'))
@@ -296,7 +310,7 @@ class RenderedCapture(unittest.TestCase):
         self.image=Image.new('RGB',(640,480),(20,30,40))
         self.path=self.root/'fixture.png';self.image.save(self.path)
         self.digest=m.file_digest(self.path)
-    def observe(self,raw=b'XI-IO Software\nReview installation\n',retired=False):
+    def observe(self,raw=b'XI-IO Software\nREVIEW INSTALLATION\n',retired=False):
         with patch.object(m,'read_ocr',return_value=(raw.decode(),raw,'tesseract fixture')):
             self.native.rendered_content('fixture',self.digest,self.native.geometry,retired=retired)
     def test_exact_crop_and_uncorrected_text_bind_to_the_whole_capture(self):
@@ -310,30 +324,13 @@ class RenderedCapture(unittest.TestCase):
         self.assertEqual(receipt['crop_sha256'],m.file_digest(self.root/receipt['crop_file']))
         self.assertEqual(receipt['raw_text_sha256'],m.file_digest(self.root/receipt['raw_text_file']))
         self.assertEqual(receipt['raw_text_bytes'],len(receipt['raw_text'].encode()))
+        layout=receipt['layout_pass']
+        self.assertEqual(layout['page_segmentation_mode'],3)
+        self.assertEqual(layout['crop_sha256'],receipt['crop_sha256'])
+        self.assertEqual(layout['raw_text_sha256'],m.file_digest(self.root/layout['raw_text_file']))
+        self.assertEqual(layout['raw_text_bytes'],len(layout['raw_text'].encode()))
         with Image.open(self.root/receipt['crop_file']) as crop:
             self.assertEqual(crop.tobytes(),self.image.crop((40,30,440,330)).tobytes())
-    def test_complementary_ocr_is_from_one_crop_and_keeps_exact_labels(self):
-        words = [b'XI-IO Software\n', b'REVIEW INSTALLATION\n']
-        with patch.object(m, 'read_ocr', side_effect=[(w.decode(), w, 'tesseract fixture') for w in words]) as read:
-            self.native.rendered_content('fixture', self.digest, self.native.geometry)
-        calls = read.call_args_list
-        self.assertEqual(calls[0].args[0], calls[1].args[0])
-        self.assertEqual(calls[1].kwargs, {'mode': 3})
-        receipt = self.native.rendered_text_readback
-        self.assertTrue(receipt['content_verified'])
-        self.assertEqual([row['raw_text'].encode() for row in receipt['ocr_passes']], words)
-        self.assertEqual(receipt['exact_match_counts']['Review installation'], 1)
-
-    def test_secondary_pass_cannot_hide_mixed_or_duplicate_pixels(self):
-        for label, expected in [('Craft App Suite', 'ARTCRAFT_MIXED_RENDERED_CONTENT'),
-                                ('REVIEW INSTALLATION', 'ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED')]:
-            with self.subTest(label=label):
-                name = 'fixture-' + expected.lower()
-                shutil.copyfile(self.path, self.root/(name+'.png'))
-                words = [b'XI-IO Software\n', ('REVIEW INSTALLATION\n'+label).encode()]
-                with patch.object(m, 'read_ocr', side_effect=[(w.decode(), w, 'tesseract fixture') for w in words]), self.assertRaisesRegex(m.base.Unverified, '^'+expected+'$'):
-                    self.native.rendered_content(name, self.digest, self.native.geometry)
-
     def test_screenshot_identity_and_window_geometry_cannot_drift(self):
         with patch.object(m,'read_ocr') as ocr,self.assertRaisesRegex(m.base.Unverified,'^RENDERED_SCREENSHOT_DIGEST_MISMATCH$'):
             self.native.rendered_content('fixture','f'*64,self.native.geometry)
@@ -358,16 +355,38 @@ class RenderedCapture(unittest.TestCase):
         receipt=self.native.rendered_text_readback
         self.assertFalse(receipt['content_verified'])
         self.assertEqual(receipt['raw_text'],'XI-IO Software\n')
-        self.assertEqual(receipt['exact_match_counts']['Review installation'],0)
+        self.assertEqual(receipt['exact_match_counts']['layout']['REVIEW INSTALLATION'],0)
     def test_post_ocr_window_change_cannot_qualify_prior_pixels(self):
         count=0
         def guard():
             nonlocal count
             count+=1
-            if count==2:self.native.geometry=(41,30,400,300)
+            if count==3:self.native.geometry=(41,30,400,300)
         self.native.guard=guard
         with self.assertRaisesRegex(m.base.Unverified,'^RENDERED_WINDOW_GEOMETRY_CHANGED$'):self.observe()
         self.assertFalse(self.native.rendered_text_readback['content_verified'])
+    def test_crop_mutation_between_passes_prevents_the_layout_read(self):
+        def primary(crop,timeout,page_segmentation_mode):
+            self.assertEqual(page_segmentation_mode,11)
+            crop.write_bytes(b'changed after primary OCR')
+            return 'XI-IO Software',b'XI-IO Software','tesseract fixture'
+        with patch.object(m,'read_ocr',side_effect=primary) as ocr,self.assertRaisesRegex(m.base.Unverified,'^RENDERED_EVIDENCE_CHANGED$'):
+            self.native.rendered_content('fixture',self.digest,self.native.geometry)
+        self.assertEqual(ocr.call_count,1)
+    def test_complementary_ocr_is_from_one_crop_and_keeps_exact_labels(self):
+        # Preserve e54fef61's complementary-pass regression under the explicit
+        # v2 pass assignments and separately retained raw-text identities.
+        outputs=[('XI-IO Software',b'XI-IO Software','tesseract fixture'),('REVIEW INSTALLATION',b'REVIEW INSTALLATION','tesseract fixture')]
+        with patch.object(m,'read_ocr',side_effect=outputs) as ocr:
+            self.native.rendered_content('fixture',self.digest,self.native.geometry)
+        self.assertEqual(ocr.call_count,2)
+        self.assertEqual(ocr.call_args_list[0].args[0],ocr.call_args_list[1].args[0])
+        self.assertEqual([call.kwargs['page_segmentation_mode'] for call in ocr.call_args_list],[11,3])
+        self.assertTrue(self.native.rendered_text_readback['content_verified'])
+        reading=self.native.rendered_text_readback
+        self.assertEqual([reading['raw_text'].encode(),reading['layout_pass']['raw_text'].encode()],
+                         [b'XI-IO Software',b'REVIEW INSTALLATION'])
+        self.assertEqual(reading['exact_match_counts']['layout']['REVIEW INSTALLATION'],1)
     def test_ocr_and_title_failures_keep_retired_red_false(self):
         for category in ('RENDERED_OCR_EXECUTOR_UNAVAILABLE','RENDERED_WINDOW_PIXELS_UNVERIFIED','RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED','RETIRED_DEV12_MIXED_RENDERED_CONTENT'):
             class Native:
@@ -382,32 +401,6 @@ class RenderedCapture(unittest.TestCase):
                 self.assertFalse(receipt['red_established']);self.assertFalse(receipt['initialization_observed'])
                 self.assertFalse(receipt['xiio_catalog_rendered']);self.assertFalse(receipt['domain_action_verified'])
                 self.assertEqual(receipt['failure_category'],category)
-
-class RetiredRenderedRetry(unittest.TestCase):
-    def test_only_missing_title_retries_with_a_fresh_frame(self):
-        native = m.Software.__new__(m.Software)
-        native.deadline = time.monotonic()+30
-        native.guard = Mock()
-        native.open_software = Mock()
-        native.retired_controls = Mock(return_value=['old'])
-        native.painted_capture = Mock(side_effect=[('first', (1, 2, 3, 4)), ('second', (1, 2, 3, 4))])
-        native.rendered_content = Mock(side_effect=[m.base.Unverified('RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED'), None])
-        with patch.object(m.time, 'sleep'):
-            self.assertEqual(native.run_retired(), ('second', ['old']))
-        self.assertEqual([c.args[0] for c in native.painted_capture.call_args_list],
-                         ['software-retired-dev12', 'software-retired-dev12-attempt-2'])
-
-    def test_mixed_title_is_terminal(self):
-        native = m.Software.__new__(m.Software)
-        native.deadline = time.monotonic()+30
-        native.guard = Mock()
-        native.open_software = Mock()
-        native.retired_controls = Mock(return_value=['old'])
-        native.painted_capture = Mock(return_value=('frame', (1, 2, 3, 4)))
-        native.rendered_content = Mock(side_effect=m.base.Unverified('RETIRED_DEV12_MIXED_RENDERED_CONTENT'))
-        with self.assertRaisesRegex(m.base.Unverified,'^RETIRED_DEV12_MIXED_RENDERED_CONTENT$'):
-            native.run_retired()
-        self.assertEqual(native.painted_capture.call_count, 1)
 
 class PaintedCapture(unittest.TestCase):
     def setUp(self):
@@ -428,6 +421,7 @@ class PaintedCapture(unittest.TestCase):
         native.initialized=Mock(return_value=True)
         native.retired_controls=Mock(return_value=[{'fixture':'retired controls'}])
         native.rendered_content=Mock()
+        native.promote_attempt=Mock()
         native.capture_count=0
         def command(args):
             if args[0]=='scrot':
@@ -491,5 +485,96 @@ class PaintedCapture(unittest.TestCase):
         with patch.object(m.base.time,'sleep'):native.run_retired()
         self.assertEqual(native.capture_count,2)
         self.assertEqual(native.rendered_content.call_args.args[2],(5,6,600,450))
+
+class SameFrameAttempts(unittest.TestCase):
+    setUp=PaintedCapture.setUp
+    native=PaintedCapture.native
+    def real_reader(self):
+        native=self.native([self.painted])
+        native.rendered_content=lambda *args,**kwargs:m.Software.rendered_content(native,*args,**kwargs)
+        native.promote_attempt=lambda *args:m.Software.promote_attempt(native,*args)
+        return native
+    def ocr(self,text):
+        raw=text.encode()
+        return text,raw,'tesseract fixture'
+    def test_only_missing_title_retries_with_a_fresh_frame(self):
+        # e54fef61's fresh-retired-frame regression also verifies canonical
+        # promotion and immutable failed-attempt custody in v2.
+        native=self.real_reader()
+        def ocr(crop,timeout,page_segmentation_mode):
+            self.assertEqual(crop.parent,native.proof)
+            return self.ocr('Setup Local Installation' if native.capture_count==1 else m.RETIRED_TITLE)
+        with patch.object(m,'read_ocr',side_effect=ocr),patch.object(m.base.time,'sleep'):
+            native.run_retired()
+        self.assertEqual(native.capture_count,2)
+        manifest=json.loads((self.root/native.rendered_attempts['manifest_file']).read_text())
+        self.assertEqual([row['outcome'] for row in manifest['attempts']],['RETRYABLE','OBSERVED'])
+        first,second=[self.root/row['directory'] for row in manifest['attempts']]
+        self.assertNotEqual(first,second)
+        self.assertEqual((first/'software-retired-dev12-owned-window.ocr.txt').read_text(),'Setup Local Installation')
+        self.assertEqual((second/'software-retired-dev12-owned-window.ocr.txt').read_text(),m.RETIRED_TITLE)
+        self.assertEqual(manifest['accepted_attempt'],second.relative_to(self.root).as_posix())
+        for name in ['software-retired-dev12.png','software-retired-dev12-owned-window.png','software-retired-dev12-owned-window.ocr.txt','software-retired-dev12-owned-window.layout.ocr.txt']:
+            self.assertEqual((self.root/name).read_bytes(),(second/name).read_bytes())
+    def test_secondary_pass_cannot_hide_mixed_or_duplicate_pixels(self):
+        # Preserve e54fef61's mixed/duplicate secondary-pass cases, with a
+        # distinct terminal duplicate category rather than a retryable absence.
+        for extra,code in [(m.UPSTREAM_TITLE,'ARTCRAFT_MIXED_RENDERED_CONTENT'),(m.ARTCRAFT_INSTALL_ACTION+' '+m.ARTCRAFT_INSTALL_ACTION,'ARTCRAFT_RENDERED_TEXT_AMBIGUOUS')]:
+            with self.subTest(code=code),tempfile.TemporaryDirectory() as directory:
+                native=self.real_reader();native.proof=Path(directory)
+                def ocr(crop,timeout,page_segmentation_mode):
+                    return self.ocr(m.ARTCRAFT_TITLE if page_segmentation_mode==11 else m.ARTCRAFT_INSTALL_ACTION+' '+extra)
+                with patch.object(m,'read_ocr',side_effect=ocr),patch.object(m.base.time,'sleep'),self.assertRaisesRegex(m.base.Unverified,'^'+code+'$'):
+                    native.run()
+                self.assertEqual(native.capture_count,1)
+                manifest=json.loads((native.proof/native.rendered_attempts['manifest_file']).read_text())
+                self.assertIsNone(manifest['accepted_attempt'])
+                self.assertEqual(manifest['attempts'][0]['outcome'],'REFUSED')
+    def test_mixed_title_is_terminal(self):
+        # Preserve e54fef61's retired-loop terminal check; a duplicate retired
+        # title is also terminal, never treated as a missing title to retry.
+        for duplicate,code in [(False,'RETIRED_DEV12_MIXED_RENDERED_CONTENT'),(True,'RETIRED_DEV12_RENDERED_TEXT_AMBIGUOUS')]:
+            with self.subTest(code=code),tempfile.TemporaryDirectory() as directory:
+                native=self.real_reader();native.proof=Path(directory)
+                def ocr(crop,timeout,page_segmentation_mode):
+                    text=m.RETIRED_TITLE
+                    if duplicate and page_segmentation_mode==11:text+=' '+m.RETIRED_TITLE
+                    if not duplicate and page_segmentation_mode==3:text+=' '+m.ARTCRAFT_TITLE
+                    return self.ocr(text)
+                with patch.object(m,'read_ocr',side_effect=ocr),patch.object(m.base.time,'sleep'),self.assertRaisesRegex(m.base.Unverified,'^'+code+'$'):
+                    native.run_retired()
+                self.assertEqual(native.capture_count,1)
+                manifest=json.loads((native.proof/native.rendered_attempts['manifest_file']).read_text())
+                self.assertIsNone(manifest['accepted_attempt'])
+                self.assertEqual(manifest['attempts'][0]['outcome'],'REFUSED')
+                self.assertFalse((native.proof/'software-retired-dev12.png').exists())
+    def test_existing_final_evidence_is_never_overwritten(self):
+        native=self.real_reader()
+        original=self.root/'software-retired-dev12.png';original.write_bytes(b'foreign proof')
+        with patch.object(m,'read_ocr',return_value=self.ocr(m.RETIRED_TITLE)),patch.object(m.base.time,'sleep'),self.assertRaisesRegex(m.base.Unverified,'^ARTCRAFT_PROOF_PATH_EXISTS$'):
+            native.run_retired()
+        self.assertEqual(original.read_bytes(),b'foreign proof')
+        self.assertFalse((self.root/'software-retired-dev12-owned-window.png').exists())
+        manifest=json.loads((self.root/native.rendered_attempts['manifest_file']).read_text())
+        self.assertIsNone(manifest['accepted_attempt'])
+    def test_persistent_missing_text_exhausts_only_forty_distinct_attempts(self):
+        native=self.real_reader()
+        # Pixels are already covered by the actual checker tests above. This
+        # fixture isolates the bounded semantic retry and retained file custody.
+        def command(args):
+            if args[0]=='scrot':
+                native.capture_count+=1
+                shutil.copyfile(self.painted,args[-1])
+            return ''
+        native.command=command
+        with patch.object(m,'read_ocr',return_value=self.ocr('Setup Local Installation')),patch.object(m.base.time,'sleep'),self.assertRaisesRegex(m.base.Unverified,'^RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED$'):
+            native.run_retired()
+        self.assertEqual(native.capture_count,40)
+        manifest=json.loads((self.root/native.rendered_attempts['manifest_file']).read_text())
+        self.assertEqual(len(manifest['attempts']),40)
+        self.assertEqual(len({row['directory'] for row in manifest['attempts']}),40)
+        self.assertIsNone(manifest['accepted_attempt'])
+        self.assertFalse((self.root/'software-retired-dev12.png').exists())
+        self.assertFalse(native.rendered_text_readback['content_verified'])
 
 if __name__=='__main__':unittest.main()

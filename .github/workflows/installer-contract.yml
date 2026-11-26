@@ -314,9 +314,13 @@ jobs:
           '
           observed=$?
           set -e
-          for name in software-initialization.json software-initialized.png software-initialized-owned-window.png software-initialized-owned-window.ocr.txt software-unverified.png software-unqualified.png; do
+          for name in software-initialization.json software-initialized.png software-initialized-owned-window.png software-initialized-owned-window.ocr.txt software-initialized-owned-window.layout.ocr.txt software-initialized-attempts.json software-unverified.png software-unqualified.png; do
             if test -f "$work/$name"; then cp "$work/$name" "$name"; fi
           done
+          if test -d "$work/software-initialized-attempts"; then
+            test ! -e software-initialized-attempts && test ! -L software-initialized-attempts
+            cp -R -- "$work/software-initialized-attempts" software-initialized-attempts
+          fi
           if test -f "$work/stderr.log"; then cp "$work/stderr.log" maths-installed-window.stderr.log; fi
           if test -f "$work/stdout.log"; then cp "$work/stdout.log" maths-installed-window.stdout.log; fi
           test "$observed" -eq 0 || exit "$observed"
@@ -409,9 +413,13 @@ jobs:
                   'package_installed':False,'pop_os_acceptance':False,
                   'product_install_actions_performed':False,'release_promotion':False},indent=2)+'\n')
           PY
-          for name in hex-dev12-ui-red.json software-retired-dev12.png software-retired-dev12-owned-window.png software-retired-dev12-owned-window.ocr.txt software-retired-dev12-unverified.png hex-dev12-unqualified.png hex-dev12-executor.log hex-dev12-package.sha256; do
+          for name in hex-dev12-ui-red.json software-retired-dev12.png software-retired-dev12-owned-window.png software-retired-dev12-owned-window.ocr.txt software-retired-dev12-owned-window.layout.ocr.txt software-retired-dev12-attempts.json software-retired-dev12-unverified.png hex-dev12-unqualified.png hex-dev12-executor.log hex-dev12-package.sha256; do
             if test -f "$work/$name"; then cp "$work/$name" "$name"; fi
           done
+          if test -d "$work/software-retired-dev12-attempts"; then
+            test ! -e software-retired-dev12-attempts && test ! -L software-retired-dev12-attempts
+            cp -R -- "$work/software-retired-dev12-attempts" software-retired-dev12-attempts
+          fi
           if test -f "$work/stderr.log"; then cp "$work/stderr.log" hex-dev12-native.stderr.log; fi
           if test -f "$work/stdout.log"; then cp "$work/stdout.log" hex-dev12-native.stdout.log; fi
           cat hex-dev12-executor.log
@@ -437,15 +445,18 @@ jobs:
             software-initialized.png
             software-initialized-owned-window.png
             software-initialized-owned-window.ocr.txt
-            software-initialized-owned-window.ocr-psm3.txt
+            software-initialized-owned-window.layout.ocr.txt
+            software-initialized-attempts.json
+            software-initialized-attempts/
             software-unverified.png
             software-unqualified.png
             hex-dev12-ui-red.json
             software-retired-dev12.png
             software-retired-dev12-owned-window.png
             software-retired-dev12-owned-window.ocr.txt
-            software-retired-dev12-attempt-*.png
-            software-retired-dev12-attempt-*.ocr.txt
+            software-retired-dev12-owned-window.layout.ocr.txt
+            software-retired-dev12-attempts.json
+            software-retired-dev12-attempts/
             software-retired-dev12-unverified.png
             hex-dev12-unqualified.png
             hex-dev12-executor.log
