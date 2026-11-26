@@ -82,7 +82,7 @@ for (const native of [false, true]) test('Software to CLI installation preserves
     assert.equal(panel.closest('[hidden]'), null);
     assert.equal(panel.querySelector('[aria-label="Installation folder"]'), folder);
     if (native) assert.equal(folder.value, '/fixture/selected-cli');
-    assert.equal(productOpenRequests.length, native ? 1 : 0, 'navigation does not reopen an unbound product');
+    assert.equal(productOpenRequests.length, 0, 'navigation never opens an unbound product');
     assert.ok(requests.every(request => request.action === 'inspect'));
     assert.doesNotMatch(shadow.textContent, /Tools & Diagnostics|XI-IO Ecosystem Component Catalog/);
   } finally { w.close(); }
