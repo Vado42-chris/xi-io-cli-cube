@@ -133,3 +133,153 @@ test('unreported or historical installation data never becomes current device su
   assert.notEqual(installerStatus({phase: 'APPLY_OUTCOME_UNCERTAIN', hostname: 'Aries'}, true).tone, 'success');
   assert.match(installerStatus({phase: 'INSTALLED_READBACK_VERIFIED'}, true).message, /services not started.*Remote connection is not configured/);
 });
+
+test('built Tools shares one read-only plan inspection and recovers explicitly from transport refusal', async () => {
+  const errors = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on('jsdomError', error => errors.push(error.message));
+  virtualConsole.on('error', (...args) => errors.push(args.map(String).join(' ')));
+  const dom = new JSDOM('<!doctype html><html><head></head><body><div id="root"></div></body></html>', {
+    url: 'https://hex-tools-fixture.invalid/', runScripts: 'outside-only',
+    pretendToBeVisual: true, virtualConsole,
+  });
+  const w = dom.window;
+  w.matchMedia = media => ({media, matches: media.includes('reduced-motion'), addEventListener(){}, removeEventListener(){}, addListener(){}, removeListener(){}});
+  w.ResizeObserver = class {observe(){} unobserve(){} disconnect(){}};
+  w.document.head.appendChild(Object.assign(w.document.createElement('style'), {textContent: css}));
+  const requests = [], gates = [];
+  let inFlight = false, overlaps = 0, nextGate = null, nextFailure = '';
+  let plans = [{plan_id: 'fixture-plan-a', prefix: '/fixture/cli-a', phase: 'INSTALLED_READBACK_VERIFIED'}];
+  function holdNextRequest() {
+    let release;
+    const promise = new Promise(resolve => {release = resolve;});
+    gates.push(release); nextGate = promise;
+    return release;
+  }
+  const invoke = async (command, args) => {
+    if (command === 'native_product_window') return {maximized: false, fullscreen: false};
+    assert.equal(command, 'installer_request');
+    const request = JSON.parse(JSON.stringify(args.request)); requests.push(request);
+    if (request.action === 'local_ai_status') {
+      assert.deepEqual(request, {action: 'local_ai_status', plan_id: 'fixture-plan-b'});
+    } else {
+      assert.deepEqual(request, {action: 'inspect'}, 'Tools navigation and refresh cannot prepare, apply or launch');
+    }
+    // Same exclusion boundary as the native transport, held across the reply.
+    if (inFlight) {overlaps++; return {ok: false, error: 'NATIVE_REQUEST_BUSY_DO_NOT_RETRY'};}
+    inFlight = true;
+    const gate = nextGate; nextGate = null;
+    try {
+      if (gate) await gate; else await pause(10);
+      if (nextFailure) {
+        const error = nextFailure; nextFailure = '';
+        return {ok: false, error};
+      }
+      if (request.action === 'local_ai_status') return {ok: true, result: {state: 'NO_MODELS', models: []}};
+      return {ok: true, result: {
+        plans: JSON.parse(JSON.stringify(plans)), prefix_suggestion: '/fixture/cli', node_suggestion: '/fixture/node',
+        supported_components: {cli: {available: true}, bins: {available: false, reason: 'NOT_PACKAGED'}, switchboard: {available: false, reason: 'NOT_PACKAGED'}},
+      }};
+    } finally {inFlight = false;}
+  };
+  w.__TAURI__ = {core: {invoke}}; w.__TAURI_INTERNALS__ = {invoke};
+  async function until(predicate, message) {
+    const deadline = Date.now() + 3000;
+    while (!predicate() && Date.now() < deadline) await pause(10);
+    assert.ok(predicate(), message);
+  }
+  try {
+    const module = new SourceTextModule(script, {
+      context: dom.getInternalVMContext(),
+      initializeImportMeta(meta) {meta.url = new URL(scriptPath, w.location.href).href;},
+      importModuleDynamically: async () => {throw Error('ARTCRAFT_TEST_EXECUTOR_NO_WASM');},
+    });
+    await module.link(specifier => {throw new Error('Unexpected non-bundled import: ' + specifier);});
+    await module.evaluate();
+    await until(() => w.document.querySelector('[data-hex-product-content]')?.shadowRoot?.querySelector('[aria-label="Node executable"]')?.value === '/fixture/node', 'retained installer completed its initial read');
+    const shadow = w.document.querySelector('[data-hex-product-content]').shadowRoot;
+    const tools = shadow.querySelector('[data-hex-local-tools]');
+    const panel = shadow.querySelector('[aria-label="Native HEX installer"]');
+    const selectors = () => [...tools.querySelectorAll('select[aria-label="Installed CLI for local checks"]')];
+    const optionIds = select => [...select.options].map(option => option.value).filter(Boolean);
+    const button = label => [...tools.querySelectorAll('button')].find(el => el.textContent.trim() === label);
+    const rail = label => w.document.querySelector(`[data-window-rail-tabs] button[aria-label="${label}"]`);
+    const bothLists = ids => {
+      assert.equal(selectors().length, 2);
+      for (const select of selectors()) assert.deepEqual(optionIds(select), ids);
+    };
+    async function click(el) {assert.ok(el); el.click(); await pause(30);}
+    assert.ok(tools.closest('[hidden]'));
+    assert.equal(requests.length, 1, 'hidden Tools does not inspect at startup');
+    bothLists([]);
+
+    const releaseEntry = holdNextRequest();
+    await click(rail('Tools'));
+    assert.equal(requests.length, 2, 'one shared inspect serves both controls on Tools entry');
+    assert.equal(overlaps, 0, 'the second control must not contend for native transport');
+    assert.ok(selectors().every(select => select.disabled));
+    bothLists([]);
+    releaseEntry();
+    await until(() => !inFlight && selectors().every(select => optionIds(select).includes('fixture-plan-a')), 'both controls receive the same saved plan snapshot');
+    bothLists(['fixture-plan-a']);
+    selectors()[0].value = 'fixture-plan-a';
+    selectors()[0].dispatchEvent(new w.Event('change', {bubbles: true})); await pause(20);
+    assert.deepEqual(selectors().map(select => select.value), ['fixture-plan-a', 'fixture-plan-a']);
+    assert.equal(button('Check Local AI').disabled, false);
+
+    await click(rail('Install'));
+    assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'), panel);
+    plans = [{plan_id: 'fixture-plan-b', prefix: '/fixture/cli-b', phase: 'INSTALLED_READBACK_VERIFIED'}];
+    await click(rail('Tools'));
+    await until(() => !inFlight && selectors().every(select => optionIds(select).includes('fixture-plan-b')), 'returning from Install refreshes both plan lists');
+    assert.equal(requests.length, 3); bothLists(['fixture-plan-b']);
+    selectors()[0].value = 'fixture-plan-b';
+    selectors()[0].dispatchEvent(new w.Event('change', {bubbles: true})); await pause(20);
+    assert.equal(button('Check Local AI').disabled, false);
+
+    const refresh = button('Refresh saved installations');
+    const releaseCheck = holdNextRequest();
+    button('Check Local AI').click(); refresh.click(); await pause(30);
+    assert.equal(requests.length, 4, 'Refresh cannot overlap an existing local check');
+    assert.equal(requests.at(-1).action, 'local_ai_status');
+    assert.equal(refresh.disabled, true);
+    assert.equal(button('Inspect Saved File Tests').disabled, true, 'both controls share native exclusion');
+    assert.equal(overlaps, 0);
+    releaseCheck();
+    await until(() => !inFlight && !refresh.disabled, 'the local check releases the shared request guard');
+    assert.match(tools.textContent, /Runtime responded; no models installed/);
+
+    const releaseRefresh = holdNextRequest();
+    refresh.click(); refresh.click(); await pause(30);
+    assert.equal(requests.length, 5, 'repeated refresh clicks remain one read');
+    assert.equal(refresh.disabled, true);
+    assert.equal(button('Check Local AI').disabled, true, 'pending metadata is not usable as a current plan selection');
+    bothLists([]); releaseRefresh();
+    await until(() => !inFlight && !refresh.disabled, 'shared refresh completed'); bothLists(['fixture-plan-b']);
+
+    nextFailure = 'NATIVE_REQUEST_BUSY_DO_NOT_RETRY';
+    await click(refresh);
+    await until(() => /NATIVE_REQUEST_BUSY_DO_NOT_RETRY/.test(tools.querySelector('[role="alert"]')?.textContent || ''), 'transport refusal is shown truthfully');
+    bothLists([]);
+    assert.equal(button('Check Local AI').disabled, true);
+    const afterFailure = requests.length; await pause(60);
+    assert.equal(requests.length, afterFailure, 'a failed read never automatically retries');
+    assert.equal(refresh.disabled, false, 'the finite read-only Refresh action remains available');
+
+    plans = [{plan_id: 'fixture-plan-c', prefix: '/fixture/cli-c', phase: 'INSTALLED_READBACK_VERIFIED', do_not_retry: true}];
+    await click(refresh);
+    await until(() => !inFlight && selectors().every(select => optionIds(select).includes('fixture-plan-c')), 'explicit refresh updates both lists after refusal');
+    bothLists(['fixture-plan-c']); assert.equal(tools.querySelector('[role="alert"]'), null);
+    assert.equal(requests.length, afterFailure + 1, 'explicit recovery performs one read');
+    selectors()[0].value = 'fixture-plan-c';
+    selectors()[0].dispatchEvent(new w.Event('change', {bubbles: true})); await pause(20);
+    assert.equal(button('Check Local AI').disabled, true, 'shared inspection never relaxes the uncertain-plan guard');
+    assert.equal(overlaps, 0);
+    assert.equal(requests.filter(request => request.action === 'local_ai_status').length, 1);
+    assert.ok(requests.every(request => request.action === 'inspect' || request.action === 'local_ai_status'));
+    assert.deepEqual(errors, []);
+  } finally {
+    for (const release of gates) release();
+    await pause(30); w.close();
+  }
+});
