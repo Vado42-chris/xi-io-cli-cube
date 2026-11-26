@@ -21,7 +21,7 @@ test "$(git -C "$donor" hash-object apps/artcraft-launcher-web/src/main.rs)" = 8
 test "$(git -C "$donor" hash-object apps/artcraft-launcher-web/Cargo.toml)" = 6aa439780b2c560680b425b5f14618fbd67ef195
 # Extend the recovered renderer with the finite XI-IO presentation profile.
 profile_patch="$(dirname -- "$patch")/xiio-catalog.patch"
-frozen_profile_blob=6afcc6ebe2db10d3fb96af3296c39a7eff153d8e
+frozen_profile_blob=66802a0ec5e11602f034f558a447eb718ec49f3a
 test "$(git hash-object "$profile_patch")" = "$frozen_profile_blob"
 test "$(git -C "$donor" hash-object apps/artcraft-launcher-web/src/main.rs)" = 8cbe0b57ffcf87e2007df5463a63fa14ecd4ff30
 test "$(git -C "$donor" hash-object apps/artcraft-launcher-web/src/web.rs)" = 2a0f457c07423a678a9affb895aa05ce96b3b41d
@@ -39,7 +39,7 @@ test "$(git -C "$donor" hash-object apps/artcraft-launcher-web/src/xiio.rs)" = 4
 test "$(git -C "$donor" hash-object crates/ui-egui/src/app.rs)" = d2c4025dcfc2d77a8f4821c9e4ac92980525a21a
 test "$(git -C "$donor" hash-object crates/ui-egui/src/hosted_catalog.rs)" = 8130643bb3362f1e3cdd8785c7f900589170f176
 test "$(git -C "$donor" hash-object crates/ui-egui/src/lib.rs)" = 4ea6b9b27201a592f0b7f88c94b1eb53e8fadad0
-test "$(git -C "$donor" hash-object crates/ui-egui/src/theme.rs)" = 4406517bec0e94cb78877850ef6cd04cf4632b6f
+test "$(git -C "$donor" hash-object crates/ui-egui/src/theme.rs)" = 2306d9883799eb5873c24baf3524147e47477273
 test "$(git -C "$donor" hash-object crates/ui-egui/src/views.rs)" = c331f0c58ab6038cbfde5ef98f86636407413210
 cd "$donor"
 cargo test --locked -p artcraft-launcher-ui-egui --lib

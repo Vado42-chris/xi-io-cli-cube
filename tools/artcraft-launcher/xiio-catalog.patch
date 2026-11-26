@@ -529,7 +529,7 @@ diff --git a/crates/ui-egui/src/theme.rs b/crates/ui-egui/src/theme.rs
      };
  
 +    fn with_catalog_accent(mut self, ctx: &egui::Context) -> Self {
-+        if let Some([surface, light, dark]) = ctx.data(|d| d.get_temp::<[[u8; 3]; 3]>(egui::Id::new("hosted-catalog-accent"))) {
++        if let Some([surface, light, dark]) = ctx.data(|d| d.get_temp::<[[u8; 3]; 3]>(egui::Id::unique("hosted-catalog-accent"))) {
 +            self.accent = rgb(surface);
 +            self.accent_ink = rgb(if self.dark { dark } else { light });
 +        }
@@ -548,7 +548,7 @@ diff --git a/crates/ui-egui/src/theme.rs b/crates/ui-egui/src/theme.rs
  
 +/// The embedding catalog supplies its existing brand accent; standalone contexts keep ArtCraft's.
 +pub(crate) fn set_catalog_accent(ctx: &egui::Context, accent: Option<[[u8; 3]; 3]>) {
-+    let key = egui::Id::new("hosted-catalog-accent");
++    let key = egui::Id::unique("hosted-catalog-accent");
 +    ctx.data_mut(|d| {
 +        if let Some(accent) = accent {
 +            d.insert_temp(key, accent);
