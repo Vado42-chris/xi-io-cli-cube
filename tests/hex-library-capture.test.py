@@ -171,6 +171,116 @@ class RetiredContent(unittest.TestCase):
                 CAPTURE.verify_retired_package(package, executable, proof)
 
 
+class NativeHeadingCompatibility(unittest.TestCase):
+    class Role:
+        def __init__(self, name):
+            self.value_nick = name
+
+    def setUp(self):
+        self.roles = SimpleNamespace(**{
+            name: self.Role(name.lower().replace('_', '-'))
+            for name in ('PUSH_BUTTON', 'HEADING', 'DOCUMENT_FRAME', 'STATIC', 'APPLICATION')
+        })
+
+    def ax_node(self, role, name, text=None, attrs=None, visible=True, children=()):
+        bounds = SimpleNamespace(x=1, y=2, width=10, height=20)
+        text_iface = (None if text is None else
+                      SimpleNamespace(get_character_count=lambda: len(text),
+                                      get_text=lambda start, end: text[start:end]))
+        return SimpleNamespace(
+            get_role=lambda: role, get_name=lambda: name,
+            get_attributes=lambda: attrs or {}, get_text_iface=lambda: text_iface,
+            get_child_count=lambda: len(children), get_child_at_index=children.__getitem__,
+            get_process_id=lambda: 50, visible=visible,
+            get_component_iface=lambda: SimpleNamespace(get_extents=lambda _: bounds),
+        )
+
+    def walk(self, children):
+        roles = self.roles
+        app = self.ax_node(roles.APPLICATION, '', children=children)
+        native = CAPTURE.Native.__new__(CAPTURE.Native)
+        native.pid = 50
+        native.deadline = CAPTURE.time.monotonic() + 10
+        native.visible = lambda node: node.visible
+        native.last_observation_failure = None
+        native.ax = SimpleNamespace(
+            get_desktop=lambda _: self.ax_node(roles.APPLICATION, '', children=[app]), Role=roles,
+            CoordType=SimpleNamespace(SCREEN=0))
+        return native.rows()
+
+    def heading(self, name, attrs=None, role=None, visible=True):
+        return self.ax_node(role or self.roles.DOCUMENT_FRAME, '', text=name, attrs=attrs,
+                            visible=visible)
+
+    @staticmethod
+    def attributes(level):
+        return {'toolkit': 'WebKitGTK', 'computed-role': 'heading', 'tag': 'h'+level, 'level': level}
+
+    def test_both_exact_package_selectors_read_same_node_webkit_heading_metadata(self):
+        for retired, rows, selector, level in (
+            (False, Content().rows(), CAPTURE.select_content_controls, '1'),
+            (True, RetiredContent().rows(), CAPTURE.select_retired_controls, '2'),
+        ):
+            with self.subTest(retired=retired):
+                heading, = (row['name'] for row in rows if row['role'] == 'heading')
+                buttons = [self.ax_node(self.roles.PUSH_BUTTON, row['name']) for row in rows
+                           if row['role'] == 'button']
+                # Candidate's rendered heading contains a DOM line break.
+                heading_text = heading if retired else 'Your XI-IO\nlibrary.'
+                # The same numeric-role node must also provide exact accessible Text.
+                picked = selector(self.walk(buttons + [self.heading(heading_text, self.attributes(level))]))
+                adapted, = (row for row in picked if row['role'] == 'heading')
+                self.assertEqual(adapted['heading_role_source'], 'WEBKITGTK_COMPUTED_HEADING')
+                self.assertEqual(adapted['heading_raw_role'], 'document-frame')
+                self.assertEqual(adapted['heading_level'], int(level))
+                self.assertEqual(CAPTURE.control_text(adapted), heading)
+                # Standard provider-correct HEADING still uses the original semantic path.
+                direct = selector(self.walk(buttons + [self.heading(heading_text, role=self.roles.HEADING)]))
+                direct_heading, = (row for row in direct if row['role'] == 'heading')
+                self.assertNotIn('heading_role_source', direct_heading)
+
+    def test_incomplete_contradictory_or_non_heading_provider_metadata_never_qualifies(self):
+        good = self.attributes('1')
+        variants = [
+            ('frame without metadata', {}, self.roles.DOCUMENT_FRAME, True, 'Your XI-IO library.'),
+            ('non-head computed role', dict(good, **{'computed-role': 'document'}), self.roles.DOCUMENT_FRAME, True, 'Your XI-IO library.'),
+            ('no computed role', {k: v for k,v in good.items() if k != 'computed-role'}, self.roles.DOCUMENT_FRAME, True, 'Your XI-IO library.'),
+            ('no tag', {k: v for k,v in good.items() if k != 'tag'}, self.roles.DOCUMENT_FRAME, True, 'Your XI-IO library.'),
+            ('no level', {k: v for k,v in good.items() if k != 'level'}, self.roles.DOCUMENT_FRAME, True, 'Your XI-IO library.'),
+            ('wrong level', dict(good, level='2'), self.roles.DOCUMENT_FRAME, True, 'Your XI-IO library.'),
+            ('wrong toolkit', dict(good, toolkit='other'), self.roles.DOCUMENT_FRAME, True, 'Your XI-IO library.'),
+            ('static role with same metadata', good, self.roles.STATIC, True, 'Your XI-IO library.'),
+            ('hidden heading', good, self.roles.DOCUMENT_FRAME, False, 'Your XI-IO library.'),
+            ('wrong text', good, self.roles.DOCUMENT_FRAME, True, 'A different heading'),
+        ]
+        buttons = [self.ax_node(self.roles.PUSH_BUTTON, row['name']) for row in Content().rows()
+                   if row['role'] == 'button']
+        for label, attrs, role, visible, text in variants:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(CAPTURE.Unverified, '^HEX_LIBRARY_CONTENT_NOT_OBSERVED$'):
+                    CAPTURE.select_content_controls(self.walk(buttons + [self.heading(text, attrs, role, visible)]))
+
+    def test_named_document_frame_without_same_node_text_does_not_qualify(self):
+        node = self.ax_node(self.roles.DOCUMENT_FRAME, 'Your XI-IO library.',
+                            attrs=self.attributes('1'))
+        with self.assertRaisesRegex(CAPTURE.Unverified, '^ACCESSIBILITY_HEADING_TEXT_UNAVAILABLE$'):
+            self.walk([node])
+
+    def test_opposite_visible_heading_stays_an_explicit_refusal(self):
+        for retired, rows, selector, failure in (
+            (False, Content().rows(), CAPTURE.select_content_controls, 'HEX_RETIRED_CATALOG_EXPOSED'),
+            (True, RetiredContent().rows() + Content().rows(), CAPTURE.select_retired_controls,
+             'RETIRED_CATALOG_UNEXPECTEDLY_QUALIFIED'),
+        ):
+            with self.subTest(retired=retired):
+                buttons = [self.ax_node(self.roles.PUSH_BUTTON, row['name']) for row in rows
+                           if row['role'] == 'button']
+                headings = [self.heading(name, self.attributes(level)) for name,level in
+                            (('Your XI-IO library.', '1'), ('XI-IO Ecosystem Component Catalog', '2'))]
+                with self.assertRaisesRegex(CAPTURE.Unverified, '^' + failure + '$'):
+                    selector(self.walk(buttons + headings))
+
+
 class Diagnostics(unittest.TestCase):
     def native(self, rows, complete=True):
         return SimpleNamespace(last_rows=rows, last_rows_complete=complete,
@@ -209,7 +319,7 @@ class Diagnostics(unittest.TestCase):
                 native.last_observation_failure = failure
                 native.ax = SimpleNamespace(
                     get_desktop=lambda _: ax_node(application, '', [app]),
-                    Role=SimpleNamespace(PUSH_BUTTON=button, HEADING=heading),
+                    Role=SimpleNamespace(PUSH_BUTTON=button, HEADING=heading, DOCUMENT_FRAME=Role('document-frame')),
                     CoordType=SimpleNamespace(SCREEN=0))
                 observed = native.rows()
                 with self.assertRaisesRegex(CAPTURE.Unverified, '^' + failure + '$'):

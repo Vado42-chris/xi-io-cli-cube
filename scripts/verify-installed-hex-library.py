@@ -74,6 +74,24 @@ def read_heading_text(node):
         raise Unverified('ACCESSIBILITY_HEADING_TEXT_UNAVAILABLE') from None
 
 
+def webkit_heading_metadata(node):
+    # WebKitGTK 2.50.4 omitted Footer in the ordinal table it sends over D-Bus,
+    # so its Heading can decode as DOCUMENT_FRAME in AT-SPI 2.44. Do not alias
+    # that enum. WebKit's own same-node attributes expose the computed role,
+    # native heading tag and heading level independently of that ordinal.
+    try:
+        attrs = node.get_attributes()
+    except Exception:
+        raise Unverified('ACCESSIBILITY_HEADING_METADATA_UNAVAILABLE') from None
+    if not isinstance(attrs, dict) or attrs.get('toolkit') != 'WebKitGTK' or attrs.get('computed-role') != 'heading':
+        return None
+    level = attrs.get('level')
+    if level not in ('1', '2', '3', '4', '5', '6') or attrs.get('tag') != 'h' + level:
+        return None
+    return {'heading_role_source': 'WEBKITGTK_COMPUTED_HEADING',
+            'heading_raw_role': 'document-frame', 'heading_level': int(level)}
+
+
 def control_text(row):
     # WebKit headings can expose visible text without an accessible name.
     # Buttons still use their semantic name; no descendant-text search occurs.
@@ -261,6 +279,11 @@ class Native:
             raw_counts = self.last_raw_role_counts
             raw_counts[role_nick] = raw_counts.get(role_nick, 0) + 1
             role = roles.get(raw_role)
+            heading_metadata = None
+            if raw_role == self.ax.Role.DOCUMENT_FRAME:
+                heading_metadata = webkit_heading_metadata(node)
+                if heading_metadata is not None:
+                    role = 'heading'
             if role:
                 name = node.get_name() or ''
                 require(len(name) <= MAX_CONTROL_TEXT, 'ACCESSIBILITY_NAME_BOUNDS')
@@ -270,6 +293,11 @@ class Native:
                 if role == 'heading':
                     try:
                         row['text'] = read_heading_text(node)
+                        if heading_metadata is not None:
+                            row.update(heading_metadata)
+                            if visible:
+                                require(isinstance(row['text'], str) and row['text'].strip(),
+                                        'ACCESSIBILITY_HEADING_TEXT_UNAVAILABLE')
                     except Unverified as error:
                         row['text_error'] = str(error)
                         raise
