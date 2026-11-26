@@ -4,7 +4,8 @@ const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8');
 test('existing steps bind finite local actions, selected workspace and exact review',()=>{
  for(const action of ['local_ai_status','safe_task_prepare','safe_task_apply'])assert.ok(source.includes(action));
  assert.match(source,/approval_digest:review.approval_digest,approved:true/);
- assert.match(source,/disabled=\{busy\|\|!approved\|\|attempted\|\|!reviewMatches\|\|!eligible\}/);
+ assert.match(source,/const blocked=busy\|\|Boolean\(planSnapshot\?\.busy\)\|\|Boolean\(requestGate\?\.busy\)/);
+ assert.match(source,/disabled=\{blocked\|\|!approved\|\|attempted\|\|!reviewMatches\|\|!eligible\}/);
  assert.match(source,/setAttempted\(true\)/);
  assert.match(source,/context.current!==requestedContext/);
  assert.match(source,/review\?\.plan_id===planId&&review\?\.workspace===workspace/);

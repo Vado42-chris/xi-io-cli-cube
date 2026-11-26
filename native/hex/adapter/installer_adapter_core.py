@@ -3,7 +3,7 @@
 Kernel OperationJournal owns outcomes. Plan JSON is immutable approval metadata,
 not another installation ledger. No service control, network or credential use.
 """
-import sys, os, json, hashlib, stat, subprocess, tempfile, uuid, datetime, fcntl, platform
+import sys, os, json, hashlib, stat, subprocess, tempfile, uuid, datetime, fcntl, platform, re
 from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / 'kernel'))
@@ -21,6 +21,7 @@ from xiio_installer.transaction import (TransactionError, plan_install,
 SOURCE = HERE.parent / 'cli-source'
 AVAILABILITY = {'cli': {'available': True, 'required': True, 'required_dependencies':['switchboard-native-consumer']}, 'bins': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}, 'switchboard': {'available': False, 'reason': 'PACKAGED_ARTIFACT_UNQUALIFIED'}}
 class Refused(Exception): pass
+start_terminal = subprocess.Popen
 def demand(v, message):
     if not v: raise Refused(message)
 def digest(b): return hashlib.sha256(b).hexdigest()
@@ -179,6 +180,90 @@ def installed(p, expected_sha=None, expected_generation=None):
     demand(result.get('integrity_verified') is True and result.get('source_sha')==receipt['source_sha'],'CLI_VERSION_NOT_VERIFIED')
     return {'generation':current,'source_sha':receipt['source_sha'],'files':receipt['files'],'launcher_sha256':digest(file_bytes(launcher)),'version_readback':result}
 
+def registered_terminal():
+    """Resolve only the system-owned Debian terminal alternative, never PATH."""
+    demand(sys.platform.startswith('linux'), 'CLI_LAUNCH_PLATFORM_UNSUPPORTED')
+    current=Path('/usr/bin/x-terminal-emulator')
+    try:
+        for _ in range(16):
+            for path in [current,*current.parents]:
+                metadata=path.lstat()
+                demand(metadata.st_uid==0 and (stat.S_ISLNK(metadata.st_mode) or not metadata.st_mode&0o022),
+                       'REGISTERED_TERMINAL_UNTRUSTED')
+            if current.is_symlink():
+                target=Path(os.readlink(current))
+                current=Path(os.path.normpath(str(target if target.is_absolute() else current.parent/target)))
+                continue
+            current=current.resolve(strict=True)
+            for path in [current,*current.parents]:
+                metadata=path.lstat()
+                demand(metadata.st_uid==0 and not metadata.st_mode&0o022,
+                       'REGISTERED_TERMINAL_UNTRUSTED')
+            metadata=current.stat()
+            demand(stat.S_ISREG(metadata.st_mode) and bool(metadata.st_mode&0o111) and os.access(current,os.X_OK),
+                   'REGISTERED_TERMINAL_UNTRUSTED')
+            return str(current)
+    except (OSError,RuntimeError) as error:
+        raise Refused('REGISTERED_TERMINAL_UNAVAILABLE') from error
+    raise Refused('REGISTERED_TERMINAL_UNTRUSTED')
+
+def terminal_environment():
+    """Only local desktop routing and ordinary owner directories reach the CLI."""
+    result={'HOME':str(Path.home()),'PATH':'/usr/local/bin:/usr/bin:/bin','LANG':'C.UTF-8'}
+    def absolute(value):
+        return isinstance(value,str) and value.startswith('/') and len(value)<=4096 and '\x00' not in value and not any(p in ('.','..') for p in value.split('/'))
+    for name in ['XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_CACHE_HOME','XDG_RUNTIME_DIR']:
+        value=os.environ.get(name)
+        if absolute(value): result[name]=value
+    display=os.environ.get('DISPLAY','')
+    wayland=os.environ.get('WAYLAND_DISPLAY','')
+    if re.fullmatch(r':[0-9]{1,5}(?:\.[0-9]{1,5})?',display):result['DISPLAY']=display
+    if re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}',wayland):result['WAYLAND_DISPLAY']=wayland
+    demand('DISPLAY' in result or ('WAYLAND_DISPLAY' in result and 'XDG_RUNTIME_DIR' in result),
+           'CLI_LAUNCH_DESKTOP_UNAVAILABLE')
+    authority=os.environ.get('XAUTHORITY')
+    if absolute(authority):result['XAUTHORITY']=authority
+    runtime=result.get('XDG_RUNTIME_DIR')
+    bus=os.environ.get('DBUS_SESSION_BUS_ADDRESS')
+    if runtime and bus=='unix:path='+runtime.rstrip('/')+'/bus':result['DBUS_SESSION_BUS_ADDRESS']=bus
+    return result
+
+def cli_launch_workspace(raw,p,base):
+    demand(isinstance(raw,str) and 0<len(raw)<=4096,'CLI_PROJECT_SELECTION_REQUIRED')
+    workspace=safe_path(raw)
+    # Same bounded project and installer-custody exclusions as the existing
+    # disposable local-work action, with the CLI's credential folders retained.
+    sensitive={'.ssh','.gnupg','.aws','.azure','.kube','.docker','.password-store','.config','.local','.codex','.git'}
+    demand(workspace.is_dir() and len(workspace.parts)>=3 and workspace!=Path.home()
+           and not any(part in sensitive for part in workspace.parts),'DEDICATED_WORKSPACE_REQUIRED')
+    for protected in [base,Path(p['prefix']),HERE.parent]:
+        demand(not(workspace==protected or protected in workspace.parents or workspace in protected.parents),
+               'WORKSPACE_OVERLAPS_INSTALLER')
+    metadata=workspace.stat()
+    demand(metadata.st_uid==os.getuid(),'OWNED_WORKSPACE_REQUIRED')
+    return workspace,(metadata.st_dev,metadata.st_ino,metadata.st_uid,metadata.st_mode)
+
+def launch_installed_cli(p,readback,raw_workspace,base):
+    workspace,identity=cli_launch_workspace(raw_workspace,p,base)
+    terminal=registered_terminal();desktop=terminal_environment()
+    launcher=Path(p['launcher']) if p.get('kind')=='launcher_repair' else Path(p['prefix'])/'bin/xi-io-cli'
+    demand(file_bytes(Path(p['prefix'])/'current').decode().strip()==readback['generation'],'INSTALLED_GENERATION_CHANGED')
+    demand(digest(file_bytes(launcher))==readback['launcher_sha256'],'LAUNCHER_CHANGED')
+    demand(digest(file_bytes(Path(p['node']['path'])))==p['node']['sha256'],'NODE_CHANGED_SINCE_REVIEW')
+    demand(cli_launch_workspace(raw_workspace,p,base)==(workspace,identity),'CLI_PROJECT_CHANGED')
+    try:
+        # Debian's registered terminal takes an argv after -e. A fixed second
+        # argument also avoids xterm's legacy single-argument shell fallback.
+        child=start_terminal([terminal,'-e',str(launcher),'menu'],shell=False,
+            stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+            cwd=str(workspace),env=desktop,start_new_session=True,close_fds=True)
+    except OSError as error:
+        raise Refused('CLI_TERMINAL_NOT_STARTED') from error
+    return {'schema':'xiio.hex.cli-launch/v1','state':'CLI_LAUNCH_REQUESTED',
+            'plan_id':p['plan_id'],'generation':readback['generation'],'source_sha':readback['source_sha'],
+            'pid':child.pid,'launcher':str(launcher),'terminal':terminal,'workspace':str(workspace),
+            'launch_requested':True,'runtime_ready':False}
+
 # Exact upstream PR15 launcher-only path, packaged beside (not replacing) the
 # offline transport adaptation. These hashes are authority, not mutable metadata.
 REPAIR_REF='0f2b444abbe8f7a99c5f4520b1222c568eba6dd1'
@@ -330,11 +415,15 @@ def repair_uncertain_observation(base,p,view):
 def handle_repair(req,base,p):
     act=req['action'];view=repair_project(base,p)
     if act=='inspect':return view
-    if act=='readback':
+    if act in ['readback','launch_cli']:
+        if act=='launch_cli':
+            demand(req.get('approved') is True and req.get('approval_digest')==p['approval_digest'],'EXACT_APPROVAL_REQUIRED')
+            demand(view['phase']=='LAUNCHER_REPAIR_READBACK_VERIFIED' and not view['do_not_retry'],'VERIFIED_INSTALLED_CLI_REQUIRED')
         if view['phase']=='PREPARED_REPAIR_NOT_APPLIED':return view
         if view['do_not_retry']:return repair_uncertain_observation(base,p,view)
         op=observation(base,p,'apply_repair')
         rb=repair_readback(p,op['events'][-1]['details'].get('launcher_sha256'))
+        if act=='launch_cli':return launch_installed_cli(p,rb,req.get('workspace'),base)
         return {**view,'readback':rb,'observation_current':True}
     demand(act=='apply_repair','REPAIR_PLAN_ACTION_MISMATCH')
     demand(req.get('approved') is True and req.get('approval_digest')==p['approval_digest'],'EXACT_APPROVAL_REQUIRED')
@@ -388,6 +477,7 @@ def handle_repair(req,base,p):
 def handle(req):
     demand(isinstance(req,dict),'REQUEST_OBJECT_REQUIRED')
     allowed={'inspect':{'action','plan_id'},'prepare':{'action','prefix','node','components','permission_profile'},'prepare_repair':{'action','prefix','node','bin_dir'},'apply_repair':{'action','plan_id','approval_digest','approved'},'readback':{'action','plan_id'},'apply':{'action','plan_id','approval_digest','approved'},'rollback':{'action','plan_id','approval_digest','approved'},'permission_replace':{'action','plan_id','current_digest','new_profile','approved'},'central_update_decision':{'action','plan_id','request'},'service_plan':{'action','plan_id','service_ids','service_action'},'service_start':{'action','plan_id','service_ids','service_plan_digest','approved'},'service_stop':{'action','plan_id','service_ids','service_plan_digest','approved'},'server_prepare':{'action','plan_id','package_root'},'server_apply':{'action','plan_id','package_root','server_plan','server_plan_digest','approved'},'server_rollback':{'action','plan_id','server_plan','server_plan_digest','approved'},'hotpatch_prepare':{'action','plan_id','request','package_root'},'hotpatch_apply':{'action','plan_id','request','package_root','server_plan','server_plan_digest','authorization','approved'},'local_ai_status':{'action','plan_id'},'safe_task_inspect':{'action','plan_id'},'safe_task_prepare':{'action','plan_id','workspace'},'safe_task_apply':{'action','plan_id','proof_id','approval_digest','approved'}}
+    allowed['launch_cli']={'action','plan_id','approval_digest','approved','workspace'}
     act=req.get('action');demand(act in allowed and set(req)<=allowed[act],'REQUEST_FIELDS_INVALID')
     base=root();lock=base/'native-adapter.lock'
     fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
@@ -505,7 +595,10 @@ def handle(req):
             demand(digest(canonical(tree(Path(p['prefix']))))==op['events'][-1]['details'].get('destination_tree_digest'),'INSTALLED_STATE_DRIFT')
             rb=installed(p,expected_generation=op['events'][-1]['details'].get('generation'))
             return local_step_actions.handle(req,base,p,rb)
-        if act=='readback':
+        if act in ['readback','launch_cli']:
+            if act=='launch_cli':
+                demand(req.get('approved') is True and req.get('approval_digest')==p['approval_digest'],'EXACT_APPROVAL_REQUIRED')
+                demand(view['phase']=='INSTALLED_READBACK_VERIFIED' and not view['do_not_retry'],'VERIFIED_INSTALLED_CLI_REQUIRED')
             if view['phase']=='PREPARED_NOT_INSTALLED':return view
             # Incomplete journal cannot be erased by apparently correct files.
             demand(not view['do_not_retry'],'INCOMPLETE_OPERATION_REQUIRES_RECONCILIATION_NO_RETRY')
@@ -514,6 +607,7 @@ def handle(req):
             generation=op['events'][-1]['details'].get('generation')
             rb=installed(p,p.get('previous_source_sha') if view['phase']=='ROLLED_BACK' else None,generation)
             cr=connection_profile.readback(base,p,SOURCE/'connection',op['events'][-1]['details'].get('connection_receipt_sha256'),view['phase']=='ROLLED_BACK')
+            if act=='launch_cli':return launch_installed_cli(p,rb,req.get('workspace'),base)
             return {**view,'readback':rb,'connection_readback':cr,'connection_state':'CONFIGURATION_REQUIRED','connected':False,'observation_current':True}
         demand(req.get('approved') is True and req.get('approval_digest')==p['approval_digest'],'EXACT_APPROVAL_REQUIRED')
         if act=='apply':

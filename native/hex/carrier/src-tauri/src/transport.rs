@@ -8,6 +8,19 @@ fn failure(error: &str) -> Value { json!({"ok":false,"error":error}) }
 fn uncertain(error: &str) -> Value {
     json!({"ok":true,"result":{"phase":"APPLY_OUTCOME_UNCERTAIN","do_not_retry":true,"error":error,"native_process_may_still_be_running":true}})
 }
+fn local_desktop_value(key:&str,value:&str,runtime:Option<&str>)->bool {
+    if value.is_empty() || value.len()>4096 || value.contains('\0') {return false}
+    match key {
+        "DISPLAY"=>value.strip_prefix(':').map(|tail|{
+            let parts:Vec<&str>=tail.split('.').collect();
+            parts.len()<=2 && parts.iter().all(|p|!p.is_empty()&&p.len()<=5&&p.bytes().all(|b|b.is_ascii_digit()))
+        }).unwrap_or(false),
+        "WAYLAND_DISPLAY"=>value.len()<=128 && !value.starts_with('.') && value.bytes().all(|b|b.is_ascii_alphanumeric()||b"._-".contains(&b)),
+        "XAUTHORITY"=>value.starts_with('/')&&!value.split('/').any(|p|p=="."||p==".."),
+        "DBUS_SESSION_BUS_ADDRESS"=>runtime.map(|r|r.starts_with('/')&&!r.contains('\0')&&value==format!("unix:path={}/bus",r.trim_end_matches('/'))).unwrap_or(false),
+        _=>false,
+    }
+}
 fn bounded_reader<R: Read + Send + 'static>(mut input: R) -> mpsc::Receiver<Result<Vec<u8>, ()>> {
     let (tx,rx)=mpsc::channel();
     thread::spawn(move || { let mut bytes=Vec::new(); let result=input.by_ref().take((MAX_OUTPUT+1) as u64).read_to_end(&mut bytes).map_err(|_|());
@@ -22,6 +35,7 @@ fn execute_deadline(request: InstallerRequest, adapter: PathBuf, home: PathBuf, 
     if let Err(e)=request.validate() {return failure(e)}
     let bytes=match serde_json::to_vec(&request) {Ok(b) if b.len()<=MAX_REQUEST=>b,_=>return failure("REQUEST_TOO_LARGE")};
     let request_meta=serde_json::to_value(&request).unwrap_or(Value::Null);
+    let launching_cli=matches!(&request,InstallerRequest::LaunchCli{..});
     let (tx,rx)=mpsc::channel();
     thread::spawn(move || {
         let _guard=match gate.try_lock() {Ok(g)=>g,Err(_)=>{let _=tx.send(uncertain("NATIVE_REQUEST_BUSY_DO_NOT_RETRY"));return}};
@@ -40,6 +54,18 @@ fn execute_deadline(request: InstallerRequest, adapter: PathBuf, home: PathBuf, 
             if let Ok(val) = std::env::var(var) {
                 if val.starts_with('/') && !val.contains('\0') {
                     cmd.env(var, val);
+                }
+            }
+        }
+
+        // Only this explicit local launch receives desktop routing. Installation
+        // and readback retain the existing cleared environment; no shell state,
+        // provider credentials or remote display address is forwarded.
+        if launching_cli {
+            let runtime=std::env::var("XDG_RUNTIME_DIR").ok();
+            for var in ["DISPLAY","WAYLAND_DISPLAY","XAUTHORITY","DBUS_SESSION_BUS_ADDRESS"] {
+                if let Ok(value)=std::env::var(var) {
+                    if local_desktop_value(var,&value,runtime.as_deref()) {cmd.env(var,value);}
                 }
             }
         }
@@ -92,6 +118,7 @@ fn execute_deadline(request: InstallerRequest, adapter: PathBuf, home: PathBuf, 
         if request_meta["action"]=="safe_task_apply" {response["result"]["phase"]="SAFE_TASK_OUTCOME_UNCERTAIN".into();}
         if request_meta["action"]=="apply_repair" {response["result"]["phase"]="LAUNCHER_REPAIR_OUTCOME_UNCERTAIN".into();response["result"]["kind"]="launcher_repair".into();}
         if request_meta["action"]=="rollback" {response["result"]["phase"]="ROLLBACK_OUTCOME_UNCERTAIN".into();}
+        if request_meta["action"]=="launch_cli" {response["result"]["phase"]="CLI_LAUNCH_OUTCOME_UNCERTAIN".into();}
     }
     response
 }
@@ -99,6 +126,34 @@ fn execute_deadline(request: InstallerRequest, adapter: PathBuf, home: PathBuf, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn launch_desktop_environment_is_local_and_finite() {
+        assert!(local_desktop_value("DISPLAY",":0.0",None));
+        assert!(!local_desktop_value("DISPLAY","other-host:0",None));
+        assert!(!local_desktop_value("DISPLAY",":0.1.2",None));
+        assert!(local_desktop_value("WAYLAND_DISPLAY","wayland-0",None));
+        assert!(!local_desktop_value("WAYLAND_DISPLAY","/tmp/other",None));
+        assert!(local_desktop_value("XAUTHORITY","/run/user/1000/.auth",None));
+        assert!(!local_desktop_value("XAUTHORITY","../other",None));
+        assert!(local_desktop_value("DBUS_SESSION_BUS_ADDRESS","unix:path=/run/user/1000/bus",Some("/run/user/1000")));
+        assert!(!local_desktop_value("DBUS_SESSION_BUS_ADDRESS","tcp:host=other",Some("/run/user/1000")));
+        assert!(!local_desktop_value("LD_PRELOAD","/tmp/library.so",None));
+    }
+    #[test] fn desktop_handoff_is_only_for_explicit_cli_launch() {
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root=std::env::temp_dir().join(format!("hex-launch-env-{}-{stamp}",std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let script=root.join("adapter.py");
+        std::fs::write(&script,"import json,os,sys\nsys.stdin.read()\nprint(json.dumps({'ok':True,'result':{'display':os.environ.get('DISPLAY')}}))\n").unwrap();
+        let previous=std::env::var_os("DISPLAY");std::env::set_var("DISPLAY",":77");
+        let gate=Arc::new(Mutex::new(()));
+        let request=InstallerRequest::LaunchCli{plan_id:"a".repeat(32),approval_digest:"b".repeat(64),approved:true,workspace:root.to_string_lossy().into_owned()};
+        let launched=execute_deadline(request,script.clone(),root.clone(),gate.clone(),Duration::from_secs(5));
+        let inspected=execute_deadline(InstallerRequest::Inspect{plan_id:None},script,root.clone(),gate,Duration::from_secs(5));
+        match previous {Some(value)=>std::env::set_var("DISPLAY",value),None=>std::env::remove_var("DISPLAY")}
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(launched["result"]["display"],":77");
+        assert_eq!(inspected["result"]["display"],Value::Null);
+    }
     #[test] fn bounded_output_reader() {
         assert_eq!(bounded_reader(std::io::Cursor::new(b"{}".to_vec())).recv().unwrap().unwrap(), b"{}");
         assert!(bounded_reader(std::io::Cursor::new(vec![b'x';MAX_OUTPUT+1])).recv().unwrap().is_err());

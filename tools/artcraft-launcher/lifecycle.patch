@@ -1,0 +1,138 @@
+--- a/apps/artcraft-launcher-web/src/web.rs
++++ b/apps/artcraft-launcher-web/src/web.rs
+@@ -7,15 +7,73 @@
+ use artcraft_launcher_core::protocol::{Backend, Capabilities, Command, Event, LatestRelease, Origin, Source};
+ use artcraft_launcher_core::release::{self, Release};
+ use artcraft_launcher_core::{Arch, Os, Platform, SUITE, catalog, version};
+-use artcraft_launcher_ui_egui::{Host, LauncherUi, Settings, i18n};
++use artcraft_launcher_ui_egui::{Host, LauncherUi, Settings};
++#[cfg(not(feature = "hosted-canvas"))]
++use artcraft_launcher_ui_egui::i18n;
+ use wasm_bindgen::JsCast;
+ use wasm_bindgen_futures::JsFuture;
+ 
+ const SETTINGS_KEY: &str = "settings";
++
++/// A host retains this handle for exactly as long as its supplied canvas lives.
++/// It owns the real LauncherUi runner, not a parallel catalog or window.
++#[cfg(feature = "hosted-canvas")]
++#[wasm_bindgen::prelude::wasm_bindgen]
++pub struct LauncherHandle {
++    runner: eframe::WebRunner,
++}
++
++#[cfg(feature = "hosted-canvas")]
++#[wasm_bindgen::prelude::wasm_bindgen]
++impl LauncherHandle {
++    /// Stop callbacks, animation frames and graphics resources before removing the canvas.
++    pub fn destroy(&self) {
++        self.runner.destroy();
++    }
++}
++
++#[cfg(feature = "hosted-canvas")]
++impl Drop for LauncherHandle {
++    fn drop(&mut self) {
++        self.runner.destroy();
++    }
++}
++
++/// Explicit element input works inside the host's ShadowRoot.
++/// The promise resolves only after the real eframe startup completes.
++/// The host must destroy/free a late result if it unmounted while awaiting startup.
++#[cfg(feature = "hosted-canvas")]
++#[wasm_bindgen::prelude::wasm_bindgen]
++pub async fn mount_launcher(canvas: web_sys::HtmlCanvasElement) -> Result<LauncherHandle, wasm_bindgen::JsValue> {
++    eframe::WebLogger::init(log::LevelFilter::Warn).ok();
++    let runner = eframe::WebRunner::new();
++    start_runner(&runner, canvas).await?;
++    Ok(LauncherHandle { runner })
++}
++
++async fn start_runner(runner: &eframe::WebRunner, canvas: web_sys::HtmlCanvasElement) -> Result<(), wasm_bindgen::JsValue> {
++    let result = runner
++        .start(
++            canvas,
++            eframe::WebOptions::default(),
++            Box::new(|cc| {
++                let ctx = cc.egui_ctx.clone();
++                let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
++                let backend = WebBackend::new(ctx.clone());
++                Ok(Box::new(WebApp { ui: LauncherUi::new(&ctx, Box::new(backend), settings) }))
++            }),
++        )
++        .await;
++    if result.is_err() {
++        runner.destroy();
++    }
++    result
++}
+ 
+ /// Tell the UI the browser's languages (`?lang=ru` in the address first, as `ARTCRAFT_LAUNCHER_LOCALE`
+ /// does on the desktop) before the first frame, so the Automatic interface language follows the
+ /// browser; and show the loading text in that language.
++#[cfg(not(feature = "hosted-canvas"))]
+ fn detect_language() {
+     let window = match web_sys::window() {
+         Some(w) => w,
+@@ -56,6 +114,7 @@
+         el.set_text_content(Some(i18n::tr(i18n::system_lang(), "Loading ArtCraft Launcher…")));
+     }
+ }
++#[cfg(not(feature = "hosted-canvas"))]
+ pub fn start() {
+     eframe::WebLogger::init(log::LevelFilter::Warn).ok();
+     // Detect language before starting the UI.
+@@ -66,18 +125,8 @@
+             log::error!("no canvas");
+             return;
+         };
+-        let result = eframe::WebRunner::new()
+-            .start(
+-                canvas,
+-                eframe::WebOptions::default(),
+-                Box::new(|cc| {
+-                    let ctx = cc.egui_ctx.clone();
+-                    let settings: Settings = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)).unwrap_or_default();
+-                    let backend = WebBackend::new(ctx.clone());
+-                    Ok(Box::new(WebApp { ui: LauncherUi::new(&ctx, Box::new(backend), settings) }))
+-                }),
+-            )
+-            .await;
++        let runner = eframe::WebRunner::new();
++        let result = start_runner(&runner, canvas).await;
+         if let Some(loading) = document.get_element_by_id("launcher_loading") {
+             loading.remove();
+         }
+--- a/apps/artcraft-launcher-web/src/main.rs
++++ b/apps/artcraft-launcher-web/src/main.rs
+@@ -11,6 +11,7 @@
+ 
+ #[cfg(target_arch = "wasm32")]
+ fn main() {
++    #[cfg(not(feature = "hosted-canvas"))]
+     web::start();
+ }
+ 
+@@ -21,7 +22,7 @@
+ 
+ /// The `lang` values in a page URL's query (`?lang=de`), not its `#fragment`: `?lang=de#apps`
+ /// is German, not the unknown tag `de#apps`.
+-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
++#[cfg_attr(any(not(target_arch = "wasm32"), feature = "hosted-canvas"), allow(dead_code))]
+ fn lang_params(href: &str) -> Vec<String> {
+     let page = href.split('#').next().unwrap_or(href);
+     let Some((_, query)) = page.split_once('?') else { return Vec::new() };
+--- a/apps/artcraft-launcher-web/Cargo.toml
++++ b/apps/artcraft-launcher-web/Cargo.toml
+@@ -9,6 +9,10 @@
+ 
+ [lints]
+ workspace = true
++
++[features]
++# Explicit canvas ownership for a host; ordinary Trunk builds keep auto-start.
++hosted-canvas = []
+ 
+ [[bin]]
+ name = "artcraft-launcher-web"

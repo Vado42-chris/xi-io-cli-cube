@@ -5,6 +5,7 @@ The fixture helper and source payload are upstream files, not a fake repair.
 """
 import hashlib, importlib.util, json, os, shutil, subprocess, sys, time, unittest
 from pathlib import Path
+from unittest.mock import patch, Mock
 
 HERE=Path(__file__).resolve().parent
 FIXTURE_ROOT=Path(os.environ.get('XIIO_REPAIR_FIXTURE_ROOT',HERE.parents[2]/'tests/fixtures/cli-launcher-repair-pr15')).resolve()
@@ -113,6 +114,33 @@ class LauncherRepairIntegration(unittest.TestCase):
         for extra in [{'bin_dir':'.'},{'prefix':'.'},{'node':'node'},{'components':['cli']}]:
             self.assertFalse(self.call({'action':'prepare_repair','prefix':str(self.f.prefix),'bin_dir':str(self.bin),'node':NODE,**extra})['ok'])
         self.assert_no_effect()
+
+    def test_launch_cli_reopens_verified_repaired_launcher_without_new_generation(self):
+        spec=importlib.util.spec_from_file_location('xiio_cli_repair_launch_test',self.adapter)
+        adapter=importlib.util.module_from_spec(spec);spec.loader.exec_module(adapter)
+        p=self.prepare()
+        workspace=self.home/'project';workspace.mkdir(mode=0o700)
+        request={'action':'launch_cli','plan_id':p['plan_id'],'approval_digest':p['approval_digest'],'approved':True,'workspace':str(workspace)}
+        with patch.dict(os.environ,{**self.env,'DISPLAY':':77'},clear=True),patch.object(adapter,'start_terminal') as spawn:
+            with self.assertRaises(adapter.Refused):adapter.handle(request)
+            spawn.assert_not_called()
+        repaired=self.apply(p);self.assertTrue(repaired['ok'],repaired)
+        self.assertEqual(repaired['result']['phase'],'LAUNCHER_REPAIR_READBACK_VERIFIED')
+        with patch.dict(os.environ,{**self.env,'DISPLAY':':77'},clear=True),patch.object(adapter,'registered_terminal',return_value='/usr/bin/registered-test-terminal'),patch.object(adapter,'start_terminal',return_value=Mock(pid=322)) as spawn:
+            result=adapter.handle(request)
+            self.assertEqual(result['state'],'CLI_LAUNCH_REQUESTED');self.assertEqual(result['launcher'],str(self.launcher))
+            self.assertEqual(result['workspace'],str(workspace));self.assertEqual(spawn.call_args.kwargs['cwd'],str(workspace))
+            self.assertFalse(result['runtime_ready']);self.assertEqual(result['pid'],322)
+            self.assertEqual(spawn.call_args.args[0],['/usr/bin/registered-test-terminal','-e',str(self.launcher),'menu'])
+            self.assertEqual(snapshot(self.f.prefix),self.before)
+            spawn.reset_mock()
+            with self.assertRaisesRegex(adapter.Refused,'EXACT_APPROVAL_REQUIRED'):adapter.handle({**request,'approved':False})
+            original=self.launcher.read_bytes();self.launcher.write_bytes(original+b'# drift\n')
+            with self.assertRaises(adapter.Refused):adapter.handle(request)
+            self.launcher.write_bytes(original)
+            self.journal(p).write_text('corrupt')
+            with self.assertRaisesRegex(adapter.Refused,'EVIDENCE_UNREADABLE_DO_NOT_RETRY'):adapter.handle(request)
+            spawn.assert_not_called()
 
     def test_stale_approved_node_rejected_before_canonical_effect(self):
         selected=self.home/'approved-node';shutil.copy2(NODE,selected)

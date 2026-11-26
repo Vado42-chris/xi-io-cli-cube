@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Stable finite HEX installer adapter with Framework product/API consumption.
 
-The accepted implementation is retained byte-for-byte in
-installer_adapter_core.py. This surface only binds server-package requests to an
+The accepted transaction implementation and finite installed-CLI launch live in
+installer_adapter_core.py. This surface binds server-package requests to an
 installed, Installer-verified Framework product API module before delegating to
 the accepted transaction engine.
 """
