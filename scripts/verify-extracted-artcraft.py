@@ -182,6 +182,29 @@ class Software(base.Native):
         roles = [self.ax.Role.PUSH_BUTTON, self.ax.Role.PAGE_TAB]
         self.click(self.wait(lambda: self.find('Software', roles)))
 
+    def painted_capture(self, name, controls):
+        """Reuse the native deadline while prepaint pixels become observable."""
+        checker = Path(__file__).with_name('verify-hex-capture.py')
+        command = ['python3', '-I', '-B', str(checker), str(self.proof/(name + '.png'))]
+        def observe():
+            self.guard()
+            controls()
+            geometry = tuple(self.geometry)
+            try:
+                image = self.capture(name)
+            except subprocess.CalledProcessError as error:
+                category = error.stderr.strip() if isinstance(error.stderr, str) else ''
+                if error.cmd != command or category not in {'PNG_BLANK_OR_PREPAINT', 'PNG_FLAT_FRAME_NO_UI_TEXTURE'}:
+                    raise
+                self.guard()
+                controls()
+                raise base.Unverified(category) from None
+            self.guard()
+            base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
+            controls()
+            return image, geometry
+        return self.wait(observe)
+
     def rendered_content(self, name, screenshot_sha, geometry, retired=False):
         """Read only the owned window pixels from this guarded fresh capture."""
         self.guard()
@@ -244,11 +267,7 @@ class Software(base.Native):
         self.stage = 'software-generated-module-initialization'
         self.wait(self.initialized)
         self.stage = 'software-initialized-capture'
-        self.guard()
-        geometry = tuple(self.geometry)
-        image = self.capture('software-initialized')
-        self.guard()
-        self.initialized()
+        image, geometry = self.painted_capture('software-initialized', self.initialized)
         self.stage = 'software-rendered-xiio-content'
         self.rendered_content('software-initialized', image, geometry)
         self.guard()
@@ -279,11 +298,7 @@ class Software(base.Native):
         self.stage = 'software-retired-reference-readback'
         self.wait(self.retired_controls)
         self.stage = 'software-retired-body-capture'
-        self.guard()
-        geometry = tuple(self.geometry)
-        image = self.capture('software-retired-dev12')
-        self.guard()
-        self.retired_controls()
+        image, geometry = self.painted_capture('software-retired-dev12', self.retired_controls)
         self.stage = 'software-retired-rendered-title'
         self.rendered_content('software-retired-dev12', image, geometry, retired=True)
         self.guard()

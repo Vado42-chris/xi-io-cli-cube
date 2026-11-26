@@ -4,7 +4,8 @@ import unittest
 import tempfile
 import json
 import time
-from unittest.mock import patch
+import shutil
+from unittest.mock import Mock, patch
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('software',ROOT/'scripts/verify-extracted-artcraft.py')
@@ -359,5 +360,88 @@ class RenderedCapture(unittest.TestCase):
                 self.assertFalse(receipt['red_established']);self.assertFalse(receipt['initialization_observed'])
                 self.assertFalse(receipt['xiio_catalog_rendered']);self.assertFalse(receipt['domain_action_verified'])
                 self.assertEqual(receipt['failure_category'],category)
+
+class PaintedCapture(unittest.TestCase):
+    def setUp(self):
+        from PIL import Image
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name)
+        self.flat=self.root/'flat-fixture.png'
+        self.painted=self.root/'painted-fixture.png'
+        Image.new('RGB',(640,480),'white').save(self.flat)
+        image=Image.new('RGB',(640,480))
+        image.putdata([(x%256,y%256,(x+y)%256) for y in range(480) for x in range(640)])
+        image.save(self.painted)
+    def native(self,pictures):
+        native=m.Software.__new__(m.Software)
+        native.proof=self.root;native.geometry=(0,0,640,480)
+        native.deadline=time.monotonic()+90
+        native.guard=Mock();native.open_software=Mock()
+        native.initialized=Mock(return_value=True)
+        native.retired_controls=Mock(return_value=[{'fixture':'retired controls'}])
+        native.rendered_content=Mock()
+        native.capture_count=0
+        def command(args):
+            if args[0]=='scrot':
+                source=pictures[min(native.capture_count,len(pictures)-1)]
+                native.capture_count+=1
+                shutil.copyfile(source,args[-1]);return ''
+            return m.subprocess.run(args,check=True,capture_output=True,text=True,timeout=5).stdout.strip()
+        native.command=command
+        return native
+    def test_rejected_pixels_are_recaptured_after_fresh_controls_then_paint(self):
+        for retired in (False,True):
+            with self.subTest(retired=retired):
+                native=self.native([self.flat,self.painted])
+                with patch.object(m.base.time,'sleep'):
+                    result=native.run_retired() if retired else native.run()
+                digest=result[0] if retired else result
+                self.assertEqual(digest,m.file_digest(self.painted))
+                self.assertEqual(native.capture_count,2)
+                check=native.retired_controls if retired else native.initialized
+                self.assertGreaterEqual(check.call_count,5)
+                native.rendered_content.assert_called_once()
+                self.assertEqual(native.rendered_content.call_args.args[1:],(digest,(0,0,640,480)))
+    def test_persistent_prepaint_remains_unverified_and_never_establishes_red(self):
+        native=self.native([self.flat])
+        args=['probe','--retired-dev12','123','456','b'*40,str(self.root),'/tmp/payload/usr/bin/xi-io-hex-dev','/tmp/dev12.deb']
+        with patch.dict(m.os.environ,ENV),patch.object(m.sys,'argv',args),patch.object(m,'dev12_binding',return_value={}),patch.object(m,'Software',return_value=native),patch.object(m.base.time,'sleep'):
+            self.assertEqual(m.main(),61)
+        receipt=json.loads((self.root/'hex-dev12-ui-red.json').read_text())
+        self.assertFalse(receipt['red_established']);self.assertFalse(receipt['initialization_observed'])
+        self.assertEqual(receipt['failure_category'],'PNG_BLANK_OR_PREPAINT')
+        self.assertEqual(native.capture_count,41)  # forty bounded attempts plus failure evidence
+        native.rendered_content.assert_not_called()
+    def test_changed_readiness_prevents_a_later_capture_from_qualifying(self):
+        for retired in (False,True):
+            with self.subTest(retired=retired):
+                native=self.native([self.flat,self.painted])
+                category='RETIRED_DEV12_READINESS_PRESENT' if retired else 'ARTCRAFT_INITIALIZATION_NOT_OBSERVED'
+                def ready():
+                    if native.capture_count:raise m.base.Unverified(category)
+                    return True
+                if retired:native.retired_controls=Mock(side_effect=ready)
+                else:native.initialized=Mock(side_effect=ready)
+                with patch.object(m.base.time,'sleep'),self.assertRaisesRegex(m.base.Unverified,'^'+category+'$'):
+                    native.run_retired() if retired else native.run()
+                self.assertEqual(native.capture_count,1)
+                native.rendered_content.assert_not_called()
+    def test_changed_process_identity_refuses_after_the_rejected_frame(self):
+        native=self.native([self.flat,self.painted])
+        def guard():
+            if native.capture_count:raise m.base.Unverified('PROCESS_IDENTITY_CHANGED')
+        native.guard=Mock(side_effect=guard)
+        with patch.object(m.base.time,'sleep'),self.assertRaisesRegex(m.base.Unverified,'^PROCESS_IDENTITY_CHANGED$'):
+            native.run_retired()
+        self.assertEqual(native.capture_count,1)
+        native.rendered_content.assert_not_called()
+    def test_geometry_is_fresh_for_the_successful_capture(self):
+        native=self.native([self.flat,self.painted])
+        def guard():
+            native.geometry=(5,6,600,450) if native.capture_count else (0,0,640,480)
+        native.guard=Mock(side_effect=guard)
+        with patch.object(m.base.time,'sleep'):native.run_retired()
+        self.assertEqual(native.capture_count,2)
+        self.assertEqual(native.rendered_content.call_args.args[2],(5,6,600,450))
 
 if __name__=='__main__':unittest.main()
