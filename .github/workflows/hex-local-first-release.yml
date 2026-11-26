@@ -6,37 +6,46 @@ permissions:
   contents: write
   actions: read
 concurrency:
-  group: hex-local-first-d160521c-dev12
+  group: hex-local-first-dev13
   cancel-in-progress: false
 jobs:
   local-first:
-    # Existing #24 procedure, activated only on the selected DEV12 release branch.
-    if: github.repository == 'Vado42-chris/xi-io-cli-cube' && github.ref == 'refs/heads/release/local-first-dev12-20261125'
+    # Existing #24 procedure. Unbound DEV13 selection refuses before product lookup.
+    if: github.repository == 'Vado42-chris/xi-io-cli-cube' && github.ref == 'refs/heads/release/local-first-dev13-20261125'
     runs-on: ubuntu-22.04
     timeout-minutes: 35
     env:
       GH_TOKEN: ${{ github.token }}
-      XIIO_HEX_SOURCE_SHA: d160521cffd3ff7e627155050faeecc693ac76bc
-      XIIO_HEX_RELEASE_TAG: xiio-hex-local-d160521c-dev12
-      XIIO_HEX_PACKAGE_NAME: xi-io-hex-dev_0.1.0-dev.12_amd64.deb
+      XIIO_HEX_SOURCE_SHA: cbf89ae2cee92c894baa0064eb24092ffaf17f7c
+      XIIO_HEX_RELEASE_TAG: xiio-hex-local-cbf89ae2-dev13
+      XIIO_HEX_PACKAGE_NAME: xi-io-hex-dev_0.1.0-dev.13_amd64.deb
     steps:
       - name: Checkout exact dispatched release-process source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Refuse unbound DEV13 selection before product lookup
+        run: |
+          set -euo pipefail
+          [[ "$XIIO_HEX_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo HEX_RELEASE_SOURCE_UNBOUND >&2; exit 78; }
+          test "$XIIO_HEX_RELEASE_TAG" = "xiio-hex-local-${XIIO_HEX_SOURCE_SHA:0:8}-dev13"
       - name: Checkout accepted product source separately
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: d160521cffd3ff7e627155050faeecc693ac76bc
+          ref: ${{ env.XIIO_HEX_SOURCE_SHA }}
           path: checked-product
           persist-credentials: false
-      - name: Verify current CI, reopen exact DEV12 package and stage unchanged bytes
+      - name: Install the existing evidence pixel decoder
+        run: |
+          sudo apt-get update
+          # readelf checks retained OCR linkage without executing the artifact.
+          sudo apt-get install -y --no-install-recommends python3-pil binutils
+      - name: Verify current CI and native receipts, reopen exact DEV13 package and stage unchanged bytes
         run: (cd checked-product && bash ../scripts/hex-local-first-release.sh)
-      # Current pinned CI already installed this package and observed a native
-      # process-owned window on disposable Ubuntu. It did not prove a rendered
-      # action or Pop!_OS use. The old local-update test is not a release gate.
-      - name: Publish immutable local-only DEV12 prerelease
+      # Publication requires the exact native render and real DEV12 refusal
+      # receipts. Hosted Ubuntu rendering does not qualify a Pop!_OS action.
+      - name: Publish immutable local-only DEV13 prerelease
         run: |
           set -euo pipefail
           tag="$XIIO_HEX_RELEASE_TAG"
@@ -53,18 +62,18 @@ jobs:
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
             --target "$XIIO_HEX_SOURCE_SHA" \
             --verify-tag \
-            --title 'XI-IO HEX local-first Linux DEV12 (d160521c)' \
+            --title "XI-IO HEX local-first Linux DEV13 (${XIIO_HEX_SOURCE_SHA:0:8})" \
             --notes-file "$out/INSTALL-LOCAL-FIRST.txt" \
             --prerelease --latest=false \
             "$out/$XIIO_HEX_PACKAGE_NAME" \
-            "$out/SHA256SUMS" "$out/PROVENANCE.json" "$out/INSTALL-LOCAL-FIRST.txt"
+            "$out/SHA256SUMS" "$out/PROVENANCE.json" "$out/INSTALL-LOCAL-FIRST.txt" "$out/NATIVE-EVIDENCE.zip"
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" \
             --jq '.object | select(.type == "commit") | .sha' \
             | grep -Fx "$XIIO_HEX_SOURCE_SHA"
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" > "$out/provider-release-readback.json"
           jq -e --arg tag "$tag" --arg source "$XIIO_HEX_SOURCE_SHA" --arg package "$XIIO_HEX_PACKAGE_NAME" \
             '.tag_name == $tag and .target_commitish == $source and .prerelease == true and .draft == false
-             and ([.assets[].name] | sort) == ([$package, "SHA256SUMS", "PROVENANCE.json", "INSTALL-LOCAL-FIRST.txt"] | sort)' \
+             and ([.assets[].name] | sort) == ([$package, "SHA256SUMS", "PROVENANCE.json", "INSTALL-LOCAL-FIRST.txt", "NATIVE-EVIDENCE.zip"] | sort)' \
             "$out/provider-release-readback.json"
       - name: Reopen every published asset without authentication
         env:
@@ -76,7 +85,7 @@ jobs:
           public="$RUNNER_TEMP/xiio-local-first/public-readback"
           mkdir -m 0700 "$public"
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/$XIIO_HEX_RELEASE_TAG"
-          for asset in "$XIIO_HEX_PACKAGE_NAME" SHA256SUMS PROVENANCE.json INSTALL-LOCAL-FIRST.txt; do
+          for asset in "$XIIO_HEX_PACKAGE_NAME" SHA256SUMS PROVENANCE.json INSTALL-LOCAL-FIRST.txt NATIVE-EVIDENCE.zip; do
             env -u GH_TOKEN -u GITHUB_TOKEN curl --disable --fail --location \
               --proto '=https' --proto-redir '=https' --tlsv1.2 \
               --connect-timeout 15 --max-time 300 --silent --show-error \
@@ -85,13 +94,14 @@ jobs:
           done
           (cd "$public" && sha256sum -c SHA256SUMS)
           printf '%s\n' 'PUBLIC_ASSETS_REOPENED_WITHOUT_AUTHENTICATION' \
-            'POPOS_FIRST_USE=NOT_RUN' 'RENDERED_CONTENT_OR_ACTION=NOT_VERIFIED' \
+            'POPOS_FIRST_USE=NOT_RUN' 'RENDERED_ARTCRAFT_XIIO=VERIFIED_HOSTED_UBUNTU' \
+            'RETIRED_DEV12_UI=OBSERVED_AND_REFUSED' 'NATIVE_PRODUCT_ACTION=NOT_VERIFIED' \
             'MANAGED_UPGRADE=NOT_QUALIFIED' | tee "$out/public-asset-readback.txt"
       - name: Retain exact package, provenance and publication readback
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: hex-local-first-d160521c-dev12-release-proof
+          name: hex-local-first-dev13-release-proof
           path: ${{ runner.temp }}/xiio-local-first/publish/
           if-no-files-found: warn
           retention-days: 7
