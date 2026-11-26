@@ -1,0 +1,43 @@
+name: Reopen downloaded DEV14 installer in one native window
+on:
+  push:
+    branches: [qualification/dev14-packaged-window]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  consume-installed-debian:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+      - name: Fetch original immutable workflow artifact and install its Debian
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/15137960961/zip" > "$RUNNER_TEMP/origin.zip"
+          echo "d2f5910bd14a218e58ec10c7256ece8bf874280998c4c5e335cee4cc20457c8c  $RUNNER_TEMP/origin.zip" | sha256sum --check
+          mkdir archived
+          unzip -q "$RUNNER_TEMP/origin.zip" -d archived
+          shopt -s globstar nullglob
+          debs=(archived/**/*.deb)
+          test "${#debs[@]}" -eq 1
+          echo "30085a934390c7a5a25350091d9c1ce211ae45eb10030100b638584377157651  ${debs[0]}" | sha256sum --check
+          sudo apt-get update -qq
+          sudo apt-get install -y "./${debs[0]}" xvfb xdotool x11-utils dbus-x11 python3-gi gir1.2-atspi-2.0 at-spi2-core python3-pil
+      - name: Observe two installations through the running package
+        env:
+          GDK_BACKEND: x11
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          NO_AT_BRIDGE: '0'
+        run: |
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- timeout 180s /usr/bin/python3 -I -B scripts/observe-downloaded-dev14.py
+      - name: Retain native readback
+        uses: actions/upload-artifact@v4
+        with:
+          name: archived-dev14-product-window
+          path: archived-product-window-readback.json
