@@ -169,6 +169,40 @@ def window_id(pid, title, timeout=12, *, transient_for=None):
     raise RuntimeError(f"Visible native window {title!r} with parent {transient_for!r} unavailable. HEX windows {seen!r}")
 
 
+INSTALL_REGION = "Product-only release installation"
+INSTALL_HEADING = "Install a downloaded product"
+
+
+def install_heading_check(capture, rows, complete):
+    check = capture.expected_control_check(rows, complete, INSTALL_HEADING, "heading")
+    if rows is None or not complete:
+        return {**check, "status": "OBSERVER_UNAVAILABLE"}
+    return check
+
+
+def inspect_install_heading(repo, ui, unverified):
+    spec = importlib.util.spec_from_file_location("hex_library", repo / "scripts/verify-installed-hex-library.py")
+    capture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(capture)
+    from gi.repository import GLib
+    observer = capture.Native(ui.pid, ui.window, ui.elf)
+
+    def read():
+        ui.guard()
+        try:
+            rows = observer.rows(scope_name=INSTALL_REGION)
+        except (capture.Unverified, GLib.Error) as error:
+            # The existing ui.wait deadline also bounds stale AT-SPI tree reads.
+            raise unverified(f"INSTALL_HEADING_OBSERVER_UNAVAILABLE: {error}") from error
+        check = install_heading_check(capture, rows, observer.last_rows_complete)
+        if check["status"] != "MATCHED":
+            raise unverified(f"INSTALL_HEADING_{check['status']} (visible headings {check['visible_role_count']})")
+        return {"name": INSTALL_HEADING, "region": INSTALL_REGION, "status": check["status"],
+                "visible_exact_matches": check["visible_exact_matches"]}
+
+    return ui.wait(read)
+
+
 def choose_folder(ui, folder, unverified):
     button = ui.wait(lambda: ui.find("Choose product folder", [ui.ax.Role.PUSH_BUTTON]))
     ui.click(button)
@@ -335,6 +369,7 @@ def exercise_installed_window(repo, hosted, source_sha, executable, elf, package
                 ui.deadline = time.monotonic() + 120
                 ui.command(["xdotool","windowfocus","--sync",ui.window])
                 ui.click(ui.wait(lambda: ui.find("Install", [ui.ax.Role.PUSH_BUTTON,ui.ax.Role.PAGE_TAB])))
+                heading = inspect_install_heading(repo, ui, hosted.base.Unverified)
                 observations = []
                 for folder, profile, root, product in prepared:
                     rows = value_before_effect(folder, profile)
@@ -361,7 +396,7 @@ def exercise_installed_window(repo, hosted, source_sha, executable, elf, package
                 ui.guard()
                 proof.write_text(json.dumps({"schema":"xiio.hex.installed-window-product-selection-test/v1",
                     "source":source_sha, "package_sha256":package_binding["debian_package_sha256"],
-                    "installed_elf_sha256":elf, "same_window":True, "fresh_consent_each":True,
+                    "installed_elf_sha256":elf, "install_heading":heading, "same_window":True, "fresh_consent_each":True,
                     "synthetic_framework_release_admission":True, "products":observations,
                     "production_release_approved":False,"account_provisioned":False}, indent=2)+"\n")
             except Exception:
