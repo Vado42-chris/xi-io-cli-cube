@@ -109,6 +109,20 @@ def control_matches(row, name, role, reference_card=False):
     return label == name
 
 
+def expected_control_check(rows, complete, name, role, reference_card=False):
+    matches = [row for row in (rows or []) if control_matches(row, name, role, reference_card)]
+    visible = sum(row['visible'] is True for row in matches)
+    hidden = len(matches) - visible
+    role_exposed = any(row['role'] == role for row in (rows or []))
+    return {'expected_name': name, 'role': role, 'reference_card': reference_card,
+            'visible_exact_matches': visible, 'hidden_exact_matches': hidden,
+            'visible_role_count': sum(row['role'] == role and row['visible'] is True for row in (rows or [])),
+            'status': ('MATCHED' if visible == 1 else 'DUPLICATE' if visible > 1
+                       else 'NOT_VISIBLE' if hidden
+                       else 'EXPECTED_ROLE_NOT_EXPOSED' if complete and not role_exposed
+                       else 'EXPECTED_CONTROL_NOT_OBSERVED')}
+
+
 def content_diagnostics(native, retired=False):
     """Keep bounded observations, without turning absent AX data into bad UI."""
     rows = native.last_rows if native is not None else None
@@ -116,19 +130,7 @@ def content_diagnostics(native, retired=False):
     expected = [(name, role, False) for name, role in (RETIRED_CONTROLS if retired else EXPECTED_CONTROLS)]
     if retired:
         expected += [(name, 'button', True) for name in RETIRED_CARD_NAMES]
-    checks = []
-    for name, role, reference_card in expected:
-        matches = [row for row in (rows or []) if control_matches(row, name, role, reference_card)]
-        visible = sum(row['visible'] is True for row in matches)
-        hidden = len(matches) - visible
-        role_exposed = any(row['role'] == role for row in (rows or []))
-        checks.append({'expected_name': name, 'role': role, 'reference_card': reference_card,
-                       'visible_exact_matches': visible, 'hidden_exact_matches': hidden,
-                       'visible_role_count': sum(row['role'] == role and row['visible'] is True for row in (rows or [])),
-                       'status': ('MATCHED' if visible == 1 else 'DUPLICATE' if visible > 1
-                                  else 'NOT_VISIBLE' if hidden
-                                  else 'EXPECTED_ROLE_NOT_EXPOSED' if complete and not role_exposed
-                                  else 'EXPECTED_CONTROL_NOT_OBSERVED')})
+    checks = [expected_control_check(rows, complete, name, role, card) for name, role, card in expected]
     retained = []
     for row in (rows or [])[:MAX_DIAGNOSTIC_ROWS]:
         item = dict(row)
@@ -255,7 +257,7 @@ class Native:
         x, y, width, height = self.geometry
         return bounds.width > 0 and bounds.height > 0 and x <= bounds.x and y <= bounds.y and bounds.x + bounds.width <= x + width and bounds.y + bounds.height <= y + height
 
-    def rows(self):
+    def rows(self, *, scope_name=None):
         self.last_rows = None
         self.last_rows_complete = False
         self.last_raw_role_counts = {}
@@ -263,13 +265,17 @@ class Native:
         applications = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
         applications = [app for app in applications if app.get_process_id() == self.pid]
         require(len(applications) == 1, 'ACCESSIBILITY_APPLICATION_UNVERIFIED')
-        queue = [(applications[0], 0)]
+        queue = [(applications[0], 0, scope_name is None)]
+        scopes = 0
         rows, visited = [], 0
         self.last_rows = rows
         roles = {self.ax.Role.PUSH_BUTTON: 'button', self.ax.Role.HEADING: 'heading'}
         while queue:
             require(time.monotonic() < self.deadline, 'HEX_LIBRARY_OBSERVATION_DEADLINE')
-            node, depth = queue.pop(0)
+            node, depth, in_scope = queue.pop(0)
+            if scope_name is not None and node.get_name() == scope_name:
+                scopes += 1
+                in_scope = True
             visited += 1
             require(visited <= 2048 and depth < 40, 'ACCESSIBILITY_TREE_BOUNDS')
             raw_role = node.get_role()
@@ -280,11 +286,11 @@ class Native:
             raw_counts[role_nick] = raw_counts.get(role_nick, 0) + 1
             role = roles.get(raw_role)
             heading_metadata = None
-            if raw_role == self.ax.Role.DOCUMENT_FRAME:
+            if in_scope and raw_role == self.ax.Role.DOCUMENT_FRAME:
                 heading_metadata = webkit_heading_metadata(node)
                 if heading_metadata is not None:
                     role = 'heading'
-            if role:
+            if in_scope and role:
                 name = node.get_name() or ''
                 require(len(name) <= MAX_CONTROL_TEXT, 'ACCESSIBILITY_NAME_BOUNDS')
                 visible = self.visible(node)
@@ -306,7 +312,9 @@ class Native:
                     row['bounds'] = [bounds.x, bounds.y, bounds.width, bounds.height]
             count = node.get_child_count()
             require(0 <= count <= 512, 'ACCESSIBILITY_CHILD_BOUNDS')
-            queue.extend((node.get_child_at_index(i), depth + 1) for i in range(count))
+            queue.extend((node.get_child_at_index(i), depth + 1, in_scope) for i in range(count))
+        if scope_name is not None:
+            require(scopes == 1, 'ACCESSIBILITY_REGION_NOT_UNIQUELY_OBSERVED')
         self.last_rows_complete = True
         return rows
 
