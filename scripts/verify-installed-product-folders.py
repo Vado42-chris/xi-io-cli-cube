@@ -318,7 +318,20 @@ def exercise_installed_window(repo, hosted, source_sha, executable, elf, package
         sentinel_before = sentinel.read_bytes()
         with subprocess.Popen([str(executable)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as app:
             try:
-                ui = hosted.base.Native(app.pid, window_id(app.pid, "XI-IO HEX"), elf, source_sha, work)
+                # WebKit discards accessible objects between the busy and reviewed views.
+                # Restart tree traversal only for that transient, keeping the original window and ELF.
+                from gi.repository import GLib
+                class Window(hosted.base.Native):
+                    def nodes(self):
+                        for attempt in range(6):
+                            try:
+                                return super().nodes()
+                            except GLib.Error as exc:
+                                if attempt == 5 or "application no longer exists" not in str(exc).lower():
+                                    raise
+                                self.guard()
+                                time.sleep(.12)
+                ui = Window(app.pid, window_id(app.pid, "XI-IO HEX"), elf, source_sha, work)
                 ui.deadline = time.monotonic() + 120
                 ui.command(["xdotool","windowfocus","--sync",ui.window])
                 ui.click(ui.wait(lambda: ui.find("Install", [ui.ax.Role.PUSH_BUTTON,ui.ax.Role.PAGE_TAB])))
@@ -326,7 +339,9 @@ def exercise_installed_window(repo, hosted, source_sha, executable, elf, package
                 for folder, profile, root, product in prepared:
                     rows = value_before_effect(folder, profile)
                     choose_folder(ui, folder, hosted.base.Unverified)
-                    ui.click(ui.wait(lambda: ui.find("Inspect exact product release", [ui.ax.Role.PUSH_BUTTON])))
+                    inspect = ui.wait(lambda: ui.find("Inspect exact product release", [ui.ax.Role.PUSH_BUTTON]))
+                    require(inspect.get_state_set().contains(ui.ax.StateType.ENABLED), "Inspect disabled after folder selection")
+                    ui.click(inspect)
                     label = "Approve this exact reviewed product and dependency closure."
                     approval = ui.wait(lambda: ui.find(label, [ui.ax.Role.CHECK_BOX]))
                     require(product["display_name"] in ui.text(), "Reviewed product name mismatch")
@@ -349,6 +364,19 @@ def exercise_installed_window(repo, hosted, source_sha, executable, elf, package
                     "installed_elf_sha256":elf, "same_window":True, "fresh_consent_each":True,
                     "synthetic_framework_release_admission":True, "products":observations,
                     "production_release_approved":False,"account_provisioned":False}, indent=2)+"\n")
+            except Exception:
+                if app.poll() is None and "ui" in locals():
+                    try:
+                        summary = [(n.get_role_name(), n.get_name()[:140]) for n in ui.nodes()
+                                   if n.get_role() in (ui.ax.Role.ALERT, ui.ax.Role.STATUS_BAR, ui.ax.Role.CHECK_BOX,
+                                                       ui.ax.Role.PUSH_BUTTON) and n.get_name()]
+                        print("Installed window controls:", summary[:50], flush=True)
+                        text = ui.text()
+                        errors = sorted(set(re.findall(r"\b[A-Z][A-Z_]{4,}\b", text)))
+                        print("Visible status codes:", errors[:15], flush=True)
+                    except Exception as exc:
+                        print("Accessibility snapshot unavailable", type(exc).__name__, flush=True)
+                raise
             finally:
                 app.terminate()
                 try:
