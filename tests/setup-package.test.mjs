@@ -118,11 +118,12 @@ test('one Install tab reviews two downloaded products on the same host with sepa
   try {
     const mod = new SourceTextModule(script,{context:dom.getInternalVMContext(),importModuleDynamically:async()=>{throw Error('ARTCRAFT_TEST_EXECUTOR_NO_WASM');}});
     await mod.link(()=>{throw Error('external');}); await mod.evaluate(); await pause();
-    w.document.querySelector('[data-window-rail-tabs] button[aria-label="Install"]').click(); await pause();
+    const shadow=w.document.querySelector('[data-hex-product-content]').shadowRoot;
+    [...shadow.querySelectorAll('button')].find(el=>el.textContent.trim()==='Install from download').click(); await pause();
     const panel=w.document.querySelector('[data-hex-product-content]').shadowRoot.querySelector('[aria-label="Product-only release installation"]');
     const button=text=>[...panel.querySelectorAll('button')].find(el=>el.textContent.trim()===text);
     for (;index<products.length;index++) {
-      button('Choose product folder').click(); await pause();
+      if (index > 0) { button('Choose product folder').click(); await pause(); }
       assert.equal(button('Install reviewed product'),undefined);
       button('Inspect exact product release').click(); await pause();
       assert.match(panel.textContent,new RegExp(products[index]));

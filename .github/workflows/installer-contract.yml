@@ -346,6 +346,17 @@ jobs:
           cp software-initialized.png maths-installed-window.png
           sha256sum maths-installed-window.png | tee maths-installed-window.sha256
           printf 'SOURCE=%s\nARTCRAFT_RUNTIME_INITIALIZATION_OBSERVED=true\nNATIVE_MATHS_CLICK_READBACK=NOT_VERIFIED\nPOP_OS_ACCEPTANCE=NOT_PERFORMED\nARIES_INSTALL=NOT_PERFORMED\n' "$HEX_BUILD_SOURCE"
+      - name: Install two downloaded products through one installed HEX window
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(native/hex/carrier/src-tauri/target/release/bundle/deb/*.deb)
+          test "${#debs[@]}" -eq 1
+          sha256sum --check maths-native-deb.sha256
+          export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 NO_AT_BRIDGE=0
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- \
+            timeout --signal=KILL 180s /usr/bin/python3 -I -B scripts/verify-installed-product-folders.py \
+            --package "${debs[0]}" --proof "$GITHUB_WORKSPACE/hex-installed-products.json"
       - name: Refuse the actual released DEV12 catalog with the same content observer
         if: always()
         run: |
@@ -459,6 +470,7 @@ jobs:
             maths-deb.contents
             hex-built-frontend.tgz
             hex-native-frontend-identity.json
+            hex-installed-products.json
             hex-frontend-artifacts.sha256
             hex-ocr-identity.json
             hex-ocr-toolchain.tgz

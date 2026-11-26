@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useImperativeHandle, useRef, useState} from 'react';
 import {createInstallerClient, installerStatus, nativeInstallerAvailable} from '../lib/nativeInstaller.mjs';
 import {installerReadiness, reviewedRuntimeReady} from '../lib/installerReadiness.mjs';
 import {selectNativeDirectory} from '../lib/nativeDirectory.mjs';
@@ -9,7 +9,9 @@ type PermissionProfile = {schema:'xiio.hex.permission-profile/v1';profile_id:str
 type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]; permission_profile: PermissionProfile} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true} | {action:'launch_cli';plan_id:string;approval_digest:string;approved:true;workspace:string} | {action:'server_prepare';plan_id:string;package_root:string} | {action:'server_apply';plan_id:string;package_root:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'server_rollback';plan_id:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'permission_replace';plan_id:string;current_digest:string;new_profile:PermissionProfile;approved:true} | {action:'product_inspect';release_lock:string;framework_binding_receipt:string;framework_generation:string;node:string} | {action:'product_apply';release_lock:string;framework_binding_receipt:string;framework_generation:string;node:string;review_digest:string;approved:true};
 
 /** Local native controls within the accepted Cube design, not another launcher. */
-export default function NativeInstallerPanel() {
+export type ProductChooser = {chooseProductFolder: () => Promise<void>};
+
+export default function NativeInstallerPanel({chooserRef}: {chooserRef?: React.Ref<ProductChooser>} = {}) {
   const native = nativeInstallerAvailable();
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -170,6 +172,7 @@ export default function NativeInstallerPanel() {
     } catch (e) {setError(String(e instanceof Error ? e.message : e));}
     finally {busyRef.current = false; setBusy(false);}
   }
+  useImperativeHandle(chooserRef ?? null, () => ({chooseProductFolder}));
   function resetProductReview() {
     setProductReview(null); setProductResult(null); setProductApproved(false);
   }

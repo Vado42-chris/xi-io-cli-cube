@@ -4,7 +4,7 @@ import {NativeProductWindowShell, useThemeMode, setThemeMode} from './shared/win
 import {Grid, Download, Wrench, Calculator, Sun, Moon} from 'lucide-react';
 import ArtcraftLauncherBody from './components/ArtcraftLauncherBody';
 import {loadPackagedArtcraftLauncher} from './lib/artcraftLauncherAssets.mjs';
-import NativeInstallerPanel from './components/NativeInstallerPanel';
+import NativeInstallerPanel, {type ProductChooser} from './components/NativeInstallerPanel';
 import HexLocalTools from './components/HexLocalTools';
 import Snap55Workbench from './components/Snap55Workbench';
 import TabletBackdrop from './components/TabletBackdrop';
@@ -16,6 +16,7 @@ type View = 'software' | 'install' | 'tools' | 'maths';
 // Current shell and installer custody remain. Artcraft owns only Software.
 function CubeProductContent({view, onReviewInstallation}: {view: View; onReviewInstallation: () => void}) {
   const host = useRef<HTMLDivElement>(null);
+  const productChooser = useRef<ProductChooser>(null);
   const launcherLifecycle = useRef<{pending: Promise<void>; cleanupFailure: string | null}>({pending: Promise.resolve(), cleanupFailure: null});
   const [root, setRoot] = useState<ShadowRoot | null>(null);
   const theme = useThemeMode();
@@ -28,6 +29,11 @@ function CubeProductContent({view, onReviewInstallation}: {view: View; onReviewI
       <div className="h-full min-h-0 flex flex-col" data-hex-workspace data-product-theme={theme}>
         <div className="hex-product-toolbar flex items-center justify-between shrink-0 px-3 py-2 text-workspace-text">
           <span className="font-semibold">{view === 'software' ? 'Software' : view === 'install' ? 'Install software' : view === 'tools' ? 'Local tools' : 'Maths'}</span>
+          {view === 'software' && nativeInstallerAvailable() && <button type="button"
+            className="ml-auto mr-2 min-h-[44px] border border-workspace-border-strong px-3"
+            onClick={() => {onReviewInstallation(); void productChooser.current?.chooseProductFolder();}}>
+            Install from download
+          </button>}
           <button type="button" className="min-w-[44px] min-h-[44px] inline-flex items-center justify-center border border-workspace-border-strong"
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} appearance`}
             onClick={() => setThemeMode(theme === 'dark' ? 'light' : 'dark')}>
@@ -42,7 +48,7 @@ function CubeProductContent({view, onReviewInstallation}: {view: View; onReviewI
           <TabletBackdrop />
           {/* Keep exact installer plan, consent and uncertain outcomes alive. */}
           <div className="hex-workspace-layout relative" hidden={view !== 'install'} style={{display: view === 'install' ? undefined : 'none'}}>
-            <NativeInstallerPanel />
+            <NativeInstallerPanel chooserRef={productChooser} />
           </div>
           <div className="hex-workspace-layout relative" hidden={view !== 'tools'} style={{display: view === 'tools' ? undefined : 'none'}}>
             <HexLocalTools active={view === 'tools'} />
