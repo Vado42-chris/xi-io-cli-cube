@@ -144,25 +144,81 @@ def window_id(pid, title, timeout=12):
     raise RuntimeError("Visible native window missing: " + title)
 
 
-def choose_folder(ui, folder):
+def choose_folder(ui, folder, unverified):
     button = ui.wait(lambda: ui.find("Choose product folder", [ui.ax.Role.PUSH_BUTTON]))
     ui.click(button)
     dialog = window_id(ui.pid, "Choose downloaded product folder")
     ui.command(["xdotool", "windowfocus", "--sync", dialog])
 
-    def dialog_input(*args):
+    title = "Choose downloaded product folder"
+    roles = ui.ax.Role
+    geometry = dict(item.split("=", 1) for item in
+                    ui.command(["xdotool", "getwindowgeometry", "--shell", dialog]).splitlines()
+                    if "=" in item)
+    x, y, width, height = (int(geometry[k]) for k in ("X", "Y", "WIDTH", "HEIGHT"))
+
+    def guard_dialog():
         require(ui.command(["xdotool", "getwindowfocus"]) == dialog, "Chooser lost focus")
         require(ui.command(["xdotool", "getwindowpid", dialog]) == str(ui.pid), "Wrong chooser process")
-        ui.command(["xdotool", *args])
+        require(ui.command(["xdotool", "getwindowname", dialog]) == title, "Chooser title changed")
 
-    dialog_input("key", "--clearmodifiers", "ctrl+l")
-    dialog_input("type", "--clearmodifiers", "--delay", "1", str(folder))
-    dialog_input("key", "--clearmodifiers", "Return")
-    # GTK may enter the typed directory on the first Return. Accept only while
-    # the same owned chooser still has focus. The observed product must match below.
-    time.sleep(.65)
-    if ui.command(["xdotool", "getwindowfocus"]) == dialog:
-        dialog_input("key", "--clearmodifiers", "Return")
+    def chooser_nodes():
+        roots = [n for n in ui.nodes() if n.get_name() == title
+                 and n.get_role() in (roles.DIALOG, roles.FILE_CHOOSER, roles.FRAME)]
+        if len(roots) != 1:
+            return []
+        queue, found = [roots[0]], []
+        while queue:
+            current = queue.pop()
+            require(len(found) < 2048, "Chooser accessibility tree exceeded bounds")
+            found.append(current)
+            queue.extend(current.get_child_at_index(i) for i in range(current.get_child_count()))
+        return found
+
+    def point(node):
+        state = node.get_state_set()
+        if not state.contains(ui.ax.StateType.SHOWING):
+            return None
+        component = node.get_component_iface()
+        if not component:
+            return None
+        rect = component.get_extents(ui.ax.CoordType.SCREEN)
+        px, py = rect.x + rect.width // 2, rect.y + rect.height // 2
+        if rect.width > 0 and rect.height > 0 and x <= px < x+width and y <= py < y+height:
+            return px, py
+        return None
+
+    def click_named(name, accepted_roles):
+        end = time.monotonic() + 7
+        seen = []
+        while time.monotonic() < end:
+            guard_dialog()
+            nodes = chooser_nodes()
+            candidates = []
+            for n in nodes:
+                if n.get_name() != name or n.get_role() not in accepted_roles:
+                    continue
+                position = point(n)
+                if position and n.get_state_set().contains(ui.ax.StateType.SENSITIVE):
+                    candidates.append(position)
+            # A GTK list row/cell and its text can share an accessible name.
+            # Click the unique point when both interfaces describe the same cell.
+            if len(set(candidates)) == 1:
+                px, py = candidates[0]
+                ui.command(["xdotool", "mousemove", "--sync", str(px), str(py)])
+                guard_dialog()
+                ui.command(["xdotool", "click", "1"])
+                return
+            seen = [(n.get_role_name(), n.get_name()[:80]) for n in nodes
+                    if n.get_name() and point(n)][:45]
+            time.sleep(.12)
+        raise RuntimeError(f"Chooser control {name!r} was not uniquely selectable. Visible controls {seen!r}")
+
+    # The downloaded directories are direct children of the new disposable HOME.
+    # Single-click the file list row, then click GTK's explicit response button.
+    click_named(folder.name, (roles.TABLE_CELL, roles.LIST_ITEM, roles.TREE_ITEM,
+                              roles.LABEL, roles.ICON))
+    click_named("Select folder", (roles.PUSH_BUTTON,))
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         result = subprocess.run(["xdotool","search","--onlyvisible","--pid",str(ui.pid),"--name","^Choose downloaded product folder$"],capture_output=True)
@@ -172,7 +228,11 @@ def choose_folder(ui, folder):
     else:
         raise RuntimeError("Folder chooser remained open")
     ui.command(["xdotool", "windowfocus", "--sync", ui.window])
-    ui.wait(lambda: ui.find("Inspect exact product release", [ui.ax.Role.PUSH_BUTTON]))
+    def selected_path_visible():
+        if str(folder) in ui.text():
+            return True
+        raise unverified("Selected folder was not displayed by HEX")
+    ui.wait(selected_path_visible)
 
 
 def main():
@@ -210,7 +270,19 @@ def main():
         framework = prepare_framework(repo, work)
         folders = [f.resolve(strict=True) for f in args.media] if args.media else sample_products(work)
         require(len(folders) >= 2 and len(set(folders)) == len(folders), "Two different product folders required")
-        prepared = [(f, *prepare_admission(f, framework, node)) for f in folders]
+        # Native GTK opens at HOME. Materialize the downloaded folders there
+        # using ordinary, visible names so selection uses the real file list.
+        downloads = []
+        for index, original in enumerate(folders, 1):
+            download = Path(os.environ["HOME"]) / f"HEX download {index:02d}"
+            shutil.copytree(original, download)
+            for member in original.rglob("*"):
+                require(not member.is_symlink(), "Symlink in qualification media")
+                if member.is_file():
+                    require((download / member.relative_to(original)).read_bytes() == member.read_bytes(),
+                            "Downloaded copy differs from supplied media")
+            downloads.append(download)
+        prepared = [(f, *prepare_admission(f, framework, node)) for f in downloads]
         require(len({r["product_id"] for _, _, r, _ in prepared}) == len(folders), "Duplicate selected product")
         sentinel = work / "private-sphere"
         sentinel.write_bytes(os.urandom(32))
@@ -224,7 +296,7 @@ def main():
                 observations = []
                 for folder, profile, root, product in prepared:
                     rows = value_before_effect(folder, profile)
-                    choose_folder(ui, folder)
+                    choose_folder(ui, folder, hosted.base.Unverified)
                     ui.click(ui.wait(lambda: ui.find("Inspect exact product release", [ui.ax.Role.PUSH_BUTTON])))
                     label = "Approve this exact reviewed product and dependency closure."
                     approval = ui.wait(lambda: ui.find(label, [ui.ax.Role.CHECK_BOX]))
