@@ -10,6 +10,7 @@ from . import __version__
 from .discovery import discover_host
 from .manifest import load_manifest, verify_payload
 from .dependency_binding import bind_dependency_manifest
+from .dependency_receipt_verification import verify_dependency_binding_receipt
 from .diagnostics import diagnostic_bundle, evidence_status
 from .observability import OperationJournal, inspect_operation, list_operations
 from .redaction import redact_text
@@ -18,7 +19,7 @@ from .consent import SCOPES, authorize, compile_policy, read_receipt, replace_re
 from .service_profile import compile_service_activation, load_service_profile
 from .update_request import authorize_update, load_update_request
 from .runtime_profile import load_runtime_profile, qualify_update_request
-from .runtime_activation import activate_runtime_profile, revoke_runtime_consent
+from .runtime_activation import activate_runtime_profile, revoke_runtime_consent, verify_runtime_activation_receipt
 
 
 def _refs_from_items(items: list[Any]) -> list[dict[str, Any]]:
@@ -51,6 +52,8 @@ def _expected_action(cmd: str) -> str:
     return {
         "discover": "discover local host capabilities without mutation",
         "verify-payload": "verify immutable product payload custody",
+        "verify-dependency-binding": "reopen and verify installed dependency binding custody without mutation",
+        "verify-runtime-activation": "reopen runtime activation custody and re-probe live service generations without mutation",
         "plan": "compile an installation plan without mutation",
         "apply": "apply an explicitly approved installation transaction",
         "rollback": "rollback an explicitly approved installation transaction",
@@ -155,6 +158,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("payload_root", type=Path)
     ap.add_argument("receipt", type=Path)
     ap.add_argument("--approve", action="store_true", help="required for mutation")
+    vd = sub.add_parser("verify-dependency-binding")
+    vd.add_argument("binding_receipt", type=Path)
+    vd.add_argument("expected_dependency_id")
+    vd.add_argument("expected_owner_repo")
+    vd.add_argument("expected_generation")
+    va = sub.add_parser("verify-runtime-activation")
+    va.add_argument("activation_receipt", type=Path)
+    va.add_argument("expected_profile_id")
+    va.add_argument("expected_product_id")
+    va.add_argument("expected_profile_generation")
     bp = sub.add_parser("bind-dependency-manifest")
     bp.add_argument("manifest", type=Path)
     bp.add_argument("payload_root", type=Path)
@@ -163,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     bp.add_argument("expected_dependency_id")
     bp.add_argument("expected_owner_repo")
     bp.add_argument("expected_generation")
+    bp.add_argument("--descriptor", type=Path, help="separate dependency/runtime descriptor for strict product manifests")
     bp.add_argument("--approve", action="store_true", help="required for dependency installation")
     rp = sub.add_parser("rollback")
     rp.add_argument("receipt", type=Path)
@@ -202,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     ar.add_argument("--grant", action="append", default=[])
     ar.add_argument("--update-policy", choices=["MANUAL","SECURITY_AUTO","MANAGED"])
     ar.add_argument("--principal-ref", default="local-user")
+    ar.add_argument("--release-generation", help="exact accepted release generation for RESOLVE_FROM_RELEASE_LOCK profiles")
     ar.add_argument("--approve", action="store_true", help="required for runtime activation")
     rr = sub.add_parser("revoke-runtime-consent")
     rr.add_argument("consent_receipt", type=Path)
@@ -210,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     qu.add_argument("runtime_profile", type=Path)
     qu.add_argument("consent_receipt", type=Path)
     qu.add_argument("update_request", type=Path)
+    qu.add_argument("--release-generation", help="exact accepted release generation for RESOLVE_FROM_RELEASE_LOCK profiles")
     sub.add_parser("operations")
     sub.add_parser("evidence-status")
     ip = sub.add_parser("inspect-operation")
@@ -369,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
             return 0 if result["state"]=="AUTHORIZED_FOR_WARD_ADMISSION" else 3
         if args.cmd == "activate-runtime":
-            profile = load_runtime_profile(args.runtime_profile)
+            profile = load_runtime_profile(args.runtime_profile, release_generation=args.release_generation)
             result = activate_runtime_profile(
                 profile,
                 grants=args.grant,
@@ -399,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
             return 0
         if args.cmd == "qualify-update":
-            profile = load_runtime_profile(args.runtime_profile)
+            profile = load_runtime_profile(args.runtime_profile, release_generation=args.release_generation)
             consent = json.loads(args.consent_receipt.read_text(encoding="utf-8"))
             request = json.loads(args.update_request.read_text(encoding="utf-8"))
             result = qualify_update_request(profile, consent, request)
@@ -442,6 +458,57 @@ def main(argv: list[str] | None = None) -> int:
                 return 70
             print(json.dumps(result, indent=2))
             return 0
+        if args.cmd == "verify-dependency-binding":
+            result = verify_dependency_binding_receipt(
+                args.binding_receipt,
+                expected_dependency_id=args.expected_dependency_id,
+                expected_owner_repo=args.expected_owner_repo,
+                expected_generation=args.expected_generation,
+            )
+            finalized = _finish_terminal_or_report_unknown(
+                journal,
+                "passed",
+                "installed dependency binding custody reopened and verified",
+                expected_action=expected,
+                execution_result="succeeded",
+                rollback_eligible=False,
+                details={
+                    "kernel_version": __version__,
+                    "dependency_id": result["dependency_id"],
+                    "accepted_generation": result["accepted_generation"],
+                    "custody_verified": result["custody_verified"],
+                },
+            )
+            if not finalized:
+                return 70
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.cmd == "verify-runtime-activation":
+            result = verify_runtime_activation_receipt(
+                args.activation_receipt,
+                expected_profile_id=args.expected_profile_id,
+                expected_product_id=args.expected_product_id,
+                expected_profile_generation=args.expected_profile_generation,
+            )
+            finalized = _finish_terminal_or_report_unknown(
+                journal,
+                "passed",
+                "runtime activation receipt and live service generations reopened and verified",
+                expected_action=expected,
+                execution_result="succeeded",
+                rollback_eligible=False,
+                details={
+                    "kernel_version": __version__,
+                    "profile_id": result["profile_id"],
+                    "product_id": result["product_id"],
+                    "profile_generation": result["profile_generation"],
+                    "custody_verified": result["custody_verified"],
+                },
+            )
+            if not finalized:
+                return 70
+            print(json.dumps(result, indent=2))
+            return 0
         if args.cmd == "plan":
             m = load_manifest(args.manifest)
             plan = plan_install(m, args.payload_root)
@@ -478,8 +545,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "bind-dependency-manifest":
             m = load_manifest(args.manifest)
+            descriptor = json.loads(args.descriptor.read_text(encoding="utf-8")) if args.descriptor is not None else None
             receipt = bind_dependency_manifest(m,args.payload_root,args.install_receipt,args.binding_receipt,
-                expected_dependency_id=args.expected_dependency_id,expected_owner_repo=args.expected_owner_repo,expected_generation=args.expected_generation)
+                expected_dependency_id=args.expected_dependency_id,expected_owner_repo=args.expected_owner_repo,expected_generation=args.expected_generation,
+                descriptor=descriptor)
             finalized = _finish_terminal_or_report_unknown(journal,"passed","dependency manifest installed and runtime exports independently rebound",
                 expected_action=expected,execution_result="succeeded",do_not_retry_before_reconcile=True,
                 changed_resources=[{"kind":"dependency_binding_receipt","path":redact_text(str(args.binding_receipt))}],rollback_eligible=True,

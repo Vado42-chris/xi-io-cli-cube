@@ -27,13 +27,21 @@ test('compiled installer disclosures retain evidence, native scrolling and appro
  };
  w.__TAURI__={core:{invoke}};w.__TAURI_INTERNALS__={invoke};
  try {
-  const mod=new SourceTextModule(source,{context:dom.getInternalVMContext()});await mod.link(()=>{throw Error('external');});await mod.evaluate();await pause();
-  [...w.document.querySelectorAll('[data-window-rail-tabs] button')].find(b=>b.getAttribute('aria-label')==='Install').click();await pause();
+  const mod=new SourceTextModule(source,{context:dom.getInternalVMContext(),importModuleDynamically:async()=>{throw Error('ARTCRAFT_TEST_EXECUTOR_NO_WASM');}});await mod.link(()=>{throw Error('external');});await mod.evaluate();await pause();
   const shadow=w.document.querySelector('[data-hex-product-content]').shadowRoot;
   const panel=shadow.querySelector('[aria-label="Native HEX installer"]');assert.ok(panel);
+  assert.ok(panel.closest('[hidden]'));
+  assert.ok(shadow.querySelector('canvas[aria-label="HEX software marketplace"]'));
+  const click=async el=>{assert.ok(el);el.click();await pause();};
+  const rail=label=>[...w.document.querySelectorAll('[data-window-rail-tabs] button')].find(b=>b.getAttribute('aria-label')===label);
+  await click(rail('Install'));
+  assert.equal(panel.closest('[hidden]'),null);assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);
+  assert.doesNotMatch(shadow.textContent,/Tools & Diagnostics|XI-IO Ecosystem Component Catalog/);
+  assert.ok(requests.every(req=>req.action==='inspect'),'opening installation does not prepare or apply');
   const findButton=text=>[...panel.querySelectorAll('button')].find(b=>b.textContent.includes(text));
   const findLabel=text=>[...panel.querySelectorAll('label')].find(b=>b.textContent.includes(text));
-  const details=[...panel.querySelectorAll('.hex-installer-disclosure')];assert.equal(details.length,3);
+  const details=[...panel.querySelectorAll('.hex-installer-disclosure')];assert.equal(details.length,4);
+  assert.ok(details.some(item=>item.querySelector('summary')?.textContent === 'Host and release settings'));
   assert.ok(details.every(d=>!d.open));
   const visibleRequirements=panel.querySelector('[aria-label="Detected installation requirements"]');
   assert.equal(visibleRequirements.children.length,3);assert.match(visibleRequirements.textContent,/Computer.*Node runtime.*Existing CLI/s);
@@ -45,6 +53,13 @@ test('compiled installer disclosures retain evidence, native scrolling and appro
   const history=panel.querySelector('[aria-label="Saved installation and repair history"]');assert.equal(history.querySelectorAll('button').length,30);
   history.closest('details').querySelector('summary').click();assert.equal(history.closest('details').open,true);
   history.querySelector('button').click();await pause();assert.equal(requests.at(-1).plan_id,'saved-0');
+  await click(rail('Software'));
+  assert.ok(shadow.querySelector('canvas[aria-label="HEX software marketplace"]'));
+  await click(rail('Install'));
+  assert.equal(shadow.querySelector('[aria-label="Native HEX installer"]'),panel);
+  assert.equal(extra.closest('details').open,true,'requirements disclosure survives Software navigation');
+  assert.equal(history.closest('details').open,true,'history disclosure survives Software navigation');
+  assert.equal(history.querySelectorAll('button').length,30);
   findLabel('Repair only the existing CLI launcher').querySelector('input').click();await pause();
   findButton('Check selected Node').click();await pause();assert.deepEqual(JSON.parse(JSON.stringify(requests.at(-1))),{action:'prepare_repair',prefix:'/existing/cli',node:'/existing/node',bin_dir:'/existing/bin'});
   const plan=panel.querySelector('[aria-label="Exact reviewed plan and receipts"]');assert.ok(plan);assert.equal(plan.tabIndex,0);assert.match(plan.textContent,/change 99/);assert.equal(plan.closest('details').open,false);
@@ -56,6 +71,7 @@ test('compiled installer disclosures retain evidence, native scrolling and appro
   finish({ok:true,result:{plan_id:'reviewed',phase:'LAUNCHER_REPAIR_OUTCOME_UNCERTAIN',do_not_retry:true}});await pause();
   assert.match(panel.textContent,/Outcome uncertain/);assert.ok(findButton('Check actual state'));assert.equal(findButton('Repair this existing launcher'),undefined);
   for(const e of panel.querySelectorAll('[role="alert"]'))assert.equal(e.closest('details'),null);
+  assert.doesNotMatch(shadow.textContent,/Tools & Diagnostics|XI-IO Ecosystem Component Catalog/);
  }finally{dom.window.close();}
 });
 test('bounded scroll CSS uses visible native scrollbars and no wheel interception',()=>{

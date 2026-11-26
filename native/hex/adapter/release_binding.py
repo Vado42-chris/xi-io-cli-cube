@@ -293,7 +293,8 @@ def install_from_installed_framework_release(lock: Path, *, product_ref: str,
                                              framework_binding_receipt: Path,
                                              expected_framework_generation: str,
                                              env: dict[str, str] | None = None,
-                                             fetch=None, node_binary: str = "node"):
+                                             fetch=None, node_binary: str = "node",
+                                             expected_distribution_sha256: str | None = None):
     """Resolve verified installed Framework custody, then invoke its release compiler."""
     export = resolve_framework_release_distribution_module(
         framework_binding_receipt,
@@ -303,7 +304,14 @@ def install_from_installed_framework_release(lock: Path, *, product_ref: str,
         framework_release_distribution_module=Path(export["release_distribution_module"]),
         node_binary=node_binary,
     )
+    def read_reviewed_distribution(**coordinates):
+        value = reader(**coordinates)
+        if expected_distribution_sha256 is not None:
+            observed = hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            _require(observed == expected_distribution_sha256, "BUNDLE_RELEASE_CHANGED_SINCE_REVIEW")
+        return value
+
     return install_from_distribution_reader(
         lock, product_ref=product_ref, consumer_ref=consumer_ref,
-        read_release_distribution=reader, env=env, fetch=fetch,
+        read_release_distribution=read_reviewed_distribution, env=env, fetch=fetch,
     )

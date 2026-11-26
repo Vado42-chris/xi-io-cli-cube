@@ -59,6 +59,14 @@ fixtures, checks every script is visited, and adds failing scripts to prove
 failure propagation. Its entry assertions do not prove real publication,
 managed admission, hosted execution or consumed returns.
 
+The installed-model entry is `.github/workflows/cli-real-ollama.yml`. Qualify
+the real transaction through the same generated launcher and disposable
+installation used for independent payload/receipt readback. Reopen the saved
+chat and original receipt in fresh processes after restart and rollback, while
+checking preserved project bytes. Source-only inference and separate installer
+smokes do not qualify that joined journey. These checks add no runtime or
+account authority.
+
 Keep the embedded installer, payload, connection and kernel custody separate.
 A pin-coherence correction does not qualify canonical seven-file CLI adoption,
 remove historical fourteen-file features or prove an in-place upgrade between

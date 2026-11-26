@@ -185,6 +185,11 @@ def _framework_release_distribution(req):
 
 
 def handle(req):
+    if req == {"action": "inspect"}:
+        result = _CORE_HANDLE(req)
+        result["product_host"] = native_product_receiver.installed_framework_hint(
+            Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"))
+        return result
     if isinstance(req, dict) and req.get("action") == _FRAMEWORK_RELEASE_DISCOVERY_ACTION:
         return _framework_release_distribution(req)
     if isinstance(req, dict) and req.get("action") in _PRODUCT_ACTION_FIELDS:

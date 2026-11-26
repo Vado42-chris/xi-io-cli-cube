@@ -158,6 +158,8 @@ def _fake_cli(mode, note, events):
         line = ask()
         if line == "/exit":
             emit("See you next time.")
+            if mode == "nonzero_exit":
+                raise SystemExit(7)
             return
         if line == "/details":
             if mode == "missing_receipt" and proposals:
@@ -446,7 +448,8 @@ class ReceiptAndPreviewTests(unittest.TestCase):
         self.assertIn("python3 -B " + driver_path, workflow)
         self.assertLess(workflow.index("python3-pexpect"), workflow.index("python3 -B " + test_path))
         self.assertLess(workflow.index("python3 -B " + test_path), workflow.index("python3 -B " + driver_path))
-        self.assertIn("printf 'status: old\\n' > \"$work/project/NOTE.txt\"", workflow)
+        self.assertIn('XIIO_PROOF_ROOT="$work" python3 -B ' + driver_path, workflow)
+        self.assertNotIn("XIIO_RUNTIME=", workflow, "source invocation is not installed qualification")
         self.assertNotIn("child.sendline", workflow, "workflow must not retain a blanket yes path")
         self.assertIn("python3-pexpect", payload)
         self.assertLess(payload.index("python3-pexpect"), payload.index('python3 -B "$test_file"'))
@@ -473,7 +476,7 @@ class TerminalProofTests(unittest.TestCase):
             except Exception as error:
                 failure = error
             finally:
-                if failure is not None:
+                if failure is not None and not child.closed:
                     # Let the inert child record a final explicit no before it
                     # is closed. This is a bounded EOF wait, not an edit retry.
                     try:
@@ -565,6 +568,13 @@ class TerminalProofTests(unittest.TestCase):
         self.assertEqual(self.approvals(history), ["yes"])
         self.assertEqual(data, b"status: new")
         self.assertNotEqual(data, NEW)
+
+    def test_nonzero_exit_after_successful_edit_is_not_pass(self):
+        _, history, data, failure = self.run_case("nonzero_exit")
+        self.assertEqual(str(failure), "CLI_EXIT_FAILED")
+        self.assertEqual(self.approvals(history), ["yes"])
+        self.assertEqual(data, NEW)
+        self.assertEqual(len([row for row in history if row["kind"] == "effect"]), 1)
 
     def test_refusal_requires_unchanged_note_and_actual_failed_receipt(self):
         for mode in ["refusal_changed_note", "bad_refusal_receipt"]:

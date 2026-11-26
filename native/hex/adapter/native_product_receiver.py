@@ -8,6 +8,7 @@ Installer transaction.
 """
 from __future__ import annotations
 
+import os
 import hashlib
 import json
 import re
@@ -159,7 +160,77 @@ def _current_binding(lock: Path, product_ref: str, *, framework_binding_receipt:
     root_manifest = profile["products"][root][0]
     _require(root_manifest.product_id == product_ref,
              "PRODUCT_ROOT_IDENTITY_MISMATCH")
+    _require(profile["release_generations"].get(root) == binding["release_generation"],
+             "PRODUCT_ROOT_GENERATION_MISMATCH")
     return binding, profile
+
+
+def installed_framework_hint(state_home: Path) -> dict:
+    """Resolve one installed host from the Installer's existing child receipts."""
+    bundles = state_home / "xi-io" / "installer" / "bundles"
+    if not bundles.is_dir() or bundles.resolve() != bundles:
+        return {}
+    candidates = []
+    for receipt in bundles.glob("*/*.binding.json"):
+        if receipt.resolve() != receipt:
+            continue
+        try:
+            _, raw = _safe_file(str(receipt), "PRODUCT_HOST_RECEIPT_INVALID")
+            binding = json.loads(raw)
+            if (not isinstance(binding, dict) or binding.get("dependency_id") != framework_release_export.FRAMEWORK_DEPENDENCY_ID
+                    or binding.get("owner_repo") != framework_release_export.FRAMEWORK_OWNER_REPO):
+                continue
+            release = receipt.with_name(receipt.name.removesuffix(".binding.json") + ".release.json")
+            if binding.get("release_receipt_path") != str(release):
+                continue
+            _, raw = _safe_file(str(release), "PRODUCT_HOST_RELEASE_INVALID")
+            installed = json.loads(raw)
+            generation = installed.get("release_generation")
+            if (installed.get("schema") != "xiio.installer.child-generation-receipt/v1"
+                    or installed.get("product_ref") != binding.get("product_id")
+                    or installed.get("bundle_state") != "INSTALLED_BYTES_VERIFIED"
+                    or installed.get("readback_verified") is not True
+                    or not isinstance(generation, str) or not GENERATION.fullmatch(generation)):
+                continue
+            framework_release_export.resolve_framework_release_distribution_module(
+                receipt, expected_framework_generation=generation)
+            candidates.append({"framework_binding_receipt": str(receipt), "framework_generation": generation})
+        except (OSError, ValueError, TypeError, AttributeError, BundleError, framework_release_export.FrameworkReleaseExportError):
+            continue
+    return candidates[0] if len(candidates) == 1 else {}
+
+
+def _offline_payload_reader(lock: Path, profile: dict):
+    media = lock.parent / "payloads"
+    if not media.exists() and not media.is_symlink():
+        return None
+    _require(media.is_dir() and media.resolve() == media, "PRODUCT_MEDIA_DIRECTORY_INVALID")
+    entries = {}
+    for manifest, urls, _deps in profile["products"].values():
+        for entry in manifest.entries:
+            pair = (entry.sha256, entry.size)
+            _require(entries.setdefault(urls[entry.source], pair) == pair, "PRODUCT_MEDIA_URL_AMBIGUOUS")
+
+    def copy_payload(url: str, destination: Path, size: int) -> None:
+        sha, expected_size = entries[url]
+        _require(size == expected_size and SHA256.fullmatch(sha), "PRODUCT_MEDIA_ENTRY_INVALID")
+        directory = os.open(media, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            with os.fdopen(os.open(sha, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory), "rb") as src:
+                info = os.fstat(src.fileno())
+                _require(stat.S_ISREG(info.st_mode) and info.st_size == size, "PRODUCT_MEDIA_FILE_INVALID")
+                with destination.open("xb") as out:
+                    remaining = size
+                    while remaining:
+                        chunk = src.read(min(remaining, 1024 * 1024))
+                        _require(bool(chunk), "PRODUCT_MEDIA_FILE_TRUNCATED")
+                        out.write(chunk)
+                        remaining -= len(chunk)
+                    _require(not src.read(1), "PRODUCT_MEDIA_FILE_CHANGED")
+        finally:
+            os.close(directory)
+
+    return copy_payload
 
 
 def inspect_product_release(*, release_lock: object, framework_binding_receipt: object,
@@ -198,9 +269,11 @@ def inspect_product_release(*, release_lock: object, framework_binding_receipt: 
         "channel": root_manifest.channel,
         "consumer_ref": CONSUMER_REF,
         "release_ref": binding["release_ref"],
+        "provider_hosts": binding["provider_hosts"],
         "release_generation": binding["release_generation"],
         "framework_generation": framework_generation,
         "approved_lock_sha256": binding["approved_lock_sha256"],
+        "distribution_sha256": hashlib.sha256(_canonical(binding)).hexdigest(),
         "entrypoint_qualification_ref": binding["entrypoint_qualification_ref"],
         "ordered_roles": list(profile["ordered_roles"]),
         "products": rows,
@@ -236,6 +309,11 @@ def apply_product_release(*, release_lock: object, framework_binding_receipt: ob
     _require(review["review_digest"] == review_digest,
              "PRODUCT_RELEASE_CHANGED_SINCE_REVIEW")
     try:
+        install_options = {}
+        lock = Path(release_lock)
+        if (lock.parent / "payloads").exists() or (lock.parent / "payloads").is_symlink():
+            profile = load_bundle_profile(lock, allowed_hosts=frozenset(review["provider_hosts"]))
+            install_options["fetch"] = _offline_payload_reader(lock, profile)
         installed = release_binding.install_from_installed_framework_release(
             Path(release_lock),
             product_ref=review["product_ref"],
@@ -243,6 +321,8 @@ def apply_product_release(*, release_lock: object, framework_binding_receipt: ob
             framework_binding_receipt=Path(framework_binding_receipt),
             expected_framework_generation=framework_generation,
             node_binary=review["node"]["path"],
+            expected_distribution_sha256=review["distribution_sha256"],
+            **install_options,
         )
     except (BundleError, OSError, TypeError, ValueError) as exc:
         raise ProductReceiverError(

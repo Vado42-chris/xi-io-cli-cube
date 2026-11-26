@@ -7,10 +7,10 @@ static CHOOSER_OPEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all="lowercase")]
-pub enum DirectoryPurpose { Workspace, Installation, #[serde(rename="server-package")] ServerPackage }
+pub enum DirectoryPurpose { Workspace, Installation, #[serde(rename="server-package")] ServerPackage, #[serde(rename="product-release")] ProductRelease }
 impl DirectoryPurpose {
     fn title(&self)-> &'static str { match self {
-        Self::Workspace=>"Choose workspace folder", Self::Installation=>"Choose CLI installation folder", Self::ServerPackage=>"Choose XI-IO server package folder",
+        Self::ProductRelease=>"Choose downloaded product folder", Self::Workspace=>"Choose workspace folder", Self::Installation=>"Choose CLI installation folder", Self::ServerPackage=>"Choose XI-IO server package folder",
     }}
 }
 fn selected_path(path:Option<std::path::PathBuf>)->Result<Value,String>{

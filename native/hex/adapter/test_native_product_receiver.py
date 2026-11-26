@@ -49,6 +49,7 @@ class NativeProductReceiverTests(unittest.TestCase):
             "profile_id": "sam-product", "fixture": False, "profile_mode": "product",
             "product_root_role": "sam", "lock_sha256": self.lock_sha,
             "ordered_roles": ("sdk", "sam"),
+            "release_generations": {"sam": "b" * 40},
             "products": {"sdk": (sdk, {}, ()), "sam": (sam, {}, ("sdk",))},
         }
         self.binding = {
@@ -140,6 +141,11 @@ class NativeProductReceiverTests(unittest.TestCase):
                 )
         profile.assert_not_called()
 
+    def test_wrong_root_generation_refuses_before_install(self):
+        self.profile["release_generations"]["sam"] = "e" * 40
+        with self.assertRaisesRegex(receiver.ProductReceiverError, "PRODUCT_ROOT_GENERATION_MISMATCH"):
+            self.inspect()
+
     def test_apply_reopens_review_and_consumes_existing_installer(self):
         review = self.inspect()
         installed = {
@@ -171,6 +177,7 @@ class NativeProductReceiverTests(unittest.TestCase):
             framework_binding_receipt=self.receipt,
             expected_framework_generation="c" * 40,
             node_binary="/usr/bin/node",
+            expected_distribution_sha256=review["distribution_sha256"],
         )
         self.assertEqual(result["phase"],
                          "PRODUCT_BYTES_INSTALLED_READBACK_VERIFIED")

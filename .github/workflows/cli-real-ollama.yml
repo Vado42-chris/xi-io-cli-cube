@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'native/hex/cli-source/**'
+      - 'native/hex/COMPOSED-packaged-source.receipt.json'
       - '.github/workflows/cli-real-ollama.yml'
   workflow_dispatch:
 
@@ -37,32 +38,63 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y python3-pexpect
           python3 -B native/hex/cli-source/test_real_ollama_qualification.py
+          python3 -B native/hex/cli-source/test_installed_ollama_qualification.py
+          python3 -B native/hex/cli-source/test_installed_evidence_custody.py
+          python3 -B native/hex/cli-source/test_ollama_model_identity.py
           ollama --version
 
       - name: Start Ollama and pull bounded local model
         run: |
           set -euo pipefail
+          # The official installer starts this service. Stop only that disposable
+          # runner service before owning the proof server and its request log.
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo systemctl stop ollama.service
           nohup ollama serve >"$RUNNER_TEMP/ollama.log" 2>&1 &
-          echo $! >"$RUNNER_TEMP/ollama.pid"
+          ollama_pid=$!
+          echo "$ollama_pid" >"$RUNNER_TEMP/ollama.pid"
           for i in $(seq 1 60); do
+            kill -0 "$ollama_pid"
             curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break
             sleep 1
           done
+          kill -0 "$ollama_pid"
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5:1.5b
+          kill -0 "$ollama_pid"
           ollama list
 
-      - name: Real Ollama read, approved edit, and independent byte readback
+      - name: Capture exact Ollama model identity
+        run: |
+          set -euo pipefail
+          ollama_pid="$(cat "$RUNNER_TEMP/ollama.pid")"
+          kill -0 "$ollama_pid"
+          python3 -B native/hex/cli-source/capture_ollama_model_identity.py capture \
+            --model qwen2.5:1.5b \
+            --output "$RUNNER_TEMP/ollama-model-identity.json"
+
+      - name: Installed Ollama transaction, saved-chat restart, and rollback reopen
         env:
           XIIO_MODEL: qwen2.5:1.5b
           XIIO_TOOL_MODE: structured
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/xiio-real-ollama"
-          mkdir -p "$work/project"
-          printf 'status: old\n' > "$work/project/NOTE.txt"
-          XIIO_PROOF_ROOT="$work" XIIO_RUNTIME="$GITHUB_WORKSPACE/native/hex/cli-source/src/xiio.mjs" python3 -B native/hex/cli-source/qualify_real_ollama.py
+          # The driver creates a fresh private bench, uses the real packaged
+          # installer, then invokes only its generated launcher. Existing benches
+          # refuse, so an approved failure cannot be reset into a passing retry.
+          XIIO_PROOF_ROOT="$work" python3 -B native/hex/cli-source/qualify_real_ollama.py
+          install -m 600 "$RUNNER_TEMP/ollama-model-identity.json" "$work/model-identity.json"
+          python3 -B native/hex/cli-source/capture_ollama_model_identity.py reopen \
+            --model qwen2.5:1.5b \
+            --record "$work/model-identity.json" \
+            --output "$work/model-identity-readback.json"
+          python3 -B native/hex/cli-source/verify_installed_evidence_custody.py --root "$work"
           test "$(cat "$work/project/NOTE.txt")" = "status: new"
+          test "$(stat -c '%a' "$work/bin/xi-io-cli")" = "755"
+          test "$(stat -c '%a' "$work/evidence-custody.json")" = "600"
+          test "$(stat -c '%a' "$work/model-identity.json")" = "600"
+          test "$(stat -c '%a' "$work/model-identity-readback.json")" = "600"
           sha256sum "$work/project/NOTE.txt" | tee "$work/note.sha256"
           cp "$RUNNER_TEMP/ollama.log" "$work/ollama.log"
           cp "$work/transcript.txt" "$work/transcript.redacted.txt"
@@ -88,9 +120,18 @@ jobs:
             ${{ runner.temp }}/xiio-real-ollama/note.sha256
             ${{ runner.temp }}/xiio-real-ollama/observed-NOTE.txt
             ${{ runner.temp }}/xiio-real-ollama/outcome.json
-            ${{ runner.temp }}/xiio-real-ollama/*.receipt.json
+            ${{ runner.temp }}/xiio-real-ollama/*.json
+            ${{ runner.temp }}/xiio-real-ollama/*.transcript.txt
+            ${{ runner.temp }}/xiio-real-ollama/state/chat/*.json
+            ${{ runner.temp }}/xiio-real-ollama/prefix/current
+            ${{ runner.temp }}/xiio-real-ollama/prefix/previous
+            ${{ runner.temp }}/xiio-real-ollama/prefix/versions/**
+            ${{ runner.temp }}/xiio-real-ollama/bin/xi-io-cli
+            ${{ runner.temp }}/xiio-real-ollama/config/**
+            ${{ runner.temp }}/xiio-real-ollama/project/NOTE.txt
             ${{ runner.temp }}/xiio-real-ollama/proposal-*.txt
             ${{ runner.temp }}/ollama.log
+            ${{ runner.temp }}/ollama.pid
             ${{ runner.temp }}/xiio-real-ollama/ollama.log
           if-no-files-found: warn
           retention-days: 14

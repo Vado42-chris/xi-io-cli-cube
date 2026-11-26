@@ -24,6 +24,8 @@ ALLOWED_PERMISSIONS={
 ALLOWED_UPDATE_POLICIES={"MANUAL","SECURITY_AUTO","MANAGED"}
 SAFE_UNIT=re.compile(r"^[A-Za-z0-9_.@-]+\.service$")
 SHA256=re.compile(r"^[0-9a-f]{64}$")
+RELEASE_GENERATION_SENTINEL="RESOLVE_FROM_RELEASE_LOCK"
+RELEASE_GENERATION=re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 
 class RuntimeProfileError(RuntimeError):
     pass
@@ -78,8 +80,32 @@ def _permissions(values:Any,label:str)->tuple[str,...]:
             out.append(p)
     return tuple(sorted(out))
 
-def load_runtime_profile(path:Path)->RuntimeProfile:
+def _resolve_release_generation(value:Any,*,release_generation:str|None,label:str)->Any:
+    if value!=RELEASE_GENERATION_SENTINEL:
+        return value
+    candidate=str(release_generation or "").strip()
+    if not RELEASE_GENERATION.fullmatch(candidate):
+        raise RuntimeProfileError(label+"_RELEASE_GENERATION_REQUIRED")
+    return candidate
+
+def load_runtime_profile(path:Path,release_generation:str|None=None)->RuntimeProfile:
     raw=json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw,dict):
+        raise RuntimeProfileError("RUNTIME_PROFILE_OBJECT_REQUIRED")
+    raw=dict(raw)
+    raw["generation"]=_resolve_release_generation(raw.get("generation"),release_generation=release_generation,label="PROFILE")
+    dependencies_raw=raw.get("dependencies")
+    if isinstance(dependencies_raw,list):
+        raw["dependencies"]=[
+            ({**row,"accepted_generation":_resolve_release_generation(row.get("accepted_generation"),release_generation=release_generation,label=f"DEPENDENCY_{i}")} if isinstance(row,dict) else row)
+            for i,row in enumerate(dependencies_raw)
+        ]
+    services_raw=raw.get("services")
+    if isinstance(services_raw,list):
+        raw["services"]=[
+            ({**row,"declared_generation":_resolve_release_generation(row.get("declared_generation"),release_generation=release_generation,label=f"SERVICE_{i}")} if isinstance(row,dict) else row)
+            for i,row in enumerate(services_raw)
+        ]
     if raw.get("schema_version")!=PROFILE_SCHEMA:
         raise RuntimeProfileError("RUNTIME_PROFILE_SCHEMA_INVALID")
     profile_id=_text(raw.get("profile_id"),"PROFILE_ID")

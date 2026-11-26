@@ -37,4 +37,4 @@ def verify_dependency_binding_receipt(path:Path,*,expected_dependency_id:str,exp
   except ValueError as exc: raise DependencyReceiptVerificationError("DEPENDENCY_RECEIPT_EXPORT_MODE_INVALID") from exc
   if (ts.st_mode & 0o777)!=expected_mode or _sha256(target)!=expected_sha: raise DependencyReceiptVerificationError("DEPENDENCY_RECEIPT_EXPORT_READBACK_MISMATCH")
   verified[name]=str(target.resolve())
- return {"schema":r["schema"],"state":"VERIFIED","dependency_id":r["dependency_id"],"owner_repo":r["owner_repo"],"accepted_generation":r["accepted_generation"],"binding_receipt_path":str(receipt_path),"runtime_exports":exports,"fields":verified,"provider_effect":False,"effect_authority":False,"custody_verified":True}
+ return {"schema":r["schema"],"state":"VERIFIED","dependency_id":r["dependency_id"],"owner_repo":r["owner_repo"],"accepted_generation":r["accepted_generation"],"binding_receipt_path":str(receipt_path),"binding_sha256":_sha256(receipt_path),"runtime_exports":exports,"fields":verified,"provider_effect":False,"effect_authority":False,"custody_verified":True}

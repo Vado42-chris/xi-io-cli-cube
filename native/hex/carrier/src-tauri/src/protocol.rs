@@ -18,6 +18,8 @@ pub enum InstallerRequest {
     PrepareRepair { prefix: String, node: String, bin_dir: String },
     #[serde(rename = "apply_repair")]
     ApplyRepair { plan_id: String, approval_digest: String, approved: bool },
+    #[serde(rename = "launch_cli")]
+    LaunchCli { plan_id: String, approval_digest: String, approved: bool, workspace: String },
     Prepare { prefix: String, node: String, components: Vec<String>, permission_profile: Value },
     Readback { plan_id: String },
     Apply { plan_id: String, approval_digest: String, approved: bool },
@@ -26,6 +28,10 @@ pub enum InstallerRequest {
     PermissionReplace { plan_id: String, current_digest: String, new_profile: Value, approved: bool },
     #[serde(rename = "central_update_decision")]
     CentralUpdateDecision { plan_id: String, request: Value },
+    #[serde(rename = "product_inspect")]
+    ProductInspect { release_lock: String, framework_binding_receipt: String, framework_generation: String, node: String },
+    #[serde(rename = "product_apply")]
+    ProductApply { release_lock: String, framework_binding_receipt: String, framework_generation: String, node: String, review_digest: String, approved: bool },
     #[serde(rename = "release_discover")]
     ReleaseDiscover {
         product_ref: String,
@@ -119,6 +125,15 @@ impl InstallerRequest {
             Self::SafeTaskApply { plan_id, proof_id, approval_digest, approved } =>
                 *approved && id(plan_id) && lower_hex(proof_id,32) && lower_hex(approval_digest,64),
             Self::Inspect { plan_id } => plan_id.as_deref().map(id).unwrap_or(true),
+            Self::ProductInspect { release_lock, framework_binding_receipt, framework_generation, node }
+            | Self::ProductApply { release_lock, framework_binding_receipt, framework_generation, node, .. } => {
+                let valid_coordinates = absolute(release_lock) && absolute(framework_binding_receipt)
+                    && absolute(node) && (lower_hex(framework_generation,40) || lower_hex(framework_generation,64));
+                valid_coordinates && match self {
+                    Self::ProductApply { review_digest, approved, .. } => *approved && lower_hex(review_digest,64),
+                    _ => true,
+                }
+            }
             Self::ReleaseDiscover { product_ref, consumer_ref, framework_binding_receipt, framework_generation } =>
                 id(product_ref) && id(consumer_ref) && absolute(framework_binding_receipt)
                 && (lower_hex(framework_generation,40) || lower_hex(framework_generation,64)),
@@ -129,6 +144,8 @@ impl InstallerRequest {
                 && components.iter().all(|x| ["cli", "bins", "switchboard"].contains(&x.as_str()))
                 && components.iter().enumerate().all(|(i, x)| !components[..i].contains(x))
                 && bounded_object(permission_profile, 16 * 1024),
+            Self::LaunchCli { plan_id, approval_digest, approved, workspace } => *approved && id(plan_id)
+                && lower_hex(approval_digest,64) && absolute(workspace),
             Self::ApplyRepair { plan_id, approval_digest, approved }
             | Self::Apply { plan_id, approval_digest, approved }
             | Self::Rollback { plan_id, approval_digest, approved } => *approved && id(plan_id)
@@ -207,6 +224,16 @@ mod tests {
         assert!(valid(&a.to_string())); a["approved"]=false.into(); assert!(!valid(&a.to_string()));
         a["approved"]=true.into(); a["approval_digest"]="stale".into(); assert!(!valid(&a.to_string()));
     }
+    #[test] fn installed_cli_launch_is_finite_and_explicit() {
+        let request=serde_json::json!({"action":"launch_cli","plan_id":"a".repeat(32),"approval_digest":"b".repeat(64),"approved":true,"workspace":"/home/pilot/project"});
+        assert!(valid(&request.to_string()));
+        for (key,value) in [("approved",false.into()),("approval_digest","stale".into()),("plan_id","../other".into()),("workspace","../other".into())] {
+            let mut changed=request.clone();changed[key]=value;assert!(!valid(&changed.to_string()));
+        }
+        for key in ["command","executable","args","url","terminal","prefix","node"] {
+            let mut changed=request.clone();changed[key]="untrusted".into();assert!(!valid(&changed.to_string()));
+        }
+    }
     #[test] fn approval_is_explicit_and_bound() {
         let mut value=serde_json::json!({"action":"apply","plan_id":"plan-1","approval_digest":"a".repeat(64),"approved":true});
         assert!(valid(&value.to_string())); value["approved"]=false.into(); assert!(!valid(&value.to_string()));
@@ -217,6 +244,26 @@ mod tests {
         assert!(valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"],"service_action":"stop"}"#));
         assert!(!valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"]}"#));
         assert!(!valid(r#"{"action":"service_plan","plan_id":"plan-1","service_ids":["ollama"],"service_action":"restart"}"#));
+    }
+    #[test] fn product_selection_round_trips_to_the_packaged_adapter() {
+        let mut req = serde_json::json!({"action":"product_inspect","release_lock":"/release/bundle.lock.json",
+            "framework_binding_receipt":"/installed/framework.binding.json","framework_generation":"a".repeat(40),"node":"/usr/bin/node"});
+        for action in ["product_inspect", "product_apply"] {
+            req["action"] = action.into();
+            if action == "product_apply" {
+                assert!(!valid(&req.to_string()));
+                req["review_digest"] = "b".repeat(64).into();
+                req["approved"] = true.into();
+            }
+            let parsed: InstallerRequest = serde_json::from_value(req.clone()).unwrap();
+            assert!(parsed.validate().is_ok());
+            assert_eq!(serde_json::to_value(parsed).unwrap(),req);
+            let mut bad=req.clone(); bad["release_lock"]="relative".into();
+            assert!(!valid(&bad.to_string()));
+            let mut extra=req.clone(); extra["account_token"]="unused".into();
+            assert!(!valid(&extra.to_string()));
+        }
+        req["approved"]=false.into(); assert!(!valid(&req.to_string()));
     }
     #[test] fn release_discovery_requires_bounded_product_and_verified_framework_coordinates() {
         let base=serde_json::json!({
