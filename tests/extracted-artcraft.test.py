@@ -312,6 +312,28 @@ class RenderedCapture(unittest.TestCase):
         self.assertEqual(receipt['raw_text_bytes'],len(receipt['raw_text'].encode()))
         with Image.open(self.root/receipt['crop_file']) as crop:
             self.assertEqual(crop.tobytes(),self.image.crop((40,30,440,330)).tobytes())
+    def test_complementary_ocr_is_from_one_crop_and_keeps_exact_labels(self):
+        words = [b'XI-IO Software\n', b'REVIEW INSTALLATION\n']
+        with patch.object(m, 'read_ocr', side_effect=[(w.decode(), w, 'tesseract fixture') for w in words]) as read:
+            self.native.rendered_content('fixture', self.digest, self.native.geometry)
+        calls = read.call_args_list
+        self.assertEqual(calls[0].args[0], calls[1].args[0])
+        self.assertEqual(calls[1].kwargs, {'mode': 3})
+        receipt = self.native.rendered_text_readback
+        self.assertTrue(receipt['content_verified'])
+        self.assertEqual([row['raw_text'].encode() for row in receipt['ocr_passes']], words)
+        self.assertEqual(receipt['exact_match_counts']['Review installation'], 1)
+
+    def test_secondary_pass_cannot_hide_mixed_or_duplicate_pixels(self):
+        for label, expected in [('Craft App Suite', 'ARTCRAFT_MIXED_RENDERED_CONTENT'),
+                                ('REVIEW INSTALLATION', 'ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED')]:
+            with self.subTest(label=label):
+                name = 'fixture-' + expected.lower()
+                shutil.copyfile(self.path, self.root/(name+'.png'))
+                words = [b'XI-IO Software\n', ('REVIEW INSTALLATION\n'+label).encode()]
+                with patch.object(m, 'read_ocr', side_effect=[(w.decode(), w, 'tesseract fixture') for w in words]), self.assertRaisesRegex(m.base.Unverified, '^'+expected+'$'):
+                    self.native.rendered_content(name, self.digest, self.native.geometry)
+
     def test_screenshot_identity_and_window_geometry_cannot_drift(self):
         with patch.object(m,'read_ocr') as ocr,self.assertRaisesRegex(m.base.Unverified,'^RENDERED_SCREENSHOT_DIGEST_MISMATCH$'):
             self.native.rendered_content('fixture','f'*64,self.native.geometry)
@@ -360,6 +382,32 @@ class RenderedCapture(unittest.TestCase):
                 self.assertFalse(receipt['red_established']);self.assertFalse(receipt['initialization_observed'])
                 self.assertFalse(receipt['xiio_catalog_rendered']);self.assertFalse(receipt['domain_action_verified'])
                 self.assertEqual(receipt['failure_category'],category)
+
+class RetiredRenderedRetry(unittest.TestCase):
+    def test_only_missing_title_retries_with_a_fresh_frame(self):
+        native = m.Software.__new__(m.Software)
+        native.deadline = time.monotonic()+30
+        native.guard = Mock()
+        native.open_software = Mock()
+        native.retired_controls = Mock(return_value=['old'])
+        native.painted_capture = Mock(side_effect=[('first', (1, 2, 3, 4)), ('second', (1, 2, 3, 4))])
+        native.rendered_content = Mock(side_effect=[m.base.Unverified('RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED'), None])
+        with patch.object(m.time, 'sleep'):
+            self.assertEqual(native.run_retired(), ('second', ['old']))
+        self.assertEqual([c.args[0] for c in native.painted_capture.call_args_list],
+                         ['software-retired-dev12', 'software-retired-dev12-attempt-2'])
+
+    def test_mixed_title_is_terminal(self):
+        native = m.Software.__new__(m.Software)
+        native.deadline = time.monotonic()+30
+        native.guard = Mock()
+        native.open_software = Mock()
+        native.retired_controls = Mock(return_value=['old'])
+        native.painted_capture = Mock(return_value=('frame', (1, 2, 3, 4)))
+        native.rendered_content = Mock(side_effect=m.base.Unverified('RETIRED_DEV12_MIXED_RENDERED_CONTENT'))
+        with self.assertRaisesRegex(m.base.Unverified,'^RETIRED_DEV12_MIXED_RENDERED_CONTENT$'):
+            native.run_retired()
+        self.assertEqual(native.painted_capture.call_count, 1)
 
 class PaintedCapture(unittest.TestCase):
     def setUp(self):

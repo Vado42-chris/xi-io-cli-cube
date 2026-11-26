@@ -104,8 +104,9 @@ def rendered_text_matches(text, retired=False):
                  'RENDERED_OCR_TEXT_BOUNDS')
     normalized = ' '.join(text.split())
     labels = (ARTCRAFT_TITLE, ARTCRAFT_INSTALL_ACTION, RETIRED_TITLE, UPSTREAM_TITLE)
-    matches = {label: len(re.findall(r'(?<![A-Za-z0-9])' + re.escape(label) + r'(?![A-Za-z0-9])', normalized))
-               for label in labels}
+    matches = {label: len(re.findall(r'(?<![A-Za-z0-9])(?:' +
+               '|'.join(map(re.escape, (label, label.upper()) if label == ARTCRAFT_INSTALL_ACTION else (label,))) +
+               r')(?![A-Za-z0-9])', normalized)) for label in labels}
     expected = (RETIRED_TITLE,) if retired else (ARTCRAFT_TITLE, ARTCRAFT_INSTALL_ACTION)
     forbidden = (ARTCRAFT_TITLE, ARTCRAFT_INSTALL_ACTION, UPSTREAM_TITLE) if retired else (RETIRED_TITLE, UPSTREAM_TITLE)
     return {'normalization': 'whitespace-only', 'expected_labels': list(expected),
@@ -119,11 +120,12 @@ def require_rendered_text(matches, retired=False):
     base.require(matches['expected_labels_observed_once'],
                  'RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED' if retired else 'ARTCRAFT_RENDERED_CONTENT_NOT_OBSERVED')
 
-def read_ocr(crop, timeout):
+def read_ocr(crop, timeout, mode=11):
     """Use the fixed hosted executor and retain its uncorrected UTF-8 output."""
     executable = '/usr/bin/tesseract'
     base.require(Path(executable).is_file() and os.access(executable, os.X_OK), 'RENDERED_OCR_EXECUTOR_UNAVAILABLE')
     base.require(timeout > 0, 'INTERACTION_DEADLINE')
+    base.require(mode in (11, 3), 'RENDERED_OCR_MODE_INVALID')
     environment = dict(os.environ)
     environment.pop('TESSDATA_PREFIX', None)
     environment['OMP_THREAD_LIMIT'] = '1'
@@ -132,7 +134,7 @@ def read_ocr(crop, timeout):
         base.require(version.returncode == 0 and 0 < len(version.stdout) <= 4096, 'RENDERED_OCR_VERSION_UNVERIFIED')
         version_text = version.stdout.decode('utf-8').splitlines()[0]
         base.require(version_text.startswith('tesseract ') and len(version_text) <= 256, 'RENDERED_OCR_VERSION_UNVERIFIED')
-        result = subprocess.run([executable, str(crop), 'stdout', '-l', 'eng', '--psm', '11'],
+        result = subprocess.run([executable, str(crop), 'stdout', '-l', 'eng', '--psm', str(mode)],
                                 capture_output=True, timeout=min(timeout, 15), env=environment)
         base.require(result.returncode == 0, 'RENDERED_OCR_EXECUTION_UNVERIFIED')
         base.require(len(result.stdout) <= OCR_MAX_BYTES, 'RENDERED_OCR_TEXT_BOUNDS')
@@ -239,26 +241,44 @@ class Software(base.Native):
             self.command(['python3', '-I', '-B', str(Path(__file__).with_name('verify-hex-capture.py')), str(crop)])
         except (OSError, subprocess.SubprocessError):
             raise base.Unverified('RENDERED_WINDOW_PIXELS_UNVERIFIED') from None
-        text, raw, version = read_ocr(crop, self.deadline - time.monotonic())
-        text_path = self.proof/(name + '-owned-window.ocr.txt')
-        with text_path.open('xb') as stream:
-            stream.write(raw)
-        text_sha = base.sha(raw)
+        def observed_pass(mode, filename):
+            args = (crop, self.deadline - time.monotonic())
+            text, raw, version = read_ocr(*args) if mode == 11 else read_ocr(*args, mode=mode)
+            path = self.proof/filename
+            with path.open('xb') as stream:
+                stream.write(raw)
+            return {'page_segmentation_mode': mode, 'backend_version': version,
+                    'raw_text_file': path.name, 'raw_text_sha256': base.sha(raw),
+                    'raw_text_bytes': len(raw), 'raw_text': text,
+                    **rendered_text_matches(text, retired=retired)}
+        primary = observed_pass(11, name + '-owned-window.ocr.txt')
+        passes = [primary]
+        # A second segmentation of the same bytes may recover a high-contrast
+        # CTA missed by sparse text recognition, never by joining different frames.
+        if not retired and primary['forbidden_labels_absent'] and not primary['expected_labels_observed_once']:
+            self.guard()
+            base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
+            base.require(file_digest(crop) == crop_sha, 'RENDERED_EVIDENCE_CHANGED')
+            passes.append(observed_pass(3, name + '-owned-window.ocr-psm3.txt'))
+        counts = {label: max(row['exact_match_counts'][label] for row in passes)
+                  for label in primary['exact_match_counts']}
         self.rendered_text_readback = {
             'schema': 'xiio.hex.rendered-artcraft-text/v1', 'content_verified': False,
             'observation_mode': 'retired-dev12' if retired else 'candidate',
-            'backend': 'tesseract', 'backend_version': version, 'language': 'eng', 'page_segmentation_mode': 11,
+            'backend': 'tesseract', 'language': 'eng',
             'screenshot_file': screenshot.name, 'screenshot_sha256': screenshot_sha,
             'screenshot_dimensions': list(size), 'owned_window_geometry': list(geometry),
             'crop_file': crop.name, 'crop_sha256': crop_sha, 'crop_rectangle': [x, y, width, height],
-            'image_transform': 'owned-window-crop-only',
-            'raw_text_file': text_path.name, 'raw_text_sha256': text_sha, 'raw_text_bytes': len(raw), 'raw_text': text,
-            **rendered_text_matches(text, retired=retired),
+            'image_transform': 'owned-window-crop-only', **primary, 'ocr_passes': passes,
+            'exact_match_counts': counts,
+            'expected_labels_observed_once': all(counts[label] == 1 for label in primary['expected_labels']),
+            'forbidden_labels_absent': all(counts[label] == 0 for label in primary['forbidden_labels']),
         }
         self.guard()
         base.require(tuple(self.geometry) == geometry, 'RENDERED_WINDOW_GEOMETRY_CHANGED')
         base.require(file_digest(screenshot) == screenshot_sha and file_digest(crop) == crop_sha
-                     and file_digest(text_path) == text_sha, 'RENDERED_EVIDENCE_CHANGED')
+                     and all(file_digest(self.proof/row['raw_text_file']) == row['raw_text_sha256']
+                             for row in passes), 'RENDERED_EVIDENCE_CHANGED')
         require_rendered_text(self.rendered_text_readback, retired=retired)
         self.rendered_text_readback['content_verified'] = True
 
@@ -298,12 +318,22 @@ class Software(base.Native):
         self.stage = 'software-retired-reference-readback'
         self.wait(self.retired_controls)
         self.stage = 'software-retired-body-capture'
-        image, geometry = self.painted_capture('software-retired-dev12', self.retired_controls)
-        self.stage = 'software-retired-rendered-title'
-        self.rendered_content('software-retired-dev12', image, geometry, retired=True)
-        self.guard()
-        controls = self.retired_controls()
-        return image, controls
+        for attempt in range(4):
+            name = 'software-retired-dev12' if attempt == 0 else f'software-retired-dev12-attempt-{attempt+1}'
+            image, geometry = self.painted_capture(name, self.retired_controls)
+            self.stage = 'software-retired-rendered-title'
+            try:
+                self.rendered_content(name, image, geometry, retired=True)
+            except base.Unverified as error:
+                if str(error) != 'RETIRED_DEV12_RENDERED_TITLE_NOT_OBSERVED' or attempt == 3:
+                    raise
+                self.guard()
+                self.retired_controls()
+                base.require(time.monotonic() < self.deadline, 'INTERACTION_DEADLINE')
+                time.sleep(.2)
+                continue
+            self.guard()
+            return image, self.retired_controls()
 
 def main():
     args = sys.argv[1:]

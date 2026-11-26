@@ -437,12 +437,15 @@ jobs:
             software-initialized.png
             software-initialized-owned-window.png
             software-initialized-owned-window.ocr.txt
+            software-initialized-owned-window.ocr-psm3.txt
             software-unverified.png
             software-unqualified.png
             hex-dev12-ui-red.json
             software-retired-dev12.png
             software-retired-dev12-owned-window.png
             software-retired-dev12-owned-window.ocr.txt
+            software-retired-dev12-attempt-*.png
+            software-retired-dev12-attempt-*.ocr.txt
             software-retired-dev12-unverified.png
             hex-dev12-unqualified.png
             hex-dev12-executor.log
