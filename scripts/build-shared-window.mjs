@@ -7,7 +7,7 @@ import {resolve,dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {assertSharedWindowPublicBytes,verifySharedWindowPublicOutput} from './verify-shared-window-public-output.mjs';
+import {assertSharedWindowPublicBytes,assertSharedWindowPublicProvenance,verifySharedWindowPublicOutput} from './verify-shared-window-public-output.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const [sourceArg,depsArg]=process.argv.slice(2);
 if(!sourceArg||!depsArg) throw Error('Usage: node scripts/build-shared-window.mjs /exact/patched/node-source /isolated/pinned-build-deps');
@@ -56,7 +56,7 @@ const consumerInput={path:'src/SharedProductHost.tsx',sha256:sha(await readFile(
 const consumerInstalledLock=sha(await readFile(join(root,'node_modules/.package-lock.json')));
 const provenance={...inputs,consumer_css_input:consumerInput,generator_tools:generatorTools,generator_source_sha256:sha(await readFile(fileURLToPath(import.meta.url))),consumer_installed_lock_sha256:consumerInstalledLock,consumer_tool_qualification:'EXISTING_INSTALLED_CACHE_NOT_UPSTREAM_LOCKED_RELEASE',qualification:'DERIVED_LOCAL_UNPUBLISHED_NODE_PATCH_NOT_MAIN_BASELINE',dependency_lock_sha256:expected.sha256,node_version:process.version,artifact_files:artifactFiles,react:'EXTERNAL_EXISTING_CONSUMER_RUNTIME',product_payloads_included:false,provider_calls_on_open:'NONE_IN_PRESENTATION_IMPORT_GRAPH',browser_native_controls:'DISABLED',native_runtime:'NOT_RUN'};
 const provenanceBytes=Buffer.from(JSON.stringify(provenance,null,2)+'\n');
-assertSharedWindowPublicBytes(provenanceBytes);
+assertSharedWindowPublicProvenance(provenanceBytes);
 await writeFile(join(output,'source-custody.json'),provenanceBytes);
 await rm(scratch,{recursive:true,force:true});
 console.log(JSON.stringify({output,files:artifactFiles},null,2));

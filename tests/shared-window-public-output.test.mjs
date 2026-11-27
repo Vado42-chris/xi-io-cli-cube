@@ -36,3 +36,28 @@ test('refuses linked output and missing required files',()=>withOutput(async roo
  await rm(join(root,names[1]));
  await assert.rejects(verifySharedWindowPublicOutput(root),/SHARED_WINDOW_REQUIRED_ASSET_MISSING/);
 }));
+
+// A pinned relative input reference is not its private snapshot contents.
+test('custody allows only exact pinned input coordinates, not snapshot content',()=>withOutput(async root=>{
+ const snapshot='src/lib/empireWorkHomeSnapshot.json';
+ const pin={path:snapshot,base_git_blob:'a'.repeat(40),sha256:'b'.repeat(64)};
+ const custody={files:[pin],public_source_projection:{input:snapshot,fields:['planes[].id','planes[].label','planes[].job','planes[].kind']}};
+ const file=join(root,'source-custody.json');
+ await writeFile(file,JSON.stringify(custody));
+ assert.ok((await verifySharedWindowPublicOutput(root)).includes('source-custody.json'));
+ for(const bad of [
+  {...custody,notes:snapshot},
+  {...custody,files:[{...pin,sha256:'bad'}]},
+  {...custody,public_source_projection:{...custody.public_source_projection,fields:['physical_examples_unchanged']}},
+  {...custody,embedded:{schema:'xiio.studio.empire-work-home.snapshot/v1'}},
+  {...custody,notes:'/home/fixture/private'},
+ ]){
+  await writeFile(file,JSON.stringify(bad));
+  await assert.rejects(verifySharedWindowPublicOutput(root),/SHARED_WINDOW_PRIVATE_PATH_DISCLOSURE_REFUSED/);
+ }
+ // A similarly named file in a lazy output directory is not provenance.
+ await writeFile(file,JSON.stringify(custody));
+ await mkdir(join(root,'assets'));
+ await writeFile(join(root,'assets','source-custody.json'),JSON.stringify(custody));
+ await assert.rejects(verifySharedWindowPublicOutput(root),/SHARED_WINDOW_PRIVATE_PATH_DISCLOSURE_REFUSED/);
+}));
