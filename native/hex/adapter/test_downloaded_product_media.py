@@ -49,6 +49,46 @@ class DownloadedMediaTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.reader()(self.url, self.root / "out", self.entry.size)
 
+    def test_zero_byte_media_is_refused_without_staged_output(self):
+        self.media.mkdir()
+        (self.media / self.entry.sha256).write_bytes(b"")
+        target = self.root / "staged"
+        with self.assertRaisesRegex(ProductReceiverError, "PRODUCT_MEDIA_FILE_INVALID"):
+            self.reader()(self.url, target, self.entry.size)
+        self.assertFalse(target.exists())
+
+    def test_even_digest_pinned_empty_payload_is_refused(self):
+        self.entry.sha256 = hashlib.sha256(b"").hexdigest()
+        self.entry.size = 0
+        self.media.mkdir()
+        (self.media / self.entry.sha256).write_bytes(b"")
+        with self.assertRaisesRegex(ProductReceiverError, "PRODUCT_MEDIA_ENTRY_INVALID"):
+            self.reader()(self.url, self.root / "staged", 0)
+        self.assertFalse((self.root / "staged").exists())
+
+    def test_truncated_media_refused_before_output(self):
+        self.media.mkdir()
+        (self.media / self.entry.sha256).write_bytes(self.data[:-1])
+        with self.assertRaisesRegex(ProductReceiverError, "PRODUCT_MEDIA_FILE_INVALID"):
+            self.reader()(self.url, self.root / "staged", self.entry.size)
+        self.assertFalse((self.root / "staged").exists())
+
+    def test_same_size_wrong_bytes_are_removed_before_return(self):
+        self.media.mkdir()
+        (self.media / self.entry.sha256).write_bytes(b"x" * self.entry.size)
+        with self.assertRaisesRegex(ProductReceiverError, "PRODUCT_MEDIA_DIGEST_MISMATCH"):
+            self.reader()(self.url, self.root / "staged", self.entry.size)
+        self.assertFalse((self.root / "staged").exists())
+
+    def test_staging_collision_does_not_remove_incumbent_file(self):
+        self.media.mkdir()
+        (self.media / self.entry.sha256).write_bytes(self.data)
+        target = self.root / "staged"
+        target.write_bytes(b"incumbent")
+        with self.assertRaises(FileExistsError):
+            self.reader()(self.url, target, self.entry.size)
+        self.assertEqual(target.read_bytes(), b"incumbent")
+
     def test_missing_installer_history_creates_nothing(self):
         self.assertEqual(installed_framework_hint(self.root), {})
         self.assertEqual(list(self.root.iterdir()), [])

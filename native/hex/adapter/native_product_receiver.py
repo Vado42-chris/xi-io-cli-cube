@@ -213,20 +213,31 @@ def _offline_payload_reader(lock: Path, profile: dict):
 
     def copy_payload(url: str, destination: Path, size: int) -> None:
         sha, expected_size = entries[url]
-        _require(size == expected_size and SHA256.fullmatch(sha), "PRODUCT_MEDIA_ENTRY_INVALID")
+        _require(type(size) is int and size > 0 and size == expected_size
+                 and SHA256.fullmatch(sha), "PRODUCT_MEDIA_ENTRY_INVALID")
         directory = os.open(media, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             with os.fdopen(os.open(sha, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory), "rb") as src:
                 info = os.fstat(src.fileno())
                 _require(stat.S_ISREG(info.st_mode) and info.st_size == size, "PRODUCT_MEDIA_FILE_INVALID")
-                with destination.open("xb") as out:
-                    remaining = size
-                    while remaining:
-                        chunk = src.read(min(remaining, 1024 * 1024))
-                        _require(bool(chunk), "PRODUCT_MEDIA_FILE_TRUNCATED")
-                        out.write(chunk)
-                        remaining -= len(chunk)
-                    _require(not src.read(1), "PRODUCT_MEDIA_FILE_CHANGED")
+                created = False
+                try:
+                    digest = hashlib.sha256()
+                    with destination.open("xb") as out:
+                        created = True
+                        remaining = size
+                        while remaining:
+                            chunk = src.read(min(remaining, 1024 * 1024))
+                            _require(bool(chunk), "PRODUCT_MEDIA_FILE_TRUNCATED")
+                            out.write(chunk)
+                            digest.update(chunk)
+                            remaining -= len(chunk)
+                        _require(not src.read(1), "PRODUCT_MEDIA_FILE_CHANGED")
+                        _require(digest.hexdigest() == sha, "PRODUCT_MEDIA_DIGEST_MISMATCH")
+                except BaseException:
+                    if created:
+                        destination.unlink(missing_ok=True)
+                    raise
         finally:
             os.close(directory)
 
