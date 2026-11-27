@@ -40,6 +40,15 @@ const config=join(scratch,'frame-tailwind.config.cjs');
 await writeFile(config,`const load=require(${JSON.stringify(join(deps,'node_modules/jiti'))})(__filename,{interopDefault:true});\nconst canonical=load(${JSON.stringify(join(source,'tailwind.config.js'))});\nmodule.exports={...canonical,content:${JSON.stringify(content)},safelist:canonical.safelist.filter(x=>x.pattern?.source==='^shadow-(sm|md|lg|xl|2xl|none)$')};\n`);
 const css=spawnSync(process.execPath,[join(deps,'node_modules/tailwindcss/lib/cli.js'),'--config',config,'--input',join(source,'src/index.css'),'--output',join(output,'frame-theme.css'),'--minify'],{stdio:'inherit'});
 if(css.status!==0)throw Error('Canonical frame CSS compilation failed');
+// Public release boundary: bundled output must never disclose private local
+// source paths. Refuse before writing source-custody provenance or promotion.
+// Use byte inspection, not a source-directory substitution that could mask leaks.
+for (const filename of ['window-frame.mjs','window-frame.css','frame-theme.css']) {
+ const emitted=(await readFile(join(output,filename))).toString('utf8');
+ if (/(?:\\/home\\/|\\/Users\\/|\\/media\\/|[A-Za-z]:\\\\Users\\\\|file:\\/\\/)/.test(emitted)) {
+  throw Error('SHARED_WINDOW_PRIVATE_PATH_DISCLOSURE_REFUSED: '+filename);
+ }
+}
 const artifactFiles=[];
 for(const path of ['window-frame.mjs','window-frame.css','frame-theme.css']){
  const bytes=await readFile(join(output,path));
