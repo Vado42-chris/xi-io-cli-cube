@@ -7,6 +7,7 @@ import {resolve,dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {assertSharedWindowPublicBytes,verifySharedWindowPublicOutput} from './verify-shared-window-public-output.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const [sourceArg,depsArg]=process.argv.slice(2);
 if(!sourceArg||!depsArg) throw Error('Usage: node scripts/build-shared-window.mjs /exact/patched/node-source /isolated/pinned-build-deps');
@@ -40,18 +41,12 @@ const config=join(scratch,'frame-tailwind.config.cjs');
 await writeFile(config,`const load=require(${JSON.stringify(join(deps,'node_modules/jiti'))})(__filename,{interopDefault:true});\nconst canonical=load(${JSON.stringify(join(source,'tailwind.config.js'))});\nmodule.exports={...canonical,content:${JSON.stringify(content)},safelist:canonical.safelist.filter(x=>x.pattern?.source==='^shadow-(sm|md|lg|xl|2xl|none)$')};\n`);
 const css=spawnSync(process.execPath,[join(deps,'node_modules/tailwindcss/lib/cli.js'),'--config',config,'--input',join(source,'src/index.css'),'--output',join(output,'frame-theme.css'),'--minify'],{stdio:'inherit'});
 if(css.status!==0)throw Error('Canonical frame CSS compilation failed');
-// Public release boundary: bundled output must never disclose private local
-// source paths. Refuse before writing source-custody provenance or promotion.
-// Use byte inspection, not a source-directory substitution that could mask leaks.
-for (const filename of ['window-frame.mjs','window-frame.css','frame-theme.css']) {
- const emitted=(await readFile(join(output,filename))).toString('utf8');
- if (/(?:\\/home\\/|\\/Users\\/|\\/media\\/|[A-Za-z]:\\\\Users\\\\|file:\\/\\/)/.test(emitted)) {
-  throw Error('SHARED_WINDOW_PRIVATE_PATH_DISCLOSURE_REFUSED: '+filename);
- }
-}
+// Scan every emitted asset before recording a publication candidate.
+const generated=await verifySharedWindowPublicOutput(output);
 const artifactFiles=[];
-for(const path of ['window-frame.mjs','window-frame.css','frame-theme.css']){
+for(const path of generated.filter(name=>name!=='source-custody.json')){
  const bytes=await readFile(join(output,path));
+ assertSharedWindowPublicBytes(bytes);
  if(path.endsWith('.css')&&/@apply\s|@tailwind\s/.test(bytes.toString()))throw Error('Uncompiled shared CSS directive');
  artifactFiles.push({path,sha256:sha(bytes),bytes:bytes.length});
 }
@@ -60,6 +55,8 @@ for(const name of ['vite','@vitejs/plugin-react']) generatorTools[name]=JSON.par
 const consumerInput={path:'src/SharedProductHost.tsx',sha256:sha(await readFile(join(root,'src/SharedProductHost.tsx')))};
 const consumerInstalledLock=sha(await readFile(join(root,'node_modules/.package-lock.json')));
 const provenance={...inputs,consumer_css_input:consumerInput,generator_tools:generatorTools,generator_source_sha256:sha(await readFile(fileURLToPath(import.meta.url))),consumer_installed_lock_sha256:consumerInstalledLock,consumer_tool_qualification:'EXISTING_INSTALLED_CACHE_NOT_UPSTREAM_LOCKED_RELEASE',qualification:'DERIVED_LOCAL_UNPUBLISHED_NODE_PATCH_NOT_MAIN_BASELINE',dependency_lock_sha256:expected.sha256,node_version:process.version,artifact_files:artifactFiles,react:'EXTERNAL_EXISTING_CONSUMER_RUNTIME',product_payloads_included:false,provider_calls_on_open:'NONE_IN_PRESENTATION_IMPORT_GRAPH',browser_native_controls:'DISABLED',native_runtime:'NOT_RUN'};
-await writeFile(join(output,'source-custody.json'),JSON.stringify(provenance,null,2)+'\n');
+const provenanceBytes=Buffer.from(JSON.stringify(provenance,null,2)+'\n');
+assertSharedWindowPublicBytes(provenanceBytes);
+await writeFile(join(output,'source-custody.json'),provenanceBytes);
 await rm(scratch,{recursive:true,force:true});
 console.log(JSON.stringify({output,files:artifactFiles},null,2));
