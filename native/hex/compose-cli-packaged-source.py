@@ -125,6 +125,8 @@ def main() -> int:
         "composed_by": "native/hex/compose-cli-packaged-source.py",
         "hard": ["COMPOSED != INSTALLED", "SOURCE_TIP != PRODUCTION_ACTIVATION"],
     }
+    if canonical_installer is not None:
+        manifest["repository"] = "Vado42-chris/xi-io-cli"
     manifest_bytes = (json.dumps(manifest, indent=2) + "\n").encode()
 
     # Keep the provenance projection joined to the generated packaged

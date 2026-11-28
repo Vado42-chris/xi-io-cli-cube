@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Qualification of the existing CLI composer with disposable Git source trees."""
 import ast, hashlib, json, pathlib, shutil, subprocess, sys, tempfile, unittest
+import os
 
 COMPOSER = pathlib.Path(__file__).resolve().with_name("compose-cli-packaged-source.py")
 SOURCE = COMPOSER.read_text()
@@ -64,14 +65,32 @@ class Composition(unittest.TestCase):
                    'scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']
         self.populate(set(FILES)-set(canonical))
         self.put(self.src/'src/runtime-gate.mjs','export const gate=true;')
-        self.put(self.src/'install.mjs',"// --packaged-source\nconst PAYLOAD_FILES=Object.freeze("+repr(canonical)+");\n")
+        self.put(self.src/'install.mjs',"// --packaged-source\nconst PAYLOAD_FILES=Object.freeze("+repr(canonical)+");\n"
+                 "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n")
         subprocess.run(['git','-C',str(self.src),'add','.'],check=True)
         subprocess.run(['git','-C',str(self.src),'-c','user.name=fixture','-c',
                         'user.email=fixture@example.invalid','commit','-qm','canonical installer'],check=True)
+        wrapper=self.hex/'download-install-cli.py'
+        shutil.copyfile(COMPOSER.with_name(wrapper.name),wrapper)
         result=self.run_composer()
         self.assertEqual(result.returncode,0,result.stderr)
         manifest=json.loads((self.dest/'packaged-source.json').read_text())
         self.assertEqual(set(manifest['files']),set(canonical))
+        self.assertEqual(manifest.get('repository'),'Vado42-chris/xi-io-cli')
+        self.assertTrue(shutil.which('node'),'qualification requires Node')
+        carrier='d'*40
+        cache=self.base/'cache'
+        shutil.copytree(self.dest,cache/carrier)
+        env=dict(os.environ,HOME=str(self.base))
+        installed=subprocess.run([sys.executable,str(wrapper),'--carrier-ref',carrier,
+                                   '--cache-dir',str(cache),'--install','--prefix',str(self.base/'prefix'),
+                                   '--bin-dir',str(self.base/'bin')],capture_output=True,text=True,timeout=10,env=env)
+        self.assertEqual(installed.returncode,0,installed.stderr)
+        args=json.loads(installed.stdout)
+        expected=hash_bytes((self.dest/'packaged-source.json').read_bytes())
+        self.assertEqual(args[args.index('--repo')+1],manifest['repository'])
+        self.assertEqual(args[args.index('--expect-packaged-manifest-sha256')+1],expected)
+        self.assertEqual(args[args.index('--ref')+1],manifest['source_sha'])
         self.assertEqual((self.dest/'install.mjs').read_bytes(),(self.src/'install.mjs').read_bytes())
         self.assertFalse((self.dest/'src/local-ops.mjs').exists())
         self.assertTrue((self.dest/'src/runtime-gate.mjs').is_file())
@@ -86,6 +105,7 @@ class Composition(unittest.TestCase):
         self.assertEqual(receipt['source_sha'],source_sha)
         self.assertEqual(provenance['current_packaged_payload']['ref'],source_sha)
         self.assertEqual(set(manifest['files']),set(FILES))
+        self.assertNotIn('repository',manifest)
         for rel in FILES:
             data=(self.dest/rel).read_bytes()
             self.assertEqual(data,(self.src/rel).read_bytes())
