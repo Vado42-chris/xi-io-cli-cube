@@ -7,6 +7,7 @@ No new service, identity, entitlement, package manager, scheduler or credential 
 """
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -518,6 +519,8 @@ def install_bundle(lock: Path, *, approved_lock_sha256: str,
     except TransactionError as exc:
         raise BundleError("BUNDLE_FILESYSTEM_UNQUALIFIED") from exc
     except OSError as exc:
+        if exc.errno in (errno.ENOSPC, errno.EDQUOT):
+            raise BundleError("BUNDLE_TARGET_FILESYSTEM_FULL") from exc
         raise BundleError("BUNDLE_STATE_ROOT_UNTRUSTED") from exc
 
     state_fd = _secure_ensure_state_root(state_root)
