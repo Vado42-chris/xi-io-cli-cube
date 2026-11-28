@@ -439,6 +439,119 @@ def run_installed_proof(root, package):
     root, package = Path(root).absolute(), Path(package).absolute()
     require(root.resolve() == root and package.resolve() == package, "PROOF_ROOT_SYMLINK")
     manifest, payload = read_package(package)
+    # The external HEX downloader pin is the receiving authority. Computing a
+    # fresh digest from supplied package bytes would let those bytes self-certify.
+    wrapper = package.parent / "download-install-cli.py"
+    require(wrapper.is_file() and not wrapper.is_symlink(), "EXTERNAL_MANIFEST_PIN_UNBOUND")
+    pins = re.findall(r'^MANIFEST_SHA="([0-9a-f]{64})"
+    require(not root.exists(), "PROOF_ROOT_ALREADY_EXISTS")
+    root.mkdir(mode=0o700)
+    for name in ["config", "state", "xdg-state", "xdg-config", "xdg-data", "xdg-cache", "tmp", "project"]:
+        (root / name).mkdir(mode=0o700)
+    (root / "project" / "NOTE.txt").write_bytes(BEFORE)
+    (root / "config" / "preserved-choice.txt").write_bytes(b"keep local choices\n")
+    env = isolated_environment(root)
+    launcher = root / "bin" / "xi-io-cli"
+    protected = {root / "config" / "preserved-choice.txt": b"keep local choices\n"}
+    outcome = {"state": "FAIL", "completed_stages": [], "installed_launcher": str(launcher),
+               "source_sha": manifest["source_sha"], "same_source_generations": True,
+               "canonical_cli_adoption": False, "ward_authority_granted": False,
+               "bins_version_qualified": False, "consumed_return_qualified": False}
+
+    def preserve():
+        for file, before in protected.items():
+            require(regular_bytes(file) == before, "LIFECYCLE_CHANGED_PRESERVED_FILE")
+
+    def install(label, previous):
+        node = shutil.which("node")
+        require(node is not None, "NODE_NOT_AVAILABLE")
+        report = run_json([node, str(package / "install.mjs"), "--repo", "Vado42-chris/xi-io-cli",
+                           "--ref", manifest["source_sha"], "--packaged-source", str(package),
+                           "--expect-packaged-manifest-sha256", manifest_pin,
+                           "--prefix", str(root / "prefix"), "--bin-dir", str(root / "bin")],
+                          env, root / (label + ".process.json"))
+        require(report.get("state") == "PASS" and report.get("schema") == "xiio.cli.install/v1"
+                and report.get("previous") == previous and report.get("generation") != previous
+                and report.get("launcher") == str(launcher)
+                and report.get("launcher_sha256") == digest(regular_bytes(launcher)),
+                "INSTALL_RESULT_MISMATCH")
+        generation = report["generation"]
+        observe_installed(root, manifest, payload, env, label + "-version", generation, previous)
+        preserve()
+        installed = root / "prefix" / "versions" / generation
+        for file in [launcher, installed / "install-receipt.json", *(installed / name for name in payload)]:
+            protected[file] = regular_bytes(file)
+        outcome["completed_stages"].append(label)
+        return generation
+
+    def reopen(label, current, previous, saved):
+        observe_installed(root, manifest, payload, env, label + "-version", current, previous)
+        resume_installed(root, env, saved, label)
+        preserve()
+        outcome["completed_stages"].append(label)
+
+    try:
+        first = install("install-first", None)
+        child = spawn_installed(root, env)
+        with (root / "transcript.txt").open("w", encoding="utf-8") as log:
+            child.logfile = log
+            try:
+                result = run_proof(child, root / "project" / "NOTE.txt", root)
+            finally:
+                child.close(force=True)
+        preserve()
+        outcome["completed_stages"].append("installed-model-transaction")
+        edit_receipt = json.loads(regular_bytes(root / f"edit-{result['proposal_attempts']}.receipt.json"))
+        saved = read_saved_session(root, edit_receipt, result["proposal_attempts"])
+        protected[saved[0]] = saved[1]
+        protected[root / "project" / "NOTE.txt"] = AFTER
+        for file in (root / "config").rglob("*"):
+            if file.is_file():
+                protected[file] = regular_bytes(file)
+        reopen("restart-first", first, None, saved)
+        second = install("install-second", first)
+        reopen("restart-second", second, first, saved)
+        for label, before, after in [("rollback", second, first), ("reverse-rollback", first, second)]:
+            rollback = run_json([str(launcher), "rollback"], env, root / (label + ".process.json"))
+            require(rollback.get("schema") == "xiio.cli.rollback/v1" and rollback.get("state") == "PASS"
+                    and rollback.get("from") == before and rollback.get("to") == after,
+                    "ROLLBACK_RESULT_MISMATCH")
+            reopen(label + "-reopen", after, before, saved)
+        outcome.update(state="PASS", first_generation=first, second_generation=second,
+                       transaction=result, session_sha256=digest(saved[1]),
+                       preserved_files={str(file.relative_to(root)): digest(data)
+                                        for file, data in protected.items()})
+        return outcome
+    except Exception as error:
+        outcome["reason"] = str(error)
+        raise
+    finally:
+        save_json(root / "installed-outcome.json", outcome)
+
+
+def main():
+    require("XIIO_RUNTIME" not in os.environ, "SOURCE_RUNTIME_OVERRIDE_REFUSED")
+    outcome = run_installed_proof(Path(os.environ["XIIO_PROOF_ROOT"]), Path(__file__).resolve().parent)
+    result = outcome["transaction"]
+    print("REAL_OLLAMA_READ=PASS")
+    print("REAL_OLLAMA_APPROVED_EDIT=PASS")
+    print("INDEPENDENT_FILE_READBACK=PASS")
+    print("APPROVAL_COUNT=" + str(result["approvals"]))
+    print("REJECTED_PROPOSALS=" + str(result["rejected_proposals"]))
+    print("FIRST_ATTEMPT_PROPOSAL=" + ("PASS" if result["rejected_proposals"] == 0 else "REFUSED"))
+    print("INSTALLED_LAUNCHER_TRANSACTION=PASS")
+    print("PERSISTED_CHAT_RESTART=PASS")
+    print("SAME_SOURCE_ROLLBACK_AND_REOPEN=PASS")
+
+
+if __name__ == "__main__":
+    main()
+,
+                      wrapper.read_text(encoding="utf-8"), flags=re.MULTILINE)
+    require(len(pins) == 1, "EXTERNAL_MANIFEST_PIN_UNBOUND")
+    manifest_pin = pins[0]
+    require(digest((package / "packaged-source.json").read_bytes()) == manifest_pin,
+            "EXTERNAL_MANIFEST_PIN_MISMATCH")
     # Never reset an existing bench or manufacture a passing post-effect retry.
     require(not root.exists(), "PROOF_ROOT_ALREADY_EXISTS")
     root.mkdir(mode=0o700)
