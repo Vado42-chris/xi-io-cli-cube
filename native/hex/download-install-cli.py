@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Pinned downloader for the EXISTING HEX offline CLI installer. No new installer."""
 import argparse,base64,hashlib,importlib.util,json,os,pathlib,re,shutil,subprocess,sys,tempfile
-SOURCE_SHA="f2626cae872f191e980ecdfb681485f2d9e67198"
-INSTALLER_SHA="03da74c49c385906a25ba02698610ee1ab61378dd51b06a540048645450b1b48"
-MANIFEST_SHA="b74fd64570170077a387439f00e5397ec70c0ab5555609861af89e21068a6e86"
-FILES=["src/xiio.mjs", "src/file-edit-cas.mjs", "src/local-ops.mjs", "src/sdk-provider-state.mjs", "src/sdk/audhd-command.mjs", "src/sdk/tool-verb-fidelity.mjs", "src/sdk/local-work-packet.mjs", "src/sdk/qualified-command-executor.mjs", "src/sdk/local-worker-host.mjs", "src/runtime-integrity.mjs", "config/service-catalog.json", "scripts/service-inventory.mjs", "scripts/reconcile-service-inventory.mjs", "config/batches/starter-regression-20261031.json"]
+SOURCE_SHA="27c02933bae4127cbe74f47a01b6a4ef23e474b1"
+INSTALLER_SHA="a01ae579dbcfebc7a1aec3b6c9c928b0d3e1bf307da7653d705e9c96250f0183"
+MANIFEST_SHA="d1615b50e0b9de8a462a5b7606aa32d1c24adeee8d3148e4ac4f743a1655503e"
+FILES=["src/xiio.mjs", "src/file-edit-cas.mjs", "src/runtime-integrity.mjs", "src/runtime-gate.mjs", "config/service-catalog.json", "scripts/service-inventory.mjs", "scripts/reconcile-service-inventory.mjs"]
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 def get_file(carrier,name,source_path=None):

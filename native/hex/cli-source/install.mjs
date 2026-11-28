@@ -4,7 +4,8 @@
  *   gh release download <tag> -R Vado42-chris/xi-io-cli -p install.mjs
  *   node install.mjs --ref <tag>
  *
- * Needs Node 22+ and a signed-in GitHub CLI (`gh auth login`); the repo is private.
+ * Online acquisition needs Node 22+ and a signed-in GitHub CLI; the repo is private.
+ * Explicit, independently pinned packaged-source input uses the same lifecycle.
  * The ref is resolved to one exact commit and every file is fetched at that commit.
  * Each install is a new generation under <prefix>/versions/. Older generations are
  * never deleted. <prefix>/current and <prefix>/previous are plain text pointers,
@@ -18,7 +19,7 @@ import { spawnSync } from 'node:child_process';
 // BEGIN runtime-integrity standalone mirror (byte-parity tested; keeps the installer one file)
 // Same-host installation guards. Neither identity admission nor a remote lease.
 
-const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs','src/sdk/qualified-command-executor.mjs','src/sdk/local-worker-host.mjs','src/runtime-integrity.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs','config/batches/starter-regression-20261031.json']);
+const PAYLOAD_FILES=Object.freeze(['src/xiio.mjs','src/file-edit-cas.mjs','src/runtime-integrity.mjs','src/runtime-gate.mjs','config/service-catalog.json','scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']);
 const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 // Preserve selected runtime lookup, home and explicit transport/auth configuration;
 // never inherit interpreter preloads, dynamic loader hooks or Git config injection.
@@ -46,24 +47,6 @@ const SUPPORTED_LEGACY_RELEASES=Object.freeze({
   '16d0fb4101d0674f8bd57858ac04d7fabf02aed2':Object.freeze({
     'src/xiio.mjs':'23b55b2524302f8d46958889b4735e37f2b04ec4b994b546c7eb38a87ba6e53b',
     'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88'
-  }),
-  // Exact six-file launcher-repair / Fixture generations. Nonce-suffixed
-  // names still map by receipt.source_sha — not permissive arbitrary legacy.
-  '0f2b444abbe8f7a99c5f4520b1222c568eba6dd1':Object.freeze({
-    'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88',
-    'scripts/reconcile-service-inventory.mjs':'eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e',
-    'scripts/service-inventory.mjs':'4711d6603f759607e79cadc1031f8668ef27b393f25b408b9ecd5516ebc18204',
-    'src/file-edit-cas.mjs':'f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3',
-    'src/runtime-integrity.mjs':'de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912',
-    'src/xiio.mjs':'561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b'
-  }),
-  'd53a1d0219f5b1707c6c1bbedfb262082179ceab':Object.freeze({
-    'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88',
-    'scripts/reconcile-service-inventory.mjs':'eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e',
-    'scripts/service-inventory.mjs':'4711d6603f759607e79cadc1031f8668ef27b393f25b408b9ecd5516ebc18204',
-    'src/file-edit-cas.mjs':'f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3',
-    'src/runtime-integrity.mjs':'de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912',
-    'src/xiio.mjs':'561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b'
   })
 });
 const legacyGenerationName=value=>typeof value==='string'&&/^[0-9a-f]{12}-\d{8}T\d{6}Z$/.test(value);
@@ -81,22 +64,14 @@ function verifyGeneration(prefix,generation){
   if(receipt.schema!=='xiio.cli.install-receipt/v2'||receipt.generation!==generation||path.resolve(receipt.prefix||'')!==path.resolve(prefix)||!(/^[0-9a-f]{40}$/).test(receipt.source_sha)||!generation.startsWith(receipt.source_sha.slice(0,12)+'-'))throw Error('GENERATION_RECEIPT_INVALID');
   if(!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(String(receipt.node||''))||Number(process.versions.node.split('.')[0])<22||Number(receipt.node.split('.')[0])<22||receipt.platform!==process.platform)throw Error('GENERATION_RUNTIME_INCOMPATIBLE');
   const listed=Object.keys(receipt.files||{});
-  const expectedLegacy=SUPPORTED_LEGACY_RELEASES[receipt.source_sha];
-  if(expectedLegacy){
-    const expected=expectedLegacy;
+  if(legacyGenerationName(generation)){
+    const expected=SUPPORTED_LEGACY_RELEASES[receipt.source_sha];
     if(!expected||receipt.repo!=='Vado42-chris/xi-io-cli'||receipt.ref!==receipt.source_sha)throw Error('LEGACY_RELEASE_UNSUPPORTED');
     if(listed.length!==Object.keys(expected).length||listed.some(file=>!Object.hasOwn(expected,file)||receipt.files[file]!==expected[file]))throw Error('LEGACY_RELEASE_PAYLOAD_MISMATCH');
   }else{
-    const required=PAYLOAD_FILES.filter(file=>!['src/runtime-integrity.mjs','src/local-ops.mjs','src/sdk-provider-state.mjs','src/sdk/audhd-command.mjs','src/sdk/tool-verb-fidelity.mjs','src/sdk/local-work-packet.mjs'].includes(file));
+    const required=PAYLOAD_FILES.filter(file=>file!=='src/runtime-integrity.mjs');
     if(required.some(file=>!listed.includes(file))||listed.some(file=>!PAYLOAD_FILES.includes(file)))throw Error('GENERATION_RECEIPT_FILE_MISSING');
     if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './runtime-integrity.mjs'")&&!listed.includes('src/runtime-integrity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
-    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './local-ops.mjs'")&&!listed.includes('src/local-ops.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
-    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk-provider-state.mjs'")&&!listed.includes('src/sdk-provider-state.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
-    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/audhd-command.mjs'")&&!listed.includes('src/sdk/audhd-command.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
-    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/tool-verb-fidelity.mjs'")&&!listed.includes('src/sdk/tool-verb-fidelity.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
-    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-work-packet.mjs'")&&!listed.includes('src/sdk/local-work-packet.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
-    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/local-worker-host.mjs'")&&!listed.includes('src/sdk/local-worker-host.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
-    if(fs.readFileSync(path.join(root,'src/xiio.mjs'),'utf8').includes("from './sdk/qualified-command-executor.mjs'")&&!listed.includes('src/sdk/qualified-command-executor.mjs'))throw Error('GENERATION_RECEIPT_FILE_MISSING');
   }
   for(const relative of listed){
     const file=path.join(root,...relative.split('/'));
@@ -179,25 +154,6 @@ const base = win ? (process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData
 const PREFIX = path.resolve(arg('--prefix', process.env.XIIO_CLI_V1_PREFIX || path.join(base, 'xi-io', 'cli-v1')));
 const BIN_DIR = path.resolve(arg('--bin-dir', process.env.XIIO_CLI_BIN_DIR || (win ? path.join(base, 'xi-io', 'bin') : path.join(os.homedir(), '.local', 'bin'))));
 const GH = process.env.XIIO_GH || 'gh';
-// Local review candidate: transport only; generation/launcher/pointers stay owned below.
-const PACKAGED_ROOT = arg('--packaged-source', null);
-let packaged = null, packagedBytes = null;
-if(PACKAGED_ROOT){
-  const root=fs.realpathSync(PACKAGED_ROOT);
-  if(root!==path.resolve(PACKAGED_ROOT))throw Error('PACKAGED_ROOT_SYMLINK');
-  regular(path.join(root,'packaged-source.json'));
-  packaged=JSON.parse(fs.readFileSync(path.join(root,'packaged-source.json'),'utf8'));
-  if(packaged.schema!=='xiio.cli.packaged-source/v1'||packaged.source_sha!==REF||!Object.keys(packaged.files||{}).every(f=>FILES.includes(f))||Object.keys(packaged.files||{}).length!==FILES.length)throw Error('PACKAGED_MANIFEST_INVALID');
-  packagedBytes={};
-  for(const f of FILES){
-    const file=path.join(root,f);regular(file);
-    if(fs.realpathSync(file)!==file)throw Error('PACKAGED_PATH_SYMLINK');
-    const bytes=fs.readFileSync(file), expected=packaged.files[f];
-    if(bytes.length!==expected.size||digest(bytes)!==expected.sha256)throw Error('PACKAGED_PAYLOAD_CHANGED');
-    packagedBytes[f]=bytes;
-  }
-}
-
 const VALIDATED_NODE_BINARY = fs.realpathSync(process.execPath);
 const ADOPT_EXISTING_LAUNCHER = process.argv.includes('--adopt-existing-launcher');
 const EXPECTED_LAUNCHER_SHA = arg('--expect-launcher-sha256', null);
@@ -228,7 +184,65 @@ try {
   fail('EXISTING_GENERATION_PREFLIGHT_FAILED',{cause:String(error?.message||error),modified:false});
 }
 
-// 1. Resolve the ref to one exact commit.
+// Consume the existing xiio.cli.packaged-source/v1 transport without replacing
+// generation, receipt, launcher or pointer ownership. The external manifest pin
+// binds approved bytes, not GitHub provenance, release admission or Ward rights.
+let packaged=null,packagedBytes=null,packagedManifestSha=null;
+if(process.argv.some(value=>/^--(?:packaged-source|expect-packaged-manifest-sha256)(?:=|$)/.test(value))){
+  try{
+    if(process.argv.some(value=>/^--(?:packaged-source|expect-packaged-manifest-sha256)=/.test(value)))throw Error('PACKAGED_ARGUMENT_INVALID');
+    const explicit=(name,missing)=>{
+      const positions=process.argv.map((value,index)=>value===name?index:-1).filter(index=>index>=0);
+      if(!positions.length)throw Error(missing);
+      const value=process.argv[positions[0]+1];
+      if(positions.length!==1||typeof value!=='string'||!value||value.startsWith('--'))throw Error('PACKAGED_ARGUMENT_INVALID');
+      return value;
+    };
+    const requestedRoot=explicit('--packaged-source','PACKAGED_SOURCE_REQUIRED');
+    const expectedManifest=explicit('--expect-packaged-manifest-sha256','PACKAGED_MANIFEST_PIN_REQUIRED');
+    const exactRef=explicit('--ref','PACKAGED_EXACT_REF_REQUIRED');
+    if(!/^[0-9a-f]{40}$/.test(exactRef))throw Error('PACKAGED_EXACT_REF_REQUIRED');
+    if(process.argv.includes('--repo'))explicit('--repo','PACKAGED_REPOSITORY_REQUIRED');
+    if(!/^[0-9a-f]{64}$/.test(expectedManifest))throw Error('PACKAGED_MANIFEST_PIN_INVALID');
+    const root=path.resolve(requestedRoot),rootStat=fs.lstatSync(root);
+    if(!rootStat.isDirectory()||rootStat.isSymbolicLink()||fs.realpathSync(root)!==root)throw Error('PACKAGED_ROOT_SYMLINK');
+    const readPackagedFile=relative=>{
+      const file=path.join(root,relative),st=fs.lstatSync(file);
+      if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1)throw Error('PACKAGED_FILE_CUSTODY_INVALID');
+      if(fs.realpathSync(file)!==file)throw Error('PACKAGED_PATH_SYMLINK');
+      const fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+      try{
+        const opened=fs.fstatSync(fd);
+        if(!opened.isFile()||opened.nlink!==1||opened.dev!==st.dev||opened.ino!==st.ino)throw Error('PACKAGED_FILE_CUSTODY_INVALID');
+        return fs.readFileSync(fd);
+      }finally{fs.closeSync(fd);}
+    };
+    const manifestBytes=readPackagedFile('packaged-source.json');
+    packagedManifestSha=digest(manifestBytes);
+    if(packagedManifestSha!==expectedManifest)throw Error('PACKAGED_MANIFEST_DIGEST_MISMATCH');
+    try{packaged=JSON.parse(manifestBytes.toString('utf8'))}catch{throw Error('PACKAGED_MANIFEST_INVALID')}
+    if(packaged?.schema!=='xiio.cli.packaged-source/v1')throw Error('PACKAGED_MANIFEST_INVALID');
+    if(packaged.repository!==REPO||!(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).test(REPO))throw Error('PACKAGED_REPOSITORY_MISMATCH');
+    if(packaged.source_sha!==exactRef)throw Error('PACKAGED_REF_MISMATCH');
+    const files=packaged.files;
+    if(!files||typeof files!=='object'||Array.isArray(files)||Object.keys(files).length!==FILES.length
+      ||Object.keys(files).some(file=>!FILES.includes(file)))throw Error('PACKAGED_MANIFEST_INVALID');
+    packagedBytes=Object.create(null);
+    for(const file of FILES){
+      const row=files[file];
+      if(!row||typeof row!=='object'||Array.isArray(row)||!Number.isSafeInteger(row.size)||row.size<=0
+        ||typeof row.sha256!=='string'||!(/^[0-9a-f]{64}$/).test(row.sha256))throw Error('PACKAGED_MANIFEST_INVALID');
+      const bytes=readPackagedFile(file);
+      if(bytes.length!==row.size||digest(bytes)!==row.sha256)throw Error('PACKAGED_PAYLOAD_CHANGED');
+      packagedBytes[file]=bytes;
+    }
+  }catch(error){
+    const cause=String(error?.message||error);
+    fail(cause.startsWith('PACKAGED_')?cause:'PACKAGED_SOURCE_UNREADABLE',{modified:false});
+  }
+}
+
+// 1. Resolve online acquisition, or retain the explicitly selected package ref.
 const sha = packaged ? packaged.source_sha : String(gh(['api', `repos/${REPO}/commits/${encodeURIComponent(REF)}`, '--jq', '.sha'])).trim();
 if (!/^[0-9a-f]{40}$/.test(sha)) fail('REF_NOT_RESOLVED', { ref: REF, got: sha.slice(0, 80) });
 
@@ -241,29 +255,19 @@ const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '') 
 const dir = fs.mkdtempSync(path.join(versions, sha.slice(0, 12) + '-' + stamp + '-'));
 const generation = path.basename(dir);
 const hashes = {};
-// Only newly created files in this fresh generation acquire these permissions.
-// An ambient group-writable umask must not make the installed catalog fail the
-// existing Ward/Switchboard custody check. Never chmod a historical generation.
-function writeNewGenerationFile(filename, bytes) {
-  const fd = fs.openSync(filename, 'wx', 0o600);
-  try {
-    fs.fchmodSync(fd, 0o600);
-    fs.writeFileSync(fd, bytes);
-    fs.fsyncSync(fd);
-  } finally { fs.closeSync(fd); }
-}
 for (const f of FILES) {
   const bytes = packagedBytes ? packagedBytes[f] : gh(['api', '-H', 'Accept: application/vnd.github.raw', `repos/${REPO}/contents/${f}?ref=${sha}`]);
   if (!bytes.length) fail('FETCH_EMPTY', { file: f });
   const out = path.join(dir, ...f.split('/'));
-  fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
-  writeNewGenerationFile(out, bytes);
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, bytes, { flag: 'wx' });
   hashes[f] = sha256(bytes);
 }
-writeNewGenerationFile(path.join(dir, 'install-receipt.json'), JSON.stringify({
+fs.writeFileSync(path.join(dir, 'install-receipt.json'), JSON.stringify({
   schema: 'xiio.cli.install-receipt/v2', installed_at: new Date().toISOString(), repo: REPO, ref: REF, source_sha: sha,
   generation, prefix: PREFIX, platform: process.platform, node: process.versions.node, files: hashes, models_installed: 0,
-}, null, 2) + '\n');
+  ...(packaged?{source_acquisition:{kind:'packaged-source',manifest_sha256:packagedManifestSha}}:{}),
+}, null, 2) + '\n', { flag: 'wx' });
 
 // 3. Verify the staged generation before it becomes current. The smoke test
 //    uses a throwaway config dir so it cannot change the person's settings.
@@ -280,7 +284,7 @@ for (const file of FILES.filter(f => f.startsWith('scripts/') && f.endsWith('.mj
 const v = spawnSync(process.execPath, [entry, 'version', '--staged'], { encoding: 'utf8', env, cwd: dir, timeout: 30000 });
 let ver; try { ver = JSON.parse(v.stdout); } catch { fail('CLI_VERSION_FAILED', { generation, stderr: String(v.stderr).slice(0, 300) }); }
 if (v.status !== 0 || !ver.integrity_verified || !['STAGED','PASS'].includes(ver.state) || ver.source_sha !== sha || ver.running_file_sha256 !== hashes['src/xiio.mjs']) fail('INSTALLED_GENERATION_MISMATCH', { expected: sha, reported: ver.source_sha, file_sha256: ver.running_file_sha256 });
-const menu = spawnSync(process.execPath, [entry, dir], { input: '/exit\n', encoding: 'utf8', env, cwd: dir, timeout: 30000 });
+const menu = spawnSync(process.execPath, [entry, dir], { input: '10\n', encoding: 'utf8', env, cwd: dir, timeout: 30000 });
 if (menu.status !== 0) fail('CLI_INTERACTIVE_EXIT_FAILED', { generation, stdout: String(menu.stdout).slice(-300) });
 fs.rmSync(scratch, { recursive: true, force: true });
 
@@ -390,5 +394,3 @@ console.log(JSON.stringify({
   add_to_path: onPath ? null : (win ? `powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';${BIN_DIR}', 'User')"  (then open a new terminal)` : `export PATH="${BIN_DIR}:$PATH"`),
   next: ['xi-io-cli version', 'xi-io-cli', 'xi-io-cli rollback'],
 }, null, 2));
-
-

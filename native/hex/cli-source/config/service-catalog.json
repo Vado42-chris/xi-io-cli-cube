@@ -13,25 +13,32 @@
   "profiles": {
     "aries-dev": {
       "node_ref": "node.aries",
-      "description": "Development workstation profile",
+      "role": "workstation",
+      "description": "Selected workstation services (Ollama/Ibal/Studio/dev plane). Not the public product host. Profile JSON changes do not stop or remove running software.",
       "services": [
         "ollama",
+        "local-agent-api",
         "ibal",
         "studio-ui",
         "api-glass-private",
         "dev-gateway",
-        "inbox",
-        "crm",
-        "hex",
-        "cloudflared"
+        "switchboard-device-consumer"
       ]
     },
     "loki-live": {
       "node_ref": "node.loki",
-      "description": "Temporary live/public hosting and adversarial UX host",
+      "role": "server",
+      "description": "Public web, CRM, BINS, Inbox, HEX, and mail-server host. Preserves local-agent + Switchboard authority. mail-server stays PROFILE_REQUIRED_NOT_AUTO_INSTALLED until Chris authorizes install.",
       "services": [
+        "local-agent-api",
         "public-web",
-        "cloudflared"
+        "cloudflared",
+        "crm",
+        "bins",
+        "inbox",
+        "hex",
+        "mail-server",
+        "switchboard-device-consumer"
       ]
     }
   },
@@ -48,11 +55,24 @@
       "install_provider": "ollama"
     },
     {
+      "id": "local-agent-api",
+      "class": "local_cli_api",
+      "runtime": "xi-io: CLI local agent",
+      "model_agnostic": true,
+      "probe": "http://127.0.0.1:3109/v1/status",
+      "systemd_candidates": [
+        "xiio-local-agent.service",
+        "xi-io-local-agent.service"
+      ],
+      "install_provider": "xi-io-sdk",
+      "cli_access": "read_write"
+    },
+    {
       "id": "ibal",
       "class": "ai_orchestrator",
       "runtime": "xi-io: Ibal",
       "model_agnostic": true,
-      "probe": "https://127.0.0.1:3000/",
+      "probe": "http://127.0.0.1:3000/api/ibal/runtime/health",
       "systemd_candidates": [
         "xiio-ibal.service",
         "xi-io-ibal.service"
@@ -89,17 +109,31 @@
       "probe": "http://127.0.0.1:8791/api/health",
       "systemd_candidates": [
         "xiio-inbox-dogfood-8791.service",
+        "xiio-inbox-8787.service",
         "xiio-inbox.service"
       ]
     },
     {
       "id": "crm",
       "class": "crm",
-      "probe": "http://127.0.0.1:8794/api/health",
+      "probe": "http://127.0.0.1:8794/health",
       "systemd_candidates": [
         "xiio-crm-8794.service",
         "xiio-crm.service"
       ]
+    },
+    {
+      "id": "bins",
+      "class": "bins_custody",
+      "runtime": "xi-io: BINS",
+      "probe": "http://127.0.0.1:8796/health",
+      "systemd_candidates": [
+        "xiio-bins-8796.service",
+        "xiio-bins.service"
+      ],
+      "install_provider": "xi-io_bins",
+      "notes": "Declared product probe is disposable BINS :8796. A listening port alone is not product identity; :8797 is a separate staging/side runtime.",
+      "systemd_action_unit": "xiio-bins-8796.service"
     },
     {
       "id": "hex",
@@ -115,10 +149,9 @@
       "class": "edge_tunnel",
       "probe": null,
       "systemd_candidates": [
-        "cloudflared.service"
-      ],
-      "discovery_systemd_candidates": [
-        "xiio-cloudflared-webserver.service"
+        "cloudflared.service",
+        "xiio-cloudflared-webserver.service",
+        "xi-io-tunnel.service"
       ]
     },
     {
@@ -140,7 +173,21 @@
         "dovecot.service"
       ],
       "install_provider": "system-mail",
-      "state": "PROFILE_REQUIRED_NOT_AUTO_INSTALLED"
+      "selected_provider_profile": "postfix+dovecot",
+      "selection": "POSTFIX_DOVECOT_ON_LOKI_SELECTED",
+      "state": "PROFILE_REQUIRED_NOT_AUTO_INSTALLED",
+      "notes": "Chris selected Postfix+Dovecot on Loki. Catalog declares intent only. Install/qualify owned by mail seat; CLI install remains gated until qualify PASS. Profile JSON must never stop or remove running software."
+    },
+    {
+      "id": "switchboard-device-consumer",
+      "class": "device_worker",
+      "runtime": "xi-io: Switchboard native device consumer",
+      "probe": null,
+      "systemd_candidates": [
+        "xiio-switchboard-device-consumer.service"
+      ],
+      "install_provider": "xi-io-Switchboard",
+      "state": "AUTHORITY_ENV_REQUIRED"
     }
   ],
   "ai_engines": [
