@@ -1,6 +1,6 @@
 {
   "schema": "xiio.cli.packaged-source/v1",
-  "source_sha": "27c02933bae4127cbe74f47a01b6a4ef23e474b1",
+  "source_sha": "011c32b71d4314fbf97f643586d28f62ece99c81",
   "files": {
     "src/xiio.mjs": {
       "sha256": "0385ec009875b3cf97f024dab2d49fb049fbb2ff2045fc260f2a4ee27c23c025",
@@ -11,8 +11,8 @@
       "size": 3853
     },
     "src/runtime-integrity.mjs": {
-      "sha256": "7ebec93e5675602f903b48c49f6ed14b68253f85a02702ff5d8397243e161ec6",
-      "size": 10751
+      "sha256": "8dc7b0264662b49c6fd37c5dd9f193628a95ba1635e83c4924a959f8d83ca74f",
+      "size": 12436
     },
     "src/runtime-gate.mjs": {
       "sha256": "9caa976c451fd5c88d6ca12465c8b886b1af7217bae27bb4c7731a4eebfb324d",
