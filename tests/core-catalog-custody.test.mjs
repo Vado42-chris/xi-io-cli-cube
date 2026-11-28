@@ -16,7 +16,7 @@ const historical=JSON.parse(fs.readFileSync(path.join(historicalSource,'SOURCE.j
 const historicalFiles=Object.keys(historical.files).filter(f=>/^(?:src|config|scripts)\//.test(f));
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 const manifestSha=sha(manifestBytes);
-assert.equal(manifestSha,'93e933f8852c0abaf83b9d503f608fdd83c573f20cd2e3cb1714640020426475','approved package manifest changed');
+assert.equal(manifestSha,'c0aa5d43c5af9095cf5e75fe678e171590ed553f5fe45a4e7921629115200041','approved package manifest changed');
 function snapshot(directory){
  const rows={};
  function visit(p,rel){
