@@ -19,13 +19,13 @@ assert current["repository"]=="Vado42-chris/xi-io-cli"
 assert current["ref"]==SOURCE
 assert current["manifest"]=="packaged-source.json"
 assert current["files"]==EXPECTED
-assert current["local_payload_modifications"] is True  # cube-joined legacy gate in runtime-integrity
+assert current["local_payload_modifications"] is False  # all seven files match canonical CLI owner blobs
 installer=(ROOT/"install.mjs").read_text()
-assert "input: '/exit\\n'" in installer
-assert "input: '10\\n'" not in installer
+assert "input: '10\\n'" in installer  # owner menu exit smoke, not an inferred chat-first prompt
+assert "input: '/exit\\n'" not in installer
 assert source["offline_installer_successor"]["sha256"]==hashlib.sha256((ROOT/"install.mjs").read_bytes()).hexdigest()
 runtime=(ROOT/"src/xiio.mjs").read_text()
-assert "127.0.0.1:11434/api/chat" in runtime
-assert "/menu" in runtime
-print(json.dumps({"schema":"xiio.hex.cli-payload-current/v1","source_sha":SOURCE,"files":len(EXPECTED),"chat_first_payload":True,"offline_installer":True,"status":"PASS"},sort_keys=True))
+assert "new URL(operation==='models'?engine.model_discovery:'/api/chat',base).href" in runtime
+assert "if(cmd==='/exit')" in runtime
+print(json.dumps({"schema":"xiio.hex.cli-payload-current/v1","source_sha":SOURCE,"files":len(EXPECTED),"chat_first_payload":False,"menu_entry":True,"offline_installer":True,"status":"PASS"},sort_keys=True))
 
