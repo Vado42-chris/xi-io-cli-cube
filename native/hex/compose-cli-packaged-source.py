@@ -43,16 +43,24 @@ def main() -> int:
     if tracked_dirty:
         raise SystemExit("CLI_WORKTREE_DIRTY:" + ";".join(tracked_dirty[:5]))
 
+    # Validate the complete exact-generation closure before changing any receiver bytes.
     files_meta = {}
+    payload = {}
     for rel in FILES:
         path = src / rel
         if not path.is_file() or path.is_symlink():
             raise SystemExit("MISSING_PAYLOAD_FILE:" + rel)
         data = path.read_bytes()
+        try:
+            tracked = subprocess.check_output(
+                ["git", "-C", str(src), "show", f"{sha}:{rel}"], stderr=subprocess.DEVNULL
+            )
+        except subprocess.CalledProcessError:
+            raise SystemExit("PAYLOAD_NOT_IN_SOURCE_GENERATION:" + rel)
+        if tracked != data:
+            raise SystemExit("PAYLOAD_SOURCE_GENERATION_MISMATCH:" + rel)
         files_meta[rel] = {"sha256": digest(data), "size": len(data)}
-        dest = DEST / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
+        payload[rel] = data
 
     # Preserve HEX --packaged-source transport adaptation; only refresh PAYLOAD_FILES.
     install_path = DEST / "install.mjs"
@@ -70,8 +78,7 @@ def main() -> int:
     )
     if n != 1:
         raise SystemExit("HEX_INSTALL_PAYLOAD_REWRITE_FAILED")
-    install_path.write_text(install_text)
-    installer = install_path.read_bytes()
+    installer = install_text.encode("utf-8")
     manifest = {
         "schema": "xiio.cli.packaged-source/v1",
         "source_sha": sha,
@@ -80,7 +87,6 @@ def main() -> int:
         "hard": ["COMPOSED != INSTALLED", "SOURCE_TIP != PRODUCTION_ACTIVATION"],
     }
     manifest_bytes = (json.dumps(manifest, indent=2) + "\n").encode()
-    (DEST / "packaged-source.json").write_bytes(manifest_bytes)
 
     # Keep the provenance projection joined to the generated packaged
     # manifest. This updates candidate metadata only, never activation.
@@ -105,17 +111,20 @@ def main() -> int:
     if isinstance(successor, dict):
         successor["sha256"] = digest(installer)
         source_meta["offline_installer_successor"] = successor
-    source_meta_path.write_text(json.dumps(source_meta, indent=2) + "\n")
+    source_meta_bytes = (json.dumps(source_meta, indent=2) + "\n").encode("utf-8")
 
     # Rewrite download-install-cli.py pins to this composed tip (candidate only).
     dl = HERE / "download-install-cli.py"
     text = dl.read_text()
-    text = re.sub(r'SOURCE_SHA="[0-9a-f]{40}"', f'SOURCE_SHA="{sha}"', text, count=1)
-    text = re.sub(r'INSTALLER_SHA="[0-9a-f]{64}"', f'INSTALLER_SHA="{digest(installer)}"', text, count=1)
-    text = re.sub(r'MANIFEST_SHA="[0-9a-f]{64}"', f'MANIFEST_SHA="{digest(manifest_bytes)}"', text, count=1)
-    files_literal = json.dumps(FILES)
-    text = re.sub(r"FILES=\[[^\]]+\]", f"FILES={files_literal}", text, count=1)
-    dl.write_text(text)
+    for pattern, replacement in (
+        (r'^SOURCE_SHA="[0-9a-f]{40}"$', f'SOURCE_SHA="{sha}"'),
+        (r'^INSTALLER_SHA="[0-9a-f]{64}"$', f'INSTALLER_SHA="{digest(installer)}"'),
+        (r'^MANIFEST_SHA="[0-9a-f]{64}"$', f'MANIFEST_SHA="{digest(manifest_bytes)}"'),
+        (r"^FILES=\[[^\]]+\]$", f"FILES={json.dumps(FILES)}"),
+    ):
+        text, count = re.subn(pattern, replacement, text, flags=re.MULTILINE)
+        if count != 1:
+            raise SystemExit("HEX_DOWNLOAD_PIN_REWRITE_FAILED")
 
     receipt = {
         "schema": "xiio.hex.composed-packaged-source/v1",
@@ -129,6 +138,17 @@ def main() -> int:
         "hard": ["COMPOSED != INSTALLED", "CANDIDATE != PRODUCTION"],
     }
     out = HERE / "COMPOSED-packaged-source.receipt.json"
+
+    # Only publish the candidate after source custody and all pin rewrites pass.
+    # This is validation-before-write, not a crash-atomic multi-file transaction.
+    for rel, data in payload.items():
+        dest = DEST / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+    install_path.write_bytes(installer)
+    (DEST / "packaged-source.json").write_bytes(manifest_bytes)
+    source_meta_path.write_bytes(source_meta_bytes)
+    dl.write_text(text)
     out.write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps(receipt, indent=2))
     return 0
