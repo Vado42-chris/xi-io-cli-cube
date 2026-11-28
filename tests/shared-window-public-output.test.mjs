@@ -29,6 +29,13 @@ test('private filesystem paths and common escaped forms refuse without leaking b
  }
  assert.doesNotThrow(()=>assertSharedWindowPublicBytes('const label="Home"; const route="/api/workspaces";'));
 });
+test('build-root breadcrumbs refuse in comments and escaped lazy output',()=>withOutput(async root=>{
+ await writeFile(join(root,'window-frame.mjs'),'// ../../scratch/synthetic-build/inputs/frame.jsx\nexport const title="Window";');
+ await assert.rejects(verifySharedWindowPublicOutput(root),/^Error: SHARED_WINDOW_PRIVATE_PATH_DISCLOSURE_REFUSED$/);
+ await writeFile(join(root,'window-frame.mjs'),'export const title="Window";');
+ await writeFile(join(root,'chunk-fixture.js'),String.raw`const candidate="\u002fworkspace\u002fsynthetic-build";`);
+ await assert.rejects(verifySharedWindowPublicOutput(root),/^Error: SHARED_WINDOW_PRIVATE_PATH_DISCLOSURE_REFUSED$/);
+}));
 test('refuses linked output and missing required files',()=>withOutput(async root=>{
  await symlink(join(root,names[0]),join(root,'extra.js'));
  await assert.rejects(verifySharedWindowPublicOutput(root),/SHARED_WINDOW_OUTPUT_LINK_REFUSED/);

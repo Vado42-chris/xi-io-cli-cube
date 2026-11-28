@@ -8,7 +8,7 @@ export function assertSharedWindowPublicBytes(bytes){
  const text=Buffer.from(bytes).toString('utf8');
  // Normalize the common JS/JSON slash escapes before the path check.
  const normalized=text.replace(/\\u002f|\\x2f/gi,'/').replace(/\\\//g,'/').replace(/\\{2}/g,'\\');
- if(/(?:\/(?:home|Users|media|mnt|tmp|private\/var)\/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]|file:\/\/)/i.test(normalized)||
+ if(/(?:\/(?:home|Users|media|mnt|tmp|workspace|scratch|private\/var)\/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/]|file:\/\/)/i.test(normalized)||
     /xiio\.studio\.empire-work-home\.snapshot\/v1|empireWorkHomeSnapshot|physical_examples_unchanged/.test(normalized)){
   throw Error('SHARED_WINDOW_PRIVATE_PATH_DISCLOSURE_REFUSED');
  }
