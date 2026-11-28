@@ -840,6 +840,90 @@ class BundleTests(unittest.TestCase):
         self.assertFalse((Path(f.env["XDG_STATE_HOME"]) /
                           "xi-io/installer/bundles/core-test").exists())
 
+    def test_hex_terminal_05_destination_enospc_is_first_failure_before_download(self):
+        import errno
+        from xiio_installer import transaction as tx
+
+        f = self.fixture()
+        f.child("sdk").child("consumer", depends_on=("sdk",))
+        lock, digest = f.product_lock(product_root_role="consumer")
+        target = Path(f.env["XDG_DATA_HOME"]) / "xi-io/consumer"
+        cwd_before = Path.cwd()
+        real_open = os.open
+        hit = []
+
+        def open_with_full_install_target(file, *args, **kwargs):
+            if isinstance(file, Path) and file.parent.parent == target and file.name == "first":
+                hit.append(file.parent.parent)
+                raise OSError(errno.ENOSPC, "fixture install target is full")
+            return real_open(file, *args, **kwargs)
+
+        with patch.object(tx.os, "open", side_effect=open_with_full_install_target), \
+             patch("child_bundle.apply_install") as apply:
+            with self.assertRaisesRegex(BundleError, "^BUNDLE_TARGET_FILESYSTEM_FULL$"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                               fetch=lambda *_: self.fail("fetch after failed target preflight"))
+            apply.assert_not_called()
+        self.assertEqual(hit, [target])
+        self.assertEqual(Path.cwd(), cwd_before)
+        self.assertFalse(Path(f.env["XDG_DATA_HOME"]).exists())
+        self.assertFalse(Path(f.env["XDG_STATE_HOME"]).exists())
+        self.assertFalse(list(f.root.rglob(".xiio-fs-probe-*")))
+
+    def test_hex_terminal_06_sdk_dependency_refuses_before_any_fetch_or_writes(self):
+        for case in ("missing", "unbound", "wrong-generation"):
+            with self.subTest(case=case):
+                f = self.fixture()
+                f.child("sdk").child("consumer", depends_on=("sdk",))
+                f.product_lock(product_root_role="consumer")
+                row = f.rows[0]
+                if case == "missing":
+                    f.rows.pop(0)
+                    error = "BUNDLE_DEPENDENCY_NOT_IN_PROFILE"
+                elif case == "unbound":
+                    row.pop("descriptor_ref")
+                    row.pop("descriptor_sha256")
+                    error = "BUNDLE_RUNTIME_DEPENDENCY_DESCRIPTOR_REQUIRED"
+                else:
+                    descriptor_path = f.root / row["descriptor_ref"]
+                    descriptor = json.loads(descriptor_path.read_bytes())
+                    descriptor["accepted_generation"] = "1" * 40
+                    descriptor_path.write_text(json.dumps(descriptor))
+                    row["descriptor_sha256"] = sha(descriptor_path.read_bytes())
+                    error = "BUNDLE_DESCRIPTOR_RELEASE_GENERATION_MISMATCH"
+                lock, digest = f.lock(profile_mode="product", product_root_role="consumer")
+                with patch("child_bundle.qualify_precommand_manifests") as probe, \
+                     patch("child_bundle.apply_install") as apply:
+                    with self.assertRaisesRegex(BundleError, "^" + error + "$"):
+                        install_bundle(lock, approved_lock_sha256=digest, env=f.env,
+                                       fetch=lambda *_: self.fail("fetch without exact SDK binding"))
+                    probe.assert_not_called()
+                    apply.assert_not_called()
+                self.assertFalse(Path(f.env["XDG_DATA_HOME"]).exists())
+                self.assertFalse(Path(f.env["XDG_STATE_HOME"]).exists())
+
+    def test_hex_terminal_07_bad_sdk_bytes_do_not_fetch_dependent_or_apply(self):
+        f = self.fixture()
+        f.child("sdk").child("consumer", depends_on=("sdk",))
+        lock, digest = f.product_lock(product_root_role="consumer")
+        first_url = f.rows[0]["payload_urls"]["sdk.bin"]
+        fetched = []
+
+        def wrong_bytes(url, output, limit):
+            fetched.append(url)
+            self.assertEqual(url, first_url, "a later product fetched after the first failure")
+            output.write_bytes(b"x" * limit)  # Exact size, wrong digest.
+
+        with patch("child_bundle.apply_install") as apply:
+            with self.assertRaisesRegex(BundleError, "^BUNDLE_DOWNLOADED_DIGEST_MISMATCH$"):
+                install_bundle(lock, approved_lock_sha256=digest, env=f.env, fetch=wrong_bytes)
+            apply.assert_not_called()
+        self.assertEqual(fetched, [first_url])
+        self.assertFalse(Path(f.env["XDG_DATA_HOME"]).exists())
+        state = Path(f.env["XDG_STATE_HOME"])
+        self.assertFalse(list(state.rglob("xiio-stage-*")))
+        self.assertFalse(list(state.rglob("*.receipt.json")))
+
     def test_ntfs_0664_refused_before_fetch_and_every_child_effect(self):
         f = self.fixture()
         f.child("cli")
