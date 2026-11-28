@@ -64,7 +64,7 @@ class Composition(unittest.TestCase):
                    'scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']
         self.populate(set(FILES)-set(canonical))
         self.put(self.src/'src/runtime-gate.mjs','export const gate=true;')
-        self.put(self.src/'install.mjs',"// --packaged-source\\nconst PAYLOAD_FILES=Object.freeze("+repr(canonical)+");\\n")
+        self.put(self.src/'install.mjs',"// --packaged-source\nconst PAYLOAD_FILES=Object.freeze("+repr(canonical)+");\n")
         subprocess.run(['git','-C',str(self.src),'add','.'],check=True)
         subprocess.run(['git','-C',str(self.src),'-c','user.name=fixture','-c',
                         'user.email=fixture@example.invalid','commit','-qm','canonical installer'],check=True)
