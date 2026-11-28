@@ -6,8 +6,8 @@ R = pathlib.Path(__file__).resolve().parent
 HEX = R.parent
 SHA = json.loads((R / "packaged-source.json").read_text())["source_sha"]
 node = shutil.which("node")
-assert node and SHA == "011c32b71d4314fbf97f643586d28f62ece99c81", SHA
-MANIFEST_SHA = "93e933f8852c0abaf83b9d503f608fdd83c573f20cd2e3cb1714640020426475"
+assert node and SHA == "83c842549c089058af5ae0d5b6b89c5c09f2c26b", SHA
+MANIFEST_SHA = "c0aa5d43c5af9095cf5e75fe678e171590ed553f5fe45a4e7921629115200041"
 assert hashlib.sha256((R / "packaged-source.json").read_bytes()).hexdigest() == MANIFEST_SHA, "CURRENT_MANIFEST_PIN_CHANGED"
 
 
