@@ -1,9 +1,9 @@
 {
   "schema": "xiio.hex.composed-packaged-source/v1",
   "state": "COMPOSED_NOT_ACTIVATED",
-  "source_sha": "011c32b71d4314fbf97f643586d28f62ece99c81",
-  "manifest_sha256": "93e933f8852c0abaf83b9d503f608fdd83c573f20cd2e3cb1714640020426475",
-  "installer_sha256": "192414a8ad101294f21c599a30deb408e9a17bb653c2e3853c799811582e4ba3",
+  "source_sha": "83c842549c089058af5ae0d5b6b89c5c09f2c26b",
+  "manifest_sha256": "c0aa5d43c5af9095cf5e75fe678e171590ed553f5fe45a4e7921629115200041",
+  "installer_sha256": "5fbab338f09f1ee56ec8e32d94966905dfe7944143a3b980bf0c073a7a4e41cf",
   "payload_files": 7,
   "destination": "native/hex/cli-source",
   "production_baseline_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
