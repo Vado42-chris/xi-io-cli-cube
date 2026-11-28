@@ -65,7 +65,7 @@
   "ref_role": "Historical initial adoption base; current packaged payload authority is current_packaged_payload and packaged-source.json.",
   "current_packaged_payload": {
     "repository": "Vado42-chris/xi-io-cli",
-    "ref": "011c32b71d4314fbf97f643586d28f62ece99c81",
+    "ref": "83c842549c089058af5ae0d5b6b89c5c09f2c26b",
     "manifest": "packaged-source.json",
     "files": {
       "src/xiio.mjs": {
@@ -104,7 +104,7 @@
     "base_ref": "8dbd369c5c6b03637d0b04518400d405153e6885",
     "path": "native/hex/cli-source/install.mjs",
     "base_sha256": "1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a",
-    "sha256": "192414a8ad101294f21c599a30deb408e9a17bb653c2e3853c799811582e4ba3",
+    "sha256": "5fbab338f09f1ee56ec8e32d94966905dfe7944143a3b980bf0c073a7a4e41cf",
     "scope": "Existing offline installer retained, exact canonical CLI owner head 011c32b, with immutable six-file PR15 receipt verification and private staged modes; current seven payload files remain byte-identical to that owner generation."
   }
 }
