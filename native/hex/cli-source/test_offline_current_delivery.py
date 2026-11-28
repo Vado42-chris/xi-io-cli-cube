@@ -1,8 +1,10 @@
 import pathlib,tempfile,subprocess,os,json,shutil,hashlib
 R=pathlib.Path(__file__).resolve().parent;SHA=json.loads((R/'packaged-source.json').read_text())['source_sha'];node=shutil.which('node')
+MANIFEST_SHA='d1615b50e0b9de8a462a5b7606aa32d1c24adeee8d3148e4ac4f743a1655503e'
+assert hashlib.sha256((R/'packaged-source.json').read_bytes()).hexdigest()==MANIFEST_SHA,'PINNED_MANIFEST_CHANGED'
 with tempfile.TemporaryDirectory(prefix='xiio-hex-delivery-') as d:
  t=pathlib.Path(d);(t/'home').mkdir();(t/'bin').mkdir();env={**os.environ,'HOME':str(t/'home'),'XIIO_CONFIG_DIR':str(t/'config'),'PATH':str(t/'bin')+':'+os.environ['PATH']}
- def install(src=R):return subprocess.run([node,str(R/'install.mjs'),'--packaged-source',str(src),'--ref',SHA,'--prefix',str(t/'prefix'),'--bin-dir',str(t/'bin')],env=env,capture_output=True,text=True,timeout=45)
+ def install(src=R):return subprocess.run([node,str(R/'install.mjs'),'--packaged-source',str(src),'--expect-packaged-manifest-sha256',MANIFEST_SHA,'--ref',SHA,'--prefix',str(t/'prefix'),'--bin-dir',str(t/'bin')],env=env,capture_output=True,text=True,timeout=45)
  first=install();assert first.returncode==0,first.stdout+first.stderr;a=json.loads(first.stdout);g1=(t/'prefix/current').read_text();assert a['source_sha']==SHA
  (t/'config').mkdir(exist_ok=True);sentinel=t/'config/user-preserved.txt';sentinel.write_text('keep user choices\n')
  second=install();assert second.returncode==0,second.stdout+second.stderr;g2=(t/'prefix/current').read_text();assert g2!=g1;assert (t/'prefix/previous').read_text()==g1;assert sentinel.read_text()=='keep user choices\n'
