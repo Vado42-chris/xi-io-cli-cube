@@ -168,8 +168,11 @@ class PhysicalInstallationTests(unittest.TestCase):
             (cls.root / name).mkdir()
         cls.env = DRIVER.isolated_environment(cls.root)
         cls.manifest, cls.payload = DRIVER.read_package(HERE)
+        manifest_digest = hashlib.sha256((HERE / "packaged-source.json").read_bytes()).hexdigest()
+        assert manifest_digest == "c0aa5d43c5af9095cf5e75fe678e171590ed553f5fe45a4e7921629115200041", "QUALIFICATION_MANIFEST_PIN_CHANGED"
         command = [shutil.which("node"), str(HERE / "install.mjs"), "--repo", "Vado42-chris/xi-io-cli",
                    "--ref", cls.manifest["source_sha"], "--packaged-source", str(HERE),
+                   "--expect-packaged-manifest-sha256", manifest_digest,
                    "--prefix", str(cls.root / "prefix"), "--bin-dir", str(cls.root / "bin")]
         completed = subprocess.run(command, env=cls.env, capture_output=True, text=True, timeout=180)
         if completed.returncode != 0:

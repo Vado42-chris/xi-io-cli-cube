@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Disposable install + update + hostile payload + hotfolder stage for local-worker tip."""
+"""Disposable seven-file CLI install/update, hostile payload, hotfolder and activation."""
 import hashlib, json, os, pathlib, shutil, subprocess, tempfile
 
 R = pathlib.Path(__file__).resolve().parent
 HEX = R.parent
 SHA = json.loads((R / "packaged-source.json").read_text())["source_sha"]
 node = shutil.which("node")
-assert node and SHA == "f2626cae872f191e980ecdfb681485f2d9e67198", SHA
+assert node and SHA == "83c842549c089058af5ae0d5b6b89c5c09f2c26b", SHA
+MANIFEST_SHA = "c0aa5d43c5af9095cf5e75fe678e171590ed553f5fe45a4e7921629115200041"
+assert hashlib.sha256((R / "packaged-source.json").read_bytes()).hexdigest() == MANIFEST_SHA, "CURRENT_MANIFEST_PIN_CHANGED"
 
 
 def digest(p):
@@ -28,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix="xiio-hex-lwh-") as d:
         prefix = prefix or (t / "prefix")
         bin_dir = bin_dir or (t / "bin")
         return subprocess.run(
-            [node, str(R / "install.mjs"), "--packaged-source", str(src), "--ref", SHA, "--prefix", str(prefix), "--bin-dir", str(bin_dir)],
+            [node, str(R / "install.mjs"), "--packaged-source", str(src), "--expect-packaged-manifest-sha256", MANIFEST_SHA, "--ref", SHA, "--prefix", str(prefix), "--bin-dir", str(bin_dir)],
             env=env,
             capture_output=True,
             text=True,
@@ -41,9 +43,10 @@ with tempfile.TemporaryDirectory(prefix="xiio-hex-lwh-") as d:
     a = json.loads(first.stdout)
     assert a["state"] == "PASS" and a["source_sha"] == SHA
     g1 = (t / "prefix/current").read_text().strip()
-    assert (t / "prefix/versions" / g1 / "src/sdk/local-worker-host.mjs").is_file()
-    assert (t / "prefix/versions" / g1 / "src/sdk/qualified-command-executor.mjs").is_file()
-    assert (t / "prefix/versions" / g1 / "config/batches/starter-regression-20261031.json").is_file()
+    assert (t / "prefix/versions" / g1 / "src/runtime-integrity.mjs").is_file()
+    assert (t / "prefix/versions" / g1 / "src/runtime-gate.mjs").is_file()
+    assert (t / "prefix/versions" / g1 / "scripts/service-inventory.mjs").is_file()
+    assert not (t / "prefix/versions" / g1 / "src/sdk/local-worker-host.mjs").exists(), "retired 14-file source must not masquerade as installed"
 
     # Preserve user settings across update generation
     (t / "config").mkdir(exist_ok=True)
@@ -72,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix="xiio-hex-lwh-") as d:
     before = (t / "prefix/current").read_bytes()
     bad = t / "bad"
     shutil.copytree(R, bad)
-    (bad / "src/sdk/local-worker-host.mjs").write_text("tampered\n")
+    (bad / "src/runtime-gate.mjs").write_text("tampered\n")
     deny = install(bad)
     assert deny.returncode != 0
     assert (t / "prefix/current").read_bytes() == before
@@ -80,7 +83,7 @@ with tempfile.TemporaryDirectory(prefix="xiio-hex-lwh-") as d:
     shutil.rmtree(bad)
     shutil.copytree(R, bad)
     m = json.loads((bad / "packaged-source.json").read_text())
-    del m["files"]["src/sdk/local-worker-host.mjs"]
+    del m["files"]["src/runtime-gate.mjs"]
     (bad / "packaged-source.json").write_text(json.dumps(m))
     deny2 = install(bad)
     assert deny2.returncode != 0
@@ -158,7 +161,7 @@ with tempfile.TemporaryDirectory(prefix="xiio-hex-lwh-") as d:
     staged = json.loads(ok.stdout)
     assert staged["state"] == "STAGED_NOT_ACTIVATED"
     assert staged["source_sha"] == SHA
-    assert (stage / "src/sdk/local-worker-host.mjs").is_file()
+    assert (stage / "src/runtime-gate.mjs").is_file()
     pointer = json.loads(lkg.read_text())
     assert pointer["state"] == "STAGED_NOT_ACTIVATED"
     assert pointer["custody_not_rolled_with_code"] is True
@@ -172,16 +175,18 @@ with tempfile.TemporaryDirectory(prefix="xiio-hex-lwh-") as d:
     cli2 = bin2 / "xi-io-cli"
     ws = t / "ws"
     ws.mkdir()
-    help_out = subprocess.run([str(cli2), "local-worker", "status", "--root", str(ws)], env=env, capture_output=True, text=True, timeout=30)
-    # Missing progress is honest MISSING, proves command exists in installed generation
-    assert help_out.returncode in (0, 2), help_out.stdout + help_out.stderr
+    help_out = subprocess.run([str(cli2), "version"], env=env, capture_output=True, text=True, timeout=30)
+    assert help_out.returncode == 0, help_out.stdout + help_out.stderr
     status = json.loads(help_out.stdout)
-    assert status["schema"] == "xiio.cli.local-worker-progress/v1"
+    assert status["schema"] == "xiio.cli.version/v1"
+    assert status["source_sha"] == SHA
+    assert status["integrity_verified"] is True
+    assert status["active_release"] is True
 
     print(
         json.dumps(
             {
-                "schema": "xiio.hex.offline-local-worker-delivery-proof/v1",
+                "schema": "xiio.hex.offline-seven-file-cli-delivery-proof/v1",
                 "state": "PASS",
                 "source_sha": SHA,
                 "payload_files": len(json.loads((R / "packaged-source.json").read_text())["files"]),
@@ -193,7 +198,8 @@ with tempfile.TemporaryDirectory(prefix="xiio-hex-lwh-") as d:
                 "stale_expect_refused": True,
                 "hotfolder_staged_not_activated": True,
                 "activated_from_stage_disposable": True,
-                "local_worker_command_present": True,
+                "local_worker_command_present": False,
+                "runtime_gate_module_present": True,
                 "production_not_overwritten": True,
                 "installed_on": "DISPOSABLE_ONLY",
             },

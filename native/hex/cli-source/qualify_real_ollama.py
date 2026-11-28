@@ -439,6 +439,16 @@ def run_installed_proof(root, package):
     root, package = Path(root).absolute(), Path(package).absolute()
     require(root.resolve() == root and package.resolve() == package, "PROOF_ROOT_SYMLINK")
     manifest, payload = read_package(package)
+    # The external HEX downloader pin is the receiving authority. Do not derive
+    # authority from untrusted source package bytes.
+    wrapper = package.parent / "download-install-cli.py"
+    require(wrapper.is_file() and not wrapper.is_symlink(), "EXTERNAL_MANIFEST_PIN_UNBOUND")
+    pins = re.findall(r'^MANIFEST_SHA="([0-9a-f]{64})"$',
+                      wrapper.read_text(encoding="utf-8"), flags=re.MULTILINE)
+    require(len(pins) == 1, "EXTERNAL_MANIFEST_PIN_UNBOUND")
+    manifest_pin = pins[0]
+    require(digest((package / "packaged-source.json").read_bytes()) == manifest_pin,
+            "EXTERNAL_MANIFEST_PIN_MISMATCH")
     # Never reset an existing bench or manufacture a passing post-effect retry.
     require(not root.exists(), "PROOF_ROOT_ALREADY_EXISTS")
     root.mkdir(mode=0o700)
@@ -463,6 +473,7 @@ def run_installed_proof(root, package):
         require(node is not None, "NODE_NOT_AVAILABLE")
         report = run_json([node, str(package / "install.mjs"), "--repo", "Vado42-chris/xi-io-cli",
                            "--ref", manifest["source_sha"], "--packaged-source", str(package),
+                           "--expect-packaged-manifest-sha256", manifest_pin,
                            "--prefix", str(root / "prefix"), "--bin-dir", str(root / "bin")],
                           env, root / (label + ".process.json"))
         require(report.get("state") == "PASS" and report.get("schema") == "xiio.cli.install/v1"

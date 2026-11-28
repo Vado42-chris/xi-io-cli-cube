@@ -661,7 +661,7 @@ def handle(req):
         try:
             if act=='apply':
                 connection_receipt=connection_profile.apply(base,p,SOURCE/'connection')
-                result=json.loads(run([p['node']['path'],str(SOURCE/'install.mjs'),'--packaged-source',str(SOURCE),'--ref',p['payload']['manifest']['source_sha'],'--prefix',p['prefix'],'--bin-dir',str(Path(p['prefix'])/'bin')],90))
+                result=json.loads(run([p['node']['path'],str(SOURCE/'install.mjs'),'--packaged-source',str(SOURCE),'--expect-packaged-manifest-sha256',p['payload']['manifest_sha256'],'--ref',p['payload']['manifest']['source_sha'],'--prefix',p['prefix'],'--bin-dir',str(Path(p['prefix'])/'bin')],90))
                 demand(result.get('state')=='PASS','INSTALLER_RESULT_NOT_PASS')
             else:
                 result=json.loads(run([str(Path(p['prefix'])/'bin/xi-io-cli'),'rollback']))

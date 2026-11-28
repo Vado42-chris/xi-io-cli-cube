@@ -47,11 +47,11 @@ export function commitWorkspaceEditCAS({file,expectedBytes,nextBytes,expectedSha
       throw Error('FILE_CHANGED_SINCE_APPROVAL');
     temp=path.join(path.dirname(file),'.'+path.basename(file)+'.xiio-'+process.pid+'-'+crypto.randomBytes(8).toString('hex')+'.tmp');
     const tmpFd=fs.openSync(temp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|(fs.constants.O_NOFOLLOW||0),initial.mode&0o777);
-    try{fs.writeFileSync(tmpFd,nextBytes);fs.fsyncSync(tmpFd);}finally{fs.closeSync(tmpFd);}
+    try{fs.writeFileSync(tmpFd,nextBytes);fs.fchmodSync(tmpFd,initial.mode&0o777);fs.fsyncSync(tmpFd);}finally{fs.closeSync(tmpFd);}
     const tempBytes=fs.readFileSync(temp);
     if(!tempBytes.equals(nextBytes))throw Error('EDIT_STAGING_READBACK_MISMATCH');
     const now=regular(file);
-    if(now.dev!==initial.dev||now.ino!==initial.ino||!lockedBytes(file,now).equals(expectedBytes))
+    if(now.dev!==initial.dev||now.ino!==initial.ino||now.mode!==initial.mode||!lockedBytes(file,now).equals(expectedBytes))
       throw Error('FILE_CHANGED_SINCE_APPROVAL');
     fs.renameSync(temp,file);temp=null;
     const readback=fs.readFileSync(file);
