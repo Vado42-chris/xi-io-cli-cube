@@ -65,7 +65,7 @@
   "ref_role": "Historical initial adoption base; current packaged payload authority is current_packaged_payload and packaged-source.json.",
   "current_packaged_payload": {
     "repository": "Vado42-chris/xi-io-cli",
-    "ref": "27c02933bae4127cbe74f47a01b6a4ef23e474b1",
+    "ref": "011c32b71d4314fbf97f643586d28f62ece99c81",
     "manifest": "packaged-source.json",
     "files": {
       "src/xiio.mjs": {
@@ -77,8 +77,8 @@
         "size": 3853
       },
       "src/runtime-integrity.mjs": {
-        "sha256": "7ebec93e5675602f903b48c49f6ed14b68253f85a02702ff5d8397243e161ec6",
-        "size": 10751
+        "sha256": "8dc7b0264662b49c6fd37c5dd9f193628a95ba1635e83c4924a959f8d83ca74f",
+        "size": 12436
       },
       "src/runtime-gate.mjs": {
         "sha256": "9caa976c451fd5c88d6ca12465c8b886b1af7217bae27bb4c7731a4eebfb324d",
@@ -104,7 +104,7 @@
     "base_ref": "8dbd369c5c6b03637d0b04518400d405153e6885",
     "path": "native/hex/cli-source/install.mjs",
     "base_sha256": "1458258a60c0450d738161c0906b61b143b4e21fcb3e58ab22c7369a5810094a",
-    "sha256": "a01ae579dbcfebc7a1aec3b6c9c928b0d3e1bf307da7653d705e9c96250f0183",
-    "scope": "Existing offline installer retained; runtime-integrity mirror adopts three hash-pinned SDK modules (audhd-command, tool-verb-fidelity, local-work-packet) with conditional legacy-generation compatibility."
+    "sha256": "192414a8ad101294f21c599a30deb408e9a17bb653c2e3853c799811582e4ba3",
+    "scope": "Existing offline installer retained, exact canonical CLI owner head 011c32b, with immutable six-file PR15 receipt verification and private staged modes; current seven payload files remain byte-identical to that owner generation."
   }
 }
