@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 PR15 = REPO / 'tests' / 'fixtures' / 'cli-launcher-repair-pr15'
 LEGACY_SHA = '0f2b444abbe8f7a99c5f4520b1222c568eba6dd1'
-MANIFEST_SHA = '93e933f8852c0abaf83b9d503f608fdd83c573f20cd2e3cb1714640020426475'
+MANIFEST_SHA = 'c0aa5d43c5af9095cf5e75fe678e171590ed553f5fe45a4e7921629115200041'
 PR15_FILES = {
     'src/xiio.mjs': '561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b',
     'src/file-edit-cas.mjs': 'f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3',
