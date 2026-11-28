@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compose HEX cli-source packaged payload from an exact CLI tip. No new installer."""
 from __future__ import annotations
-import hashlib, json, pathlib, re, shutil, subprocess, sys
+import ast, hashlib, json, pathlib, re, shutil, subprocess, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEST = HERE / "cli-source"
@@ -43,10 +43,49 @@ def main() -> int:
     if tracked_dirty:
         raise SystemExit("CLI_WORKTREE_DIRTY:" + ";".join(tracked_dirty[:5]))
 
+    # The admitted CLI install.mjs declares its own exact package closure.
+    # Historical sources without that capability retain the 14-file profile.
+    files = FILES
+    canonical_installer = None
+    installer_path = src / "install.mjs"
+    if installer_path.is_file():
+        if installer_path.is_symlink():
+            raise SystemExit("CLI_CANONICAL_INSTALLER_UNTRUSTED")
+        installer_data = installer_path.read_bytes()
+        try:
+            tracked_installer = subprocess.check_output(
+                ["git", "-C", str(src), "show", f"{sha}:install.mjs"],
+                stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError:
+            raise SystemExit("CLI_INSTALLER_NOT_IN_SOURCE_GENERATION")
+        if installer_data != tracked_installer:
+            raise SystemExit("CLI_INSTALLER_SOURCE_GENERATION_MISMATCH")
+        if b"--packaged-source" in installer_data:
+            matched = re.search(
+                r"const PAYLOAD_FILES=Object\\.freeze\\((\\[[^;]+?\\])\\);",
+                installer_data.decode("utf-8"),
+            )
+            if not matched:
+                raise SystemExit("CLI_CANONICAL_PAYLOAD_DECLARATION_MISSING")
+            try:
+                declared = ast.literal_eval(matched.group(1))
+            except (ValueError, SyntaxError):
+                raise SystemExit("CLI_CANONICAL_PAYLOAD_DECLARATION_INVALID")
+            if (not isinstance(declared, list) or not declared
+                    or len(declared) != len(set(declared))
+                    or any(not isinstance(rel, str)
+                           or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", rel)
+                           or ".." in pathlib.PurePosixPath(rel).parts
+                           for rel in declared)):
+                raise SystemExit("CLI_CANONICAL_PAYLOAD_DECLARATION_INVALID")
+            files = declared
+            canonical_installer = installer_data
+
     # Validate the complete exact-generation closure before changing any receiver bytes.
     files_meta = {}
     payload = {}
-    for rel in FILES:
+    for rel in files:
         path = src / rel
         if not path.is_file() or path.is_symlink():
             raise SystemExit("MISSING_PAYLOAD_FILE:" + rel)
@@ -69,7 +108,7 @@ def main() -> int:
     install_text = install_path.read_text()
     if "--packaged-source" not in install_text:
         raise SystemExit("HEX_PACKAGED_SOURCE_SEAM_MISSING")
-    files_literal = "[" + ",".join("'" + f + "'" for f in FILES) + "]"
+    files_literal = "[" + ",".join("'" + f + "'" for f in files) + "]"
     install_text, n = re.subn(
         r"const PAYLOAD_FILES=Object\.freeze\(\[[^\]]+\]\);",
         f"const PAYLOAD_FILES=Object.freeze({files_literal});",
@@ -78,7 +117,7 @@ def main() -> int:
     )
     if n != 1:
         raise SystemExit("HEX_INSTALL_PAYLOAD_REWRITE_FAILED")
-    installer = install_text.encode("utf-8")
+    installer = canonical_installer if canonical_installer is not None else install_text.encode("utf-8")
     manifest = {
         "schema": "xiio.cli.packaged-source/v1",
         "source_sha": sha,
@@ -120,7 +159,7 @@ def main() -> int:
         (r'^SOURCE_SHA="[0-9a-f]{40}"$', f'SOURCE_SHA="{sha}"'),
         (r'^INSTALLER_SHA="[0-9a-f]{64}"$', f'INSTALLER_SHA="{digest(installer)}"'),
         (r'^MANIFEST_SHA="[0-9a-f]{64}"$', f'MANIFEST_SHA="{digest(manifest_bytes)}"'),
-        (r"^FILES=\[[^\]]+\]$", f"FILES={json.dumps(FILES)}"),
+        (r"^FILES=\[[^\]]+\]$", f"FILES={json.dumps(files)}"),
     ):
         text, count = re.subn(pattern, replacement, text, flags=re.MULTILINE)
         if count != 1:
@@ -132,15 +171,34 @@ def main() -> int:
         "source_sha": sha,
         "manifest_sha256": digest(manifest_bytes),
         "installer_sha256": digest(installer),
-        "payload_files": len(FILES),
+        "payload_files": len(files),
         "destination": str(DEST),
         "production_baseline_sha": "89b9c418f6e161d9864bf891fd665b6a18f00dd2",
         "hard": ["COMPOSED != INSTALLED", "CANDIDATE != PRODUCTION"],
     }
     out = HERE / "COMPOSED-packaged-source.receipt.json"
 
+    # Inspect obsolete previous manifest entries before mutating receiver bytes.
+    prior = json.loads((DEST / "packaged-source.json").read_text())
+    prior_files = prior.get("files")
+    if not isinstance(prior_files, dict):
+        raise SystemExit("HEX_PREVIOUS_MANIFEST_INVALID")
+    obsolete = []
+    for rel in prior_files:
+        if rel not in files:
+            if (not isinstance(rel, str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", rel)
+                    or ".." in pathlib.PurePosixPath(rel).parts):
+                raise SystemExit("HEX_PREVIOUS_PAYLOAD_PATH_INVALID")
+            old_path = DEST / rel
+            if old_path.is_symlink() or (old_path.exists() and not old_path.is_file()):
+                raise SystemExit("HEX_STALE_PAYLOAD_UNTRUSTED:" + rel)
+            obsolete.append(old_path)
+
     # Only publish the candidate after source custody and all pin rewrites pass.
     # This is validation-before-write, not a crash-atomic multi-file transaction.
+    for old_path in obsolete:
+        old_path.unlink(missing_ok=True)
     for rel, data in payload.items():
         dest = DEST / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
