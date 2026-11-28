@@ -1,6 +1,6 @@
 import pathlib,tempfile,subprocess,os,json,shutil,hashlib
 R=pathlib.Path(__file__).resolve().parent;SHA=json.loads((R/'packaged-source.json').read_text())['source_sha'];node=shutil.which('node')
-MANIFEST_SHA='93e933f8852c0abaf83b9d503f608fdd83c573f20cd2e3cb1714640020426475'
+MANIFEST_SHA='c0aa5d43c5af9095cf5e75fe678e171590ed553f5fe45a4e7921629115200041'
 assert hashlib.sha256((R/'packaged-source.json').read_bytes()).hexdigest()==MANIFEST_SHA,'PINNED_MANIFEST_CHANGED'
 with tempfile.TemporaryDirectory(prefix='xiio-hex-delivery-') as d:
  t=pathlib.Path(d);(t/'home').mkdir();(t/'bin').mkdir();env={**os.environ,'HOME':str(t/'home'),'XIIO_CONFIG_DIR':str(t/'config'),'PATH':str(t/'bin')+':'+os.environ['PATH']}
