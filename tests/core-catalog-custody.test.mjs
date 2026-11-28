@@ -9,11 +9,14 @@ import {fileURLToPath} from 'node:url';
 
 const root=fileURLToPath(new URL('..',import.meta.url));
 const source=path.join(root,'native/hex/cli-source');
-const manifest=JSON.parse(fs.readFileSync(path.join(source,'packaged-source.json'),'utf8'));
+const manifestBytes=fs.readFileSync(path.join(source,'packaged-source.json'));
+const manifest=JSON.parse(manifestBytes);
 const historicalSource=path.join(root,'tests/fixtures/cli-launcher-repair-pr15');
 const historical=JSON.parse(fs.readFileSync(path.join(historicalSource,'SOURCE.json'),'utf8'));
 const historicalFiles=Object.keys(historical.files).filter(f=>/^(?:src|config|scripts)\//.test(f));
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+const manifestSha=sha(manifestBytes);
+assert.equal(manifestSha,'93e933f8852c0abaf83b9d503f608fdd83c573f20cd2e3cb1714640020426475','approved package manifest changed');
 function snapshot(directory){
  const rows={};
  function visit(p,rel){
@@ -40,7 +43,7 @@ for(const mask of ['002','022'])test(`actual offline producer gives only new gen
   fs.writeFileSync(gh,`#!/usr/bin/python3\nimport pathlib,sys\nu=next(x for x in sys.argv[1:] if x.startswith('repos/'))\nif '/commits/' in u:\n assert u.rsplit('/',1)[1] == ${JSON.stringify(historical.ref)}\n print(${JSON.stringify(historical.ref)})\nelse:\n rel=u.split('/contents/',1)[1].split('?',1)[0]\n assert rel in ${JSON.stringify(historicalFiles)}\n assert u.split('?ref=',1)[1] == ${JSON.stringify(historical.ref)}\n sys.stdout.buffer.write((pathlib.Path(${JSON.stringify(historicalSource)})/rel).read_bytes())\n`,{mode:0o700});
   const env={HOME:home,PATH:path.dirname(process.execPath)+':/usr/bin:/bin',LANG:'C.UTF-8',XIIO_CONFIG_DIR:path.join(home,'config'),XIIO_SANDBOX:'off',XIIO_GH:gh,NODE_OPTIONS:'--import='+hook};
   function install(program,umask,packaged){
-   const r=spawnSync('/bin/sh',['-c','umask "$1"; shift; exec "$@"','fixture',umask,process.execPath,path.join(source,program),...(packaged?['--packaged-source',source]:[]),'--ref',packaged?manifest.source_sha:historical.ref,'--prefix',prefix,'--bin-dir',bin],{env,encoding:'utf8',timeout:90000});
+   const r=spawnSync('/bin/sh',['-c','umask "$1"; shift; exec "$@"','fixture',umask,process.execPath,path.join(source,program),...(packaged?['--packaged-source',source,'--expect-packaged-manifest-sha256',manifestSha]:[]),'--ref',packaged?manifest.source_sha:historical.ref,'--prefix',prefix,'--bin-dir',bin],{env,encoding:'utf8',timeout:90000});
    assert.equal(r.status,0,r.stdout+'\n'+r.stderr);return JSON.parse(r.stdout);
   }
   // Frozen existing canonical resource exercises its historical normal-install
