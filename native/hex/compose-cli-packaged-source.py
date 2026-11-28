@@ -63,7 +63,7 @@ def main() -> int:
             raise SystemExit("CLI_INSTALLER_SOURCE_GENERATION_MISMATCH")
         if b"--packaged-source" in installer_data:
             matched = re.search(
-                r"const PAYLOAD_FILES=Object\\.freeze\\((\\[[^;]+?\\])\\);",
+                r"const PAYLOAD_FILES=Object\.freeze\((\[[^;]+?\])\);",
                 installer_data.decode("utf-8"),
             )
             if not matched:
