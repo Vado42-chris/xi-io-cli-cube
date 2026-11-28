@@ -293,7 +293,8 @@ for (const f of FILES) {
   const bytes = packagedBytes ? packagedBytes[f] : gh(['api', '-H', 'Accept: application/vnd.github.raw', `repos/${REPO}/contents/${f}?ref=${sha}`]);
   if (!bytes.length) fail('FETCH_EMPTY', { file: f });
   const out = path.join(dir, ...f.split('/'));
-  fs.mkdirSync(path.dirname(out), { recursive: true });
+  // Generated payload directories are private custody, independent of umask.
+  fs.mkdirSync(path.dirname(out), { recursive: true, mode: 0o700 });
   writePrivateGenerationFile(out, bytes);
   hashes[f] = sha256(bytes);
 }
