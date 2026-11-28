@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Pinned downloader for the EXISTING HEX offline CLI installer. No new installer."""
 import argparse,base64,hashlib,importlib.util,json,os,pathlib,re,shutil,subprocess,sys,tempfile
-SOURCE_SHA="27c02933bae4127cbe74f47a01b6a4ef23e474b1"
-INSTALLER_SHA="a01ae579dbcfebc7a1aec3b6c9c928b0d3e1bf307da7653d705e9c96250f0183"
-MANIFEST_SHA="d1615b50e0b9de8a462a5b7606aa32d1c24adeee8d3148e4ac4f743a1655503e"
+SOURCE_SHA="011c32b71d4314fbf97f643586d28f62ece99c81"
+INSTALLER_SHA="192414a8ad101294f21c599a30deb408e9a17bb653c2e3853c799811582e4ba3"
+MANIFEST_SHA="93e933f8852c0abaf83b9d503f608fdd83c573f20cd2e3cb1714640020426475"
 FILES=["src/xiio.mjs", "src/file-edit-cas.mjs", "src/runtime-integrity.mjs", "src/runtime-gate.mjs", "config/service-catalog.json", "scripts/service-inventory.mjs", "scripts/reconcile-service-inventory.mjs"]
 
 def digest(data):return hashlib.sha256(data).hexdigest()
