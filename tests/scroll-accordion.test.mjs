@@ -40,7 +40,8 @@ test('compiled installer disclosures retain evidence, native scrolling and appro
   assert.ok(requests.every(req=>req.action==='inspect'),'opening installation does not prepare or apply');
   const findButton=text=>[...panel.querySelectorAll('button')].find(b=>b.textContent.includes(text));
   const findLabel=text=>[...panel.querySelectorAll('label')].find(b=>b.textContent.includes(text));
-  const details=[...panel.querySelectorAll('.hex-installer-disclosure')];assert.equal(details.length,3);
+  const details=[...panel.querySelectorAll('.hex-installer-disclosure')];assert.equal(details.length,4);
+  assert.ok(details.some(item=>item.querySelector('summary')?.textContent === 'Host and release settings'));
   assert.ok(details.every(d=>!d.open));
   const visibleRequirements=panel.querySelector('[aria-label="Detected installation requirements"]');
   assert.equal(visibleRequirements.children.length,3);assert.match(visibleRequirements.textContent,/Computer.*Node runtime.*Existing CLI/s);

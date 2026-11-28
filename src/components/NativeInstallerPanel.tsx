@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useImperativeHandle, useRef, useState} from 'react';
 import {createInstallerClient, installerStatus, nativeInstallerAvailable} from '../lib/nativeInstaller.mjs';
 import {installerReadiness, reviewedRuntimeReady} from '../lib/installerReadiness.mjs';
 import {selectNativeDirectory} from '../lib/nativeDirectory.mjs';
@@ -6,10 +6,12 @@ import {availabilityFrom, availableSelection, canPrepareComponents, canRollbackP
 
 type Plan = {plan_id: string; phase: string; prefix?: string; components?: string[]; approval_digest?: string; payload_files?: number; payload_bytes?: number; created_at?: string; [key: string]: any};
 type PermissionProfile = {schema:'xiio.hex.permission-profile/v1';profile_id:string;capabilities:string[];service_scopes:string[];update_policy:'off'|'notify'|'review_each'|'auto_security';central_updates:boolean;remote_access:boolean;revoked:boolean};
-type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]; permission_profile: PermissionProfile} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true} | {action:'launch_cli';plan_id:string;approval_digest:string;approved:true;workspace:string} | {action:'server_prepare';plan_id:string;package_root:string} | {action:'server_apply';plan_id:string;package_root:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'server_rollback';plan_id:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'permission_replace';plan_id:string;current_digest:string;new_profile:PermissionProfile;approved:true};
+type Request = {action: 'inspect'; plan_id?: string} | {action: 'prepare'; prefix: string; node: string; components: string[]; permission_profile: PermissionProfile} | {action: 'readback'; plan_id: string} | {action: 'prepare_repair'; prefix: string; node: string; bin_dir: string} | {action: 'apply_repair' | 'apply' | 'rollback'; plan_id: string; approval_digest: string; approved: true} | {action:'launch_cli';plan_id:string;approval_digest:string;approved:true;workspace:string} | {action:'server_prepare';plan_id:string;package_root:string} | {action:'server_apply';plan_id:string;package_root:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'server_rollback';plan_id:string;server_plan:any;server_plan_digest:string;approved:true} | {action:'permission_replace';plan_id:string;current_digest:string;new_profile:PermissionProfile;approved:true} | {action:'product_inspect';release_lock:string;framework_binding_receipt:string;framework_generation:string;node:string} | {action:'product_apply';release_lock:string;framework_binding_receipt:string;framework_generation:string;node:string;review_digest:string;approved:true};
 
 /** Local native controls within the accepted Cube design, not another launcher. */
-export default function NativeInstallerPanel() {
+export type ProductChooser = {chooseProductFolder: () => Promise<void>};
+
+export default function NativeInstallerPanel({chooserRef}: {chooserRef?: React.Ref<ProductChooser>} = {}) {
   const native = nativeInstallerAvailable();
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -34,6 +36,16 @@ export default function NativeInstallerPanel() {
   const [availability, setAvailability] = useState(() => availabilityFrom(null));
   const [history, setHistory] = useState<Plan[]>([]);
   const [preflight, setPreflight] = useState<any>(null);
+  // Product-only installation consumes the existing native adapter. It never inherits
+  // the fixed suite component selection or grants worker/provider authority.
+  const [productLock, setProductLock] = useState('');
+  const [productFrameworkReceipt, setProductFrameworkReceipt] = useState('');
+  const [productFrameworkGeneration, setProductFrameworkGeneration] = useState('');
+  const [productNode, setProductNode] = useState('');
+  const [productReview, setProductReview] = useState<any>(null);
+  const [productResult, setProductResult] = useState<any>(null);
+  const [productApproved, setProductApproved] = useState(false);
+  const [productUnknown, setProductUnknown] = useState(false);
   async function chooseInstallationFolder() {
     try {
       const selected = await selectNativeDirectory('installation');
@@ -136,6 +148,9 @@ export default function NativeInstallerPanel() {
         setHistory(result.plans || []);
         setPrefix(current => current || result.prefix_suggestion || '');
         setNode(current => current || result.node_suggestion || '');
+        setProductNode(current => current || result.node_suggestion || '');
+        setProductFrameworkReceipt(current => current || result.product_host?.framework_binding_receipt || '');
+        setProductFrameworkGeneration(current => current || result.product_host?.framework_generation || '');
         setBinDir(current => current || result.bin_dir_suggestion || '');
       }
       return result;
@@ -145,6 +160,65 @@ export default function NativeInstallerPanel() {
     } finally {busyRef.current = false; setBusy(false);}
   }
   useEffect(() => {if (native) void run({action: 'inspect'}, false);}, []);
+  async function chooseProductFolder() {
+    if (busyRef.current || productUnknown) return;
+    busyRef.current = true; setBusy(true); setError('');
+    try {
+      const folder = await selectNativeDirectory('product-release');
+      if (folder !== null) {
+        resetProductReview();
+        setProductLock(folder.replace(/\/$/, '') + '/bundle.lock.json');
+      }
+    } catch (e) {setError(String(e instanceof Error ? e.message : e));}
+    finally {busyRef.current = false; setBusy(false);}
+  }
+  useImperativeHandle(chooserRef ?? null, () => ({chooseProductFolder}));
+  function resetProductReview() {
+    setProductReview(null); setProductResult(null); setProductApproved(false);
+  }
+  const productInputs = {
+    release_lock: productLock, framework_binding_receipt: productFrameworkReceipt,
+    framework_generation: productFrameworkGeneration, node: productNode,
+  };
+  const productInputsValid = productLock.startsWith('/') && productFrameworkReceipt.startsWith('/')
+    && productNode.startsWith('/') && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(productFrameworkGeneration);
+  async function inspectProduct() {
+    if (busyRef.current || productUnknown || !productInputsValid) return;
+    busyRef.current = true; setBusy(true); setError('');
+    resetProductReview();
+    try {
+      const result = await client({action:'product_inspect', ...productInputs});
+      if (result.schema !== 'xiio.hex.native-product-release-review/v1'
+          || result.phase !== 'PRODUCT_REVIEW_REQUIRED'
+          || !/^[0-9a-f]{64}$/.test(result.review_digest || '')
+          || result.effect_authority !== false || result.installed_bytes_verified !== false) {
+        throw Error('PRODUCT_REVIEW_UNQUALIFIED');
+      }
+      setProductReview(result);
+    } catch (e) {setError(String(e instanceof Error ? e.message : e));}
+    finally {busyRef.current = false; setBusy(false);}
+  }
+  async function applyProduct() {
+    if (busyRef.current || productUnknown || !productApproved || !productReview
+        || productReview.phase !== 'PRODUCT_REVIEW_REQUIRED' || !productInputsValid) return;
+    busyRef.current = true; setBusy(true); setError('');
+    // Once the effect is attempted, an unreadable result is uncertain, never retryable.
+    setProductUnknown(true); setProductApproved(false);
+    try {
+      const result = await client({action:'product_apply', ...productInputs,
+        review_digest: productReview.review_digest, approved:true});
+      if (result.schema === 'xiio.hex.native-product-release-review/v1'
+          && result.phase === 'PRODUCT_BYTES_INSTALLED_READBACK_VERIFIED'
+          && result.installed_bytes_verified === true && result.effect_authority === false
+          && result.review_digest === productReview.review_digest
+          && result.product_ref === productReview.product_ref
+          && result.release_generation === productReview.release_generation
+          && result.do_not_retry === false) {
+        setProductResult(result); setProductUnknown(false);
+      }
+    } catch (e) {setError(String(e instanceof Error ? e.message : e));}
+    finally {busyRef.current = false; setBusy(false);}
+  }
   function edit() {setPlan(null); setObserved(false); setApproval(false); setRollbackApproval(false); setLaunchResult(null); setLaunchBlocked(false);}
   const status = installerStatus(plan, observed);
   const runtimeReady = reviewedRuntimeReady(plan);
@@ -177,6 +251,48 @@ export default function NativeInstallerPanel() {
     <div><h3 className="font-bold text-workspace-text">Install on this computer</h3>
       <p className="text-sm text-workspace-muted">Local Linux candidate · Available packaged components only · No sign-in required</p></div>
     {!native ? <p role="status" className="text-sm text-workspace-focus">Native HEX is required. This browser preview cannot inspect, install or roll back files. The guides below are not proof of an installation.</p> : <>
+      <section aria-label="Product-only release installation" className="space-y-3 border border-workspace-border-strong/40 p-3">
+        <h4 className="font-semibold text-workspace-text">Install a downloaded product</h4>
+        <p className="text-xs text-workspace-muted">Choose the folder you extracted, then review the product and its dependencies.</p>
+        <button type="button" className={button} disabled={busy || productUnknown}
+          onClick={() => void chooseProductFolder()}>Choose product folder</button>
+        {productLock && <p className="text-sm break-all">{productLock.replace(/\/bundle\.lock\.json$/, '')}</p>}
+        {(!productFrameworkReceipt || !productFrameworkGeneration || !productNode) && <p role="status">The installed Framework or Node runtime could not be selected automatically. Check the host settings below.</p>}
+        <details className="hex-installer-disclosure"><summary>Host and release settings</summary>
+        <fieldset className="hex-form-grid hex-responsive-grid hex-grid-halves" disabled={busy || productUnknown}>
+          {([
+            ['Product release lock', productLock, (v:string) => setProductLock(v)],
+            ['Framework binding receipt', productFrameworkReceipt, (v:string) => setProductFrameworkReceipt(v)],
+            ['Framework generation', productFrameworkGeneration, (v:string) => setProductFrameworkGeneration(v)],
+            ['Verified Node executable', productNode, (v:string) => setProductNode(v)],
+          ] as const).map(([name,value,setValue]) => <label key={name} className="text-xs text-workspace-text">{name}
+            <input aria-label={name} value={value} onChange={e => {resetProductReview();setValue(e.target.value);}}
+              className="mt-1 w-full rounded bg-workspace-surface border border-workspace-border-strong p-2 font-mono" />
+          </label>)}
+        </fieldset></details>
+        <button type="button" className={button} disabled={busy || productUnknown || !productInputsValid}
+          onClick={() => void inspectProduct()}>Inspect exact product release</button>
+        {productReview && <div className="space-y-2 text-sm text-workspace-text">
+          <p><strong>{productReview.display_name}</strong> · {productReview.version} · {productReview.channel}</p>
+          <p className="text-xs font-mono break-all">Product: {productReview.product_ref} · Release: {productReview.release_ref} · Generation: {productReview.release_generation}</p>
+          <p className="text-xs">Dependencies: {(productReview.products || []).map((p:any) => p.display_name || p.product_ref).join(', ')}</p>
+          <details className="hex-installer-disclosure text-xs"><summary>Review exact lock, dependency roles and proof</summary>
+            <pre className="hex-detail-scroll text-workspace-muted" tabIndex={0}>{JSON.stringify(productReview,null,2)}</pre>
+          </details>
+          {!productResult && !productUnknown && <>
+            <label className="block"><input type="checkbox" checked={productApproved}
+              disabled={busy} onChange={e => setProductApproved(e.target.checked)} /> Approve this exact reviewed product and dependency closure.</label>
+            <button type="button" className={button} disabled={busy || !productApproved}
+              onClick={() => void applyProduct()}>Install reviewed product</button>
+          </>}
+        </div>}
+        {productResult && <p role="status" className="text-sm text-workspace-text">
+          {productResult.phase === 'PRODUCT_BYTES_INSTALLED_READBACK_VERIFIED' && productResult.installed_bytes_verified === true
+            ? 'Installed files independently verified. Runtime launch, services and Work return remain unverified.'
+            : 'Installation outcome not verified. Inspect saved state before retrying.'}
+        </p>}
+        {productUnknown && <p role="alert" className="text-sm text-workspace-danger">Product installation outcome uncertain. Do not retry. Inspect installed state independently.</p>}
+      </section>
       <p className="text-xs text-workspace-muted">Requires system Python 3.10+, bash and your selected Node 22.13+. Preparing a plan runs that Node executable to check its identity/version, but does not install the payload. Choose the intended installation folder on this computer.</p>
       <label className="block text-sm text-workspace-text"><input type="checkbox" checked={repairMode} disabled={busy || unknown} onChange={e => {edit(); setRepairMode(e.target.checked);}} /> Repair only the existing CLI launcher. Keep the installed runtime and generations.</label>
       <fieldset disabled={busy || unknown} className="hex-responsive-grid hex-grid-halves hex-form-grid">

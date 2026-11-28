@@ -195,7 +195,7 @@ class NativeHeadingCompatibility(unittest.TestCase):
             get_component_iface=lambda: SimpleNamespace(get_extents=lambda _: bounds),
         )
 
-    def walk(self, children):
+    def walk(self, children, scope_name=None):
         roles = self.roles
         app = self.ax_node(roles.APPLICATION, '', children=children)
         native = CAPTURE.Native.__new__(CAPTURE.Native)
@@ -206,7 +206,7 @@ class NativeHeadingCompatibility(unittest.TestCase):
         native.ax = SimpleNamespace(
             get_desktop=lambda _: self.ax_node(roles.APPLICATION, '', children=[app]), Role=roles,
             CoordType=SimpleNamespace(SCREEN=0))
-        return native.rows()
+        return native.rows(scope_name=scope_name)
 
     def heading(self, name, attrs=None, role=None, visible=True):
         return self.ax_node(role or self.roles.DOCUMENT_FRAME, '', text=name, attrs=attrs,
@@ -259,6 +259,24 @@ class NativeHeadingCompatibility(unittest.TestCase):
             with self.subTest(label=label):
                 with self.assertRaisesRegex(CAPTURE.Unverified, '^HEX_LIBRARY_CONTENT_NOT_OBSERVED$'):
                     CAPTURE.select_content_controls(self.walk(buttons + [self.heading(text, attrs, role, visible)]))
+
+    def test_install_heading_only_counts_inside_unique_product_installation_region(self):
+        name = 'Install a downloaded product'
+        scope = 'Product-only release installation'
+        expected = self.heading(name, self.attributes('4'))
+        wrong = self.heading('Install XI-IO CLI', self.attributes('4'))
+        button = self.ax_node(self.roles.PUSH_BUTTON, name)
+        for inside, expected_status in ((expected, 'MATCHED'), (wrong, 'EXPECTED_CONTROL_NOT_OBSERVED'),
+                                        (button, 'EXPECTED_ROLE_NOT_EXPOSED')):
+            with self.subTest(status=expected_status):
+                region = self.ax_node(self.roles.STATIC, scope, children=[inside])
+                rows = self.walk([expected, region], scope_name=scope)
+                self.assertEqual(CAPTURE.expected_control_check(rows, True, name, 'heading')['status'],
+                                 expected_status)
+        region = self.ax_node(self.roles.STATIC, scope, children=[expected])
+        for regions in ([], [region, region]):
+            with self.assertRaisesRegex(CAPTURE.Unverified, '^ACCESSIBILITY_REGION_NOT_UNIQUELY_OBSERVED$'):
+                self.walk([expected, *regions], scope_name=scope)
 
     def test_named_document_frame_without_same_node_text_does_not_qualify(self):
         node = self.ax_node(self.roles.DOCUMENT_FRAME, 'Your XI-IO library.',
@@ -362,6 +380,27 @@ class Diagnostics(unittest.TestCase):
             self.assertEqual(len(row['name']), CAPTURE.MAX_DIAGNOSTIC_TEXT)
             self.assertEqual(len(row['text']), CAPTURE.MAX_DIAGNOSTIC_TEXT)
             self.assertTrue(row['name_truncated'] and row['text_truncated'])
+
+
+class ProductInstallHeading(unittest.TestCase):
+    def test_current_presentation_wrong_heading_missing_role_and_observer_failure(self):
+        spec = importlib.util.spec_from_file_location(
+            'hex_product_window', ROOT / 'scripts/verify-installed-product-folders.py')
+        product = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(product)
+        current = {'role': 'heading', 'name': '', 'text': 'Install a downloaded product', 'visible': True}
+        button = {'role': 'button', 'name': 'Install a downloaded product', 'visible': True}
+        for rows, complete, status in [
+            ([current], True, 'MATCHED'),
+            ([{**current, 'text': 'Install XI-IO CLI'}], True, 'EXPECTED_CONTROL_NOT_OBSERVED'),
+            ([button], True, 'EXPECTED_ROLE_NOT_EXPOSED'),
+            (None, False, 'OBSERVER_UNAVAILABLE'),
+            ([current], False, 'OBSERVER_UNAVAILABLE'),
+            ([current, current], True, 'DUPLICATE'),
+            ([{**current, 'visible': False}], True, 'NOT_VISIBLE'),
+        ]:
+            with self.subTest(status=status, rows=rows):
+                self.assertEqual(product.install_heading_check(CAPTURE, rows, complete)['status'], status)
 
 
 class FrontendIdentity(unittest.TestCase):

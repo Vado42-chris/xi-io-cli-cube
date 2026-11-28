@@ -87,3 +87,51 @@ for (const native of [false, true]) test('Software to CLI installation preserves
     assert.doesNotMatch(shadow.textContent, /Tools & Diagnostics|XI-IO Ecosystem Component Catalog/);
   } finally { w.close(); }
 });
+
+test('one Install tab reviews two downloaded products on the same host with separate approvals', async () => {
+  const dom = new JSDOM('<div id="root"></div>', {url:'https://hex.fixture.invalid', runScripts:'outside-only', pretendToBeVisual:true, virtualConsole:new VirtualConsole()});
+  const w = dom.window;
+  w.matchMedia = () => ({matches:false, addEventListener(){}, removeEventListener(){}, addListener(){}, removeListener(){}});
+  w.ResizeObserver = class {observe(){} unobserve(){} disconnect(){}};
+  const products = ['disposable-editor','disposable-service'];
+  const requests = [];
+  let index = 0;
+  const invoke = async (command,args) => {
+    if (command === 'native_product_window') return {};
+    if (command === 'native_select_directory') {
+      assert.equal(args.purpose,'product-release');
+      return {cancelled:false,path:'/downloads/'+products[index]};
+    }
+    assert.equal(command,'installer_request');
+    const req = args.request; requests.push(req.action);
+    if (req.action === 'inspect') return {ok:true,result:{plans:[], node_suggestion:'/host/node', product_host:{framework_binding_receipt:'/host/framework.binding.json',framework_generation:'f'.repeat(40)}}};
+    assert.equal(req.node,'/host/node');
+    assert.equal(req.release_lock,'/downloads/'+products[index]+'/bundle.lock.json');
+    assert.equal(req.framework_binding_receipt,'/host/framework.binding.json');
+    assert.equal(req.framework_generation,'f'.repeat(40));
+    const review = {schema:'xiio.hex.native-product-release-review/v1', display_name:products[index],product_ref:products[index],release_generation:'b'.repeat(40),review_digest:String(index+1).repeat(64),effect_authority:false};
+    if (req.action === 'product_inspect') return {ok:true,result:{...review,phase:'PRODUCT_REVIEW_REQUIRED',installed_bytes_verified:false}};
+    assert.equal(req.action,'product_apply'); assert.equal(req.approved,true); assert.equal(req.review_digest,review.review_digest);
+    return {ok:true,result:{...review,phase:'PRODUCT_BYTES_INSTALLED_READBACK_VERIFIED',installed_bytes_verified:true,do_not_retry:false}};
+  };
+  w.__TAURI__={core:{invoke}}; w.__TAURI_INTERNALS__={invoke};
+  try {
+    const mod = new SourceTextModule(script,{context:dom.getInternalVMContext(),importModuleDynamically:async()=>{throw Error('ARTCRAFT_TEST_EXECUTOR_NO_WASM');}});
+    await mod.link(()=>{throw Error('external');}); await mod.evaluate(); await pause();
+    const shadow=w.document.querySelector('[data-hex-product-content]').shadowRoot;
+    [...shadow.querySelectorAll('button')].find(el=>el.textContent.trim()==='Install from download').click(); await pause();
+    const panel=w.document.querySelector('[data-hex-product-content]').shadowRoot.querySelector('[aria-label="Product-only release installation"]');
+    const button=text=>[...panel.querySelectorAll('button')].find(el=>el.textContent.trim()===text);
+    for (;index<products.length;index++) {
+      if (index > 0) { button('Choose product folder').click(); await pause(); }
+      assert.equal(button('Install reviewed product'),undefined);
+      button('Inspect exact product release').click(); await pause();
+      assert.match(panel.textContent,new RegExp(products[index]));
+      assert.ok(button('Install reviewed product').disabled);
+      panel.querySelector('input[type="checkbox"]').click(); await pause();
+      button('Install reviewed product').click(); await pause();
+      assert.match(panel.textContent,/Installed files independently verified/);
+    }
+    assert.deepEqual(requests.filter(a=>a!=='inspect'),['product_inspect','product_apply','product_inspect','product_apply']);
+  } finally {dom.window.close();}
+});

@@ -84,6 +84,10 @@ def main():
  cmd=[node,str(root/'install.mjs'),'--packaged-source',str(root),'--ref',SOURCE_SHA]
  for flag,value in [('--prefix',a.prefix),('--bin-dir',a.bin_dir)]:
   if value:cmd.extend([flag,value])
+ manifest=verify(root)
+ if 'repository' in manifest:
+  if manifest['repository'] != 'Vado42-chris/xi-io-cli':raise RuntimeError('PACKAGED_REPOSITORY_MISMATCH')
+  cmd.extend(['--repo',manifest['repository'],'--expect-packaged-manifest-sha256',MANIFEST_SHA])
  if a.adopt_existing_launcher:cmd.extend(['--adopt-existing-launcher','--expect-launcher-sha256',a.expect_launcher_sha256])
  # Existing HEX installer owns preferences, generation checks, approval and rollback.
  result=subprocess.run(cmd,timeout=120)
