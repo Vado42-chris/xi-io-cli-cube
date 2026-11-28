@@ -22,7 +22,7 @@ class Composition(unittest.TestCase):
         for rel in FILES: self.put(self.dest/rel,'incumbent synthetic payload: '+rel)
         self.put(self.dest/'install.mjs',"// --packaged-source\nconst PAYLOAD_FILES=Object.freeze(['previous']);\n")
         self.put(self.dest/'SOURCE.json',json.dumps({'current_packaged_payload':{'ref':'a'*40},'offline_installer_successor':{'sha256':'0'*64}}))
-        self.put(self.dest/'packaged-source.json','incumbent manifest')
+        self.put(self.dest/'packaged-source.json',json.dumps({'schema':'xiio.cli.packaged-source/v1','source_sha':'a'*40,'files':{p:{'sha256':'b'*64,'size':1} for p in FILES}}))
         self.put(self.hex/'download-install-cli.py',f'SOURCE_SHA="{"a"*40}"\nINSTALLER_SHA="{"b"*64}"\nMANIFEST_SHA="{"c"*64}"\nFILES=["previous"]\n')
         self.put(self.hex/'COMPOSED-packaged-source.receipt.json','incumbent receipt')
         subprocess.run(['git','init','-q',str(self.src)],check=True)
@@ -58,6 +58,24 @@ class Composition(unittest.TestCase):
     def test_missing_pin_rewrite(self):
         self.populate();self.put(self.hex/'download-install-cli.py','FILES=["previous"]\n');before=snapshot(self.hex)
         r=self.run_composer();self.unchanged(before,r)
+    def test_canonical_cli_seven_file_payload_preserves_exact_installer(self):
+        canonical=['src/xiio.mjs','src/file-edit-cas.mjs','src/runtime-integrity.mjs',
+                   'src/runtime-gate.mjs','config/service-catalog.json',
+                   'scripts/service-inventory.mjs','scripts/reconcile-service-inventory.mjs']
+        self.populate(set(FILES)-set(canonical))
+        self.put(self.src/'src/runtime-gate.mjs','export const gate=true;')
+        self.put(self.src/'install.mjs',"// --packaged-source\\nconst PAYLOAD_FILES=Object.freeze("+repr(canonical)+");\\n")
+        subprocess.run(['git','-C',str(self.src),'add','.'],check=True)
+        subprocess.run(['git','-C',str(self.src),'-c','user.name=fixture','-c',
+                        'user.email=fixture@example.invalid','commit','-qm','canonical installer'],check=True)
+        result=self.run_composer()
+        self.assertEqual(result.returncode,0,result.stderr)
+        manifest=json.loads((self.dest/'packaged-source.json').read_text())
+        self.assertEqual(set(manifest['files']),set(canonical))
+        self.assertEqual((self.dest/'install.mjs').read_bytes(),(self.src/'install.mjs').read_bytes())
+        self.assertFalse((self.dest/'src/local-ops.mjs').exists())
+        self.assertTrue((self.dest/'src/runtime-gate.mjs').is_file())
+
     def test_complete_source_candidate(self):
         self.populate();r=self.run_composer();self.assertEqual(r.returncode,0,r.stderr)
         manifest=json.loads((self.dest/'packaged-source.json').read_text())
