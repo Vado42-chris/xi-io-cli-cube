@@ -34,6 +34,20 @@ export const SUPPORTED_LEGACY_RELEASES=Object.freeze({
     'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88'
   })
 });
+// This exact historical six-file generation was produced by the owner CLI PR15
+// at Git commit 0f2b444. It predates runtime-gate.mjs. Admit its immutable
+// owner bytes as PREVIOUS only through the normal digest/receipt verifier.
+// A six-file receipt from any other generation still refuses.
+export const SUPPORTED_SIX_FILE_RELEASES=Object.freeze({
+  '0f2b444abbe8f7a99c5f4520b1222c568eba6dd1':Object.freeze({
+    'src/xiio.mjs':'561ca051ad26a41e27d3465191a7e7cf3e3a27c523a6411f632e6a8562bb028b',
+    'src/file-edit-cas.mjs':'f96a15c095ef043d862e6ba77bb2b0ac1dcde90c040c414a68331b4b8e4e88f3',
+    'src/runtime-integrity.mjs':'de15e26e26ad52c1bab3fd3fc7a0a389bec3c8dbe6a06666f51de075a0dd4912',
+    'config/service-catalog.json':'8f9c4c8efb77c36242a81fdcf8c821e05a2ce253d320c34ce27f4b67b2a19a88',
+    'scripts/service-inventory.mjs':'4711d6603f759607e79cadc1031f8668ef27b393f25b408b9ecd5516ebc18204',
+    'scripts/reconcile-service-inventory.mjs':'eb20d7ef9cc8d50ca7c3cd1af016f76e4c2a7ddea4afb30d47d1695237a6845e'
+  })
+});
 const legacyGenerationName=value=>typeof value==='string'&&/^[0-9a-f]{12}-\d{8}T\d{6}Z$/.test(value);
 const generationName=value=>typeof value==='string'&&(
   /^[0-9a-f]{12}-\d{8}T\d{6}Z-[A-Za-z0-9_-]+$/.test(value)||
@@ -53,6 +67,15 @@ export function verifyGeneration(prefix,generation){
     const expected=SUPPORTED_LEGACY_RELEASES[receipt.source_sha];
     if(!expected||receipt.repo!=='Vado42-chris/xi-io-cli'||receipt.ref!==receipt.source_sha)throw Error('LEGACY_RELEASE_UNSUPPORTED');
     if(listed.length!==Object.keys(expected).length||listed.some(file=>!Object.hasOwn(expected,file)||receipt.files[file]!==expected[file]))throw Error('LEGACY_RELEASE_PAYLOAD_MISMATCH');
+  }else if(Object.hasOwn(SUPPORTED_SIX_FILE_RELEASES,receipt.source_sha)){
+    // The only accepted six-file predecessor. Never infer compatibility merely
+    // from a file count or a claimed source SHA. Check the exact immutable
+    // owner digest of every historical payload before reading the files.
+    const expected=SUPPORTED_SIX_FILE_RELEASES[receipt.source_sha];
+    if(receipt.repo!=='Vado42-chris/xi-io-cli'||receipt.ref!==receipt.source_sha||
+       listed.length!==Object.keys(expected).length||
+       listed.some(file=>!Object.hasOwn(expected,file)||receipt.files[file]!==expected[file]))
+      throw Error('SIX_FILE_RELEASE_PAYLOAD_MISMATCH');
   }else{
     const required=PAYLOAD_FILES.filter(file=>file!=='src/runtime-integrity.mjs');
     if(required.some(file=>!listed.includes(file))||listed.some(file=>!PAYLOAD_FILES.includes(file)))throw Error('GENERATION_RECEIPT_FILE_MISSING');
