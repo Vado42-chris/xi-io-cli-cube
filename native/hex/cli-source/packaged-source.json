@@ -1,6 +1,6 @@
 {
   "schema": "xiio.cli.packaged-source/v1",
-  "source_sha": "011c32b71d4314fbf97f643586d28f62ece99c81",
+  "source_sha": "83c842549c089058af5ae0d5b6b89c5c09f2c26b",
   "files": {
     "src/xiio.mjs": {
       "sha256": "0385ec009875b3cf97f024dab2d49fb049fbb2ff2045fc260f2a4ee27c23c025",
